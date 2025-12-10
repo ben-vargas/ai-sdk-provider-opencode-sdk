@@ -1,0 +1,86 @@
+{
+  "name": "ai-sdk-provider-opencode-sdk",
+  "version": "0.0.1",
+  "description": "AI SDK v5 provider for OpenCode via @opencode-ai/sdk",
+  "keywords": [
+    "ai-sdk",
+    "opencode",
+    "opencode-sdk",
+    "language-model",
+    "llm"
+  ],
+  "homepage": "https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/issues"
+  },
+  "license": "MIT",
+  "author": "Ben Vargas",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist/**/*",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "clean": "rm -rf dist",
+    "dev": "tsup --watch",
+    "lint": "eslint src",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "ci": "npm run typecheck && npm run lint && npm run test",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run clean && npm run build",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "example:basic": "npm run build && npx tsx examples/basic-usage.ts",
+    "example:streaming": "npm run build && npx tsx examples/streaming.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/provider": "2.0.0",
+    "@ai-sdk/provider-utils": "3.0.9",
+    "@opencode-ai/sdk": "^1.0.141"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/node": "20.17.24",
+    "@typescript-eslint/eslint-plugin": "8.34.0",
+    "@typescript-eslint/parser": "8.34.0",
+    "@vitest/coverage-v8": "^3.2.4",
+    "ai": "5.0.101",
+    "eslint": "9.28.0",
+    "prettier": "^3.6.2",
+    "tsup": "8.5.0",
+    "typescript": "5.6.3",
+    "typescript-eslint": "^8.49.0",
+    "vitest": "3.2.4",
+    "zod": "^3.24.0"
+  },
+  "peerDependencies": {
+    "zod": "^3.0.0 || ^4.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
