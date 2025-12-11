@@ -1,0 +1,109 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.0.1] - 2025-12-10
+
+### Added
+
+Initial release of the AI SDK Provider for OpenCode.
+
+#### Core Features
+
+- **LanguageModelV2 implementation** - Full AI SDK v5 provider interface
+- **Text generation** - `generateText()` support with non-streaming responses
+- **Streaming** - `streamText()` with real-time SSE event streaming
+- **Object generation** - `generateObject()` with Zod schema validation (prompt-based JSON mode)
+- **Object streaming** - `streamObject()` with incremental partial object updates
+
+#### Provider Configuration
+
+- **Auto-start server** - Automatically starts OpenCode server if not running
+- **Custom server settings** - Configure hostname, port, baseUrl, serverTimeout
+- **Default settings** - Apply default settings to all model instances
+
+#### Model Settings
+
+- **Session management** - Create, resume, and manage conversation sessions
+- **Agent selection** - Choose from `build`, `plan`, `general`, `explore` agents
+- **System prompts** - Override default system prompts per request
+- **Tool configuration** - Enable/disable specific server-side tools
+- **Working directory** - Set `cwd` for file operations
+- **Logging** - Custom logger support with verbose mode
+
+#### Streaming Features
+
+- **Text streaming** - Real-time text delta delivery
+- **Tool observation** - Observe server-side tool execution (Read, Write, Bash, etc.)
+- **Tool state tracking** - Track pending → running → completed/error states
+- **Usage tracking** - Token usage extracted from step-finish events
+- **Finish reason mapping** - Proper finish reason (stop, length, tool-calls, error)
+
+#### Multi-Provider Support
+
+- **Anthropic models** - Claude 4.5 series (opus, sonnet, haiku)
+- **OpenAI models** - GPT-4o, GPT-4o-mini
+- **Google models** - Gemini 2.0/2.5/3.0 series
+- Model ID format: `providerID/modelID` (e.g., `anthropic/claude-opus-4-5-20251101`)
+
+#### Image Input Support
+
+- **Base64/Data URL images** - Vision-capable models can process local images
+- Supported formats: PNG, JPEG, GIF, WebP
+- Note: Remote image URLs are not supported
+
+#### Abort Signal Support
+
+- **Request cancellation** - Cancel in-progress requests via AbortController
+- **Pre-abort detection** - Immediately reject pre-aborted signals
+- **Streaming abort** - Cancel streaming requests mid-generation
+- **Server-side abort** - Calls `session.abort()` to cleanly terminate server processing
+
+#### Error Handling
+
+- **Typed errors** - Authentication, timeout, and API errors
+- **Error utilities** - `isAuthenticationError()`, `isTimeoutError()`, etc.
+- **Graceful recovery** - Proper error propagation to AI SDK
+
+#### Examples
+
+- `basic-usage.ts` - Simple text generation
+- `streaming.ts` - Real-time streaming with usage tracking
+- `conversation-history.ts` - Multi-turn conversations
+- `generate-object.ts` - Structured output with various schema patterns
+- `stream-object.ts` - Streaming object generation with progress tracking
+- `tool-observation.ts` - Observing server-side tool execution
+- `image-input.ts` - Processing images with vision models
+- `abort-signal.ts` - Request cancellation patterns
+- `custom-config.ts` - Provider and model configuration
+- `limitations.ts` - Documenting unsupported features
+- `long-running-tasks.ts` - Timeout and retry patterns
+
+#### Testing
+
+- **269 unit tests** - Comprehensive test coverage
+- Tests for: message conversion, event streaming, error handling, validation, logging
+
+### Known Limitations
+
+The following AI SDK parameters are **not supported** (silently ignored):
+
+- `temperature`, `topP`, `topK` - Sampling parameters
+- `maxOutputTokens` - Output length limits
+- `presencePenalty`, `frequencyPenalty` - Repetition penalties
+- `stopSequences` - Custom stop sequences
+- `seed` - Deterministic output
+
+Custom tool definitions are ignored - OpenCode executes tools server-side.
+
+### Dependencies
+
+- `@ai-sdk/provider` ^2.0.0
+- `@ai-sdk/provider-utils` ^3.0.0
+- `@opencode-ai/sdk` ^0.0.21
+- `zod` ^3.0.0 || ^4.0.0 (peer dependency)
