@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2] - 2025-12-10
+
+### Changed
+
+- **Updated dependencies** - Bumped to latest compatible versions:
+  - `@ai-sdk/provider-utils`: 3.0.9 → 3.0.18
+  - `@opencode-ai/sdk`: ^1.0.141 → ^1.0.137 (aligned with stable release)
+
+### Fixed
+
+- **OpenAI model names** - Updated documentation to use current GPT-5.1 series models instead of outdated GPT-4o references
+
 ## [0.0.1] - 2025-12-10
 
 ### Added
