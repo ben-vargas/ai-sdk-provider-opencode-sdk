@@ -47,7 +47,7 @@ Initial release of the AI SDK Provider for OpenCode.
 #### Multi-Provider Support
 
 - **Anthropic models** - Claude 4.5 series (opus, sonnet, haiku)
-- **OpenAI models** - GPT-4o, GPT-4o-mini
+- **OpenAI models** - GPT-5.1 series (gpt-5.1, gpt-5.1-codex, gpt-5.1-codex-mini, gpt-5.1-codex-max)
 - **Google models** - Gemini 2.0/2.5/3.0 series
 - Model ID format: `providerID/modelID` (e.g., `anthropic/claude-opus-4-5-20251101`)
 

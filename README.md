@@ -74,9 +74,11 @@ opencode('anthropic/claude-sonnet-4-5-20250929')
 opencode('anthropic/claude-haiku-4-5-20251001')
 opencode('anthropic/claude-opus-4-5-20251101')
 
-// OpenAI models
-opencode('openai/gpt-4o')
-opencode('openai/gpt-4o-mini')
+// OpenAI models (GPT-5.1 series)
+opencode('openai/gpt-5.1')
+opencode('openai/gpt-5.1-codex')
+opencode('openai/gpt-5.1-codex-mini')
+opencode('openai/gpt-5.1-codex-max')
 
 // Google Gemini models
 opencode('google/gemini-3-pro-preview')
