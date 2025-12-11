@@ -114,6 +114,13 @@ export class OpencodeLanguageModel implements LanguageModelV2 {
     }
 
     try {
+      // Check if already aborted
+      if (options.abortSignal?.aborted) {
+        const error = new Error('Request aborted');
+        error.name = 'AbortError';
+        throw error;
+      }
+
       // Get or create session
       const sessionId = await this.getOrCreateSession();
 
