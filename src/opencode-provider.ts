@@ -1,14 +1,17 @@
-import type { LanguageModelV2 } from '@ai-sdk/provider';
+import type { LanguageModelV3 } from "@ai-sdk/provider";
 import type {
   OpencodeModelId,
   OpencodeSettings,
   OpencodeProviderSettings,
   OpencodeProvider,
-} from './types.js';
-import { OpencodeLanguageModel } from './opencode-language-model.js';
-import { OpencodeClientManager, createClientManagerFromSettings } from './opencode-client-manager.js';
-import { validateProviderSettings, mergeSettings } from './validation.js';
-import { getLogger } from './logger.js';
+} from "./types.js";
+import { OpencodeLanguageModel } from "./opencode-language-model.js";
+import {
+  OpencodeClientManager,
+  createClientManagerFromSettings,
+} from "./opencode-client-manager.js";
+import { validateProviderSettings, mergeSettings } from "./validation.js";
+import { getLogger } from "./logger.js";
 
 /**
  * Create an OpenCode provider.
@@ -31,7 +34,9 @@ import { getLogger } from './logger.js';
  * });
  * ```
  */
-export function createOpencode(options?: OpencodeProviderSettings): OpencodeProvider {
+export function createOpencode(
+  options?: OpencodeProviderSettings,
+): OpencodeProvider {
   const logger = getLogger(options?.defaultSettings?.logger);
 
   // Validate provider settings
@@ -50,8 +55,8 @@ export function createOpencode(options?: OpencodeProviderSettings): OpencodeProv
    */
   const createModel = (
     modelId: OpencodeModelId,
-    settings?: OpencodeSettings
-  ): LanguageModelV2 => {
+    settings?: OpencodeSettings,
+  ): LanguageModelV3 => {
     // Merge default settings with provided settings
     const mergedSettings = mergeSettings(options?.defaultSettings, settings);
 
@@ -65,22 +70,31 @@ export function createOpencode(options?: OpencodeProviderSettings): OpencodeProv
   // Create provider function that's also an object with methods
   const provider = Object.assign(
     // Main callable function
-    (modelId: OpencodeModelId, settings?: OpencodeSettings): LanguageModelV2 => {
+    (
+      modelId: OpencodeModelId,
+      settings?: OpencodeSettings,
+    ): LanguageModelV3 => {
       return createModel(modelId, settings);
     },
     {
       // languageModel method
-      languageModel: (modelId: OpencodeModelId, settings?: OpencodeSettings): LanguageModelV2 => {
+      languageModel: (
+        modelId: OpencodeModelId,
+        settings?: OpencodeSettings,
+      ): LanguageModelV3 => {
         return createModel(modelId, settings);
       },
 
       // chat alias for languageModel
-      chat: (modelId: OpencodeModelId, settings?: OpencodeSettings): LanguageModelV2 => {
+      chat: (
+        modelId: OpencodeModelId,
+        settings?: OpencodeSettings,
+      ): LanguageModelV3 => {
         return createModel(modelId, settings);
       },
 
       // Provider info
-      provider: 'opencode' as const,
+      provider: "opencode" as const,
 
       // Get the client manager (for advanced usage)
       getClientManager: (): OpencodeClientManager => {
@@ -91,7 +105,7 @@ export function createOpencode(options?: OpencodeProviderSettings): OpencodeProv
       dispose: async (): Promise<void> => {
         await clientManager.dispose();
       },
-    }
+    },
   );
 
   return provider as OpencodeProvider;
@@ -118,19 +132,19 @@ export const opencode = createOpencode();
  */
 export const OpencodeModels = {
   // Anthropic models (Claude 4.5 series - latest)
-  'claude-sonnet-4-5': 'anthropic/claude-sonnet-4-5-20250929',
-  'claude-haiku-4-5': 'anthropic/claude-haiku-4-5-20251001',
-  'claude-opus-4-5': 'anthropic/claude-opus-4-5-20251101',
+  "claude-sonnet-4-5": "anthropic/claude-sonnet-4-5-20250929",
+  "claude-haiku-4-5": "anthropic/claude-haiku-4-5-20251001",
+  "claude-opus-4-5": "anthropic/claude-opus-4-5-20251101",
 
   // OpenAI models
-  'gpt-4o': 'openai/gpt-4o',
-  'gpt-4o-mini': 'openai/gpt-4o-mini',
+  "gpt-4o": "openai/gpt-4o",
+  "gpt-4o-mini": "openai/gpt-4o-mini",
 
   // Google Gemini models
-  'gemini-3-pro': 'google/gemini-3-pro-preview',
-  'gemini-2.5-flash': 'google/gemini-2.5-flash',
-  'gemini-2.5-pro': 'google/gemini-2.5-pro',
-  'gemini-2.0-flash': 'google/gemini-2.0-flash',
+  "gemini-3-pro": "google/gemini-3-pro-preview",
+  "gemini-2.5-flash": "google/gemini-2.5-flash",
+  "gemini-2.5-pro": "google/gemini-2.5-pro",
+  "gemini-2.0-flash": "google/gemini-2.0-flash",
 } as const;
 
 export type OpencodeModelShortcut = keyof typeof OpencodeModels;
