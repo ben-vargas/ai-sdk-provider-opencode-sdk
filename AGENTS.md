@@ -1,104 +1,195 @@
-# AGENTS.md
+# ai-sdk-provider-opencode-sdk
 
-## Project Overview
+AI SDK v6 provider for OpenCode via `@opencode-ai/sdk`. Implements `LanguageModelV3` interface.
 
-This repository provides an AI SDK v5 compatible provider for **OpenCode**, leveraging the `@opencode-ai/sdk`. It allows developers to use OpenCode models within the Vercel AI SDK ecosystem.
+## Commands
+
+### File-scoped (preferred)
+
+```bash
+# Type check single file
+npx tsc --noEmit src/opencode-provider.ts
+
+# Lint single file
+npx eslint src/opencode-provider.ts
+
+# Test single file
+npx vitest run src/opencode-provider.test.ts
+
+# Format single file
+npx prettier --write src/opencode-provider.ts
+```
+
+### Project-wide
+
+```bash
+npm run build          # Build with tsup (CJS + ESM)
+npm test               # Run all tests once
+npm run test:watch     # Watch mode
+npm run test:coverage  # With coverage
+npm run lint           # Lint src/
+npm run format         # Format all files
+npm run typecheck      # Type check without emit
+npm run ci             # typecheck + lint + test
+```
 
 ## Tech Stack
 
-- **Language**: TypeScript
-- **Runtime**: Node.js (>=18)
-- **Bundler**: [tsup](https://tsup.egoist.dev/)
-- **Testing**: [Vitest](https://vitest.dev/)
-- **Linting**: [ESLint](https://eslint.org/)
-- **Formatting**: [Prettier](https://prettier.io/)
-- **Key Libraries**: `@ai-sdk/provider`, `@ai-sdk/provider-utils`, `@opencode-ai/sdk`, `zod`
+- **TypeScript** 5.6.3 with strict mode
+- **Node.js** >=18
+- **@ai-sdk/provider** ^3.0.0 (LanguageModelV3)
+- **@ai-sdk/provider-utils** ^4.0.0
+- **@opencode-ai/sdk** ^1.0.137
+- **Vitest** 3.2.4
+- **tsup** 8.5.0 (bundler)
+- **ESLint** 9.28.0 (flat config)
 
 ## Project Structure
 
-- `src/`: Core logic and implementation
-  - `opencode-provider.ts`: Entry point for creating the provider instance
-  - `opencode-language-model.ts`: Implementation of the `LanguageModelV3` interface
-  - `opencode-client-manager.ts`: Manages the lifecycle of the OpenCode SDK client
-  - `convert-*.ts`: Transformation logic between AI SDK and OpenCode formats
-  - `validation.ts`: Configuration and input validation
-  - `logger.ts`: Internal logging utility
-- `examples/`: Code samples demonstrating various features (streaming, tool observation, image input, etc.)
-- `dist/`: Compiled output (ESM and CJS)
+```
+src/
+├── index.ts                      # Public exports
+├── opencode-provider.ts          # createOpencode() factory
+├── opencode-language-model.ts    # LanguageModelV3 implementation
+├── opencode-client-manager.ts    # SDK client lifecycle
+├── convert-to-opencode-messages.ts   # AI SDK → OpenCode
+├── convert-from-opencode-events.ts   # OpenCode → AI SDK streams
+├── map-opencode-finish-reason.ts     # Finish reason mapping
+├── types.ts                      # Shared types
+├── validation.ts                 # Input validation
+├── errors.ts                     # Error utilities
+├── logger.ts                     # Logging utilities
+└── *.test.ts                     # Co-located tests
+examples/                         # Usage examples
+dist/                             # Build output (CJS + ESM)
+```
 
-## Development Commands
+## Code Style
 
-- `npm run build`: Compiles the project using tsup
-- `npm run dev`: Starts tsup in watch mode
-- `npm run clean`: Deletes the `dist` directory
-- `npm run test`: Executes all tests once
-- `npm run test:watch`: Starts Vitest in watch mode
-- `npm run test:coverage`: Generates test coverage report
-- `npm run lint`: Runs ESLint on the source directory
-- `npm run format`: Formats code with Prettier
-- `npm run typecheck`: Performs TypeScript type checking without emitting files
+### Imports - CRITICAL
 
-## Code Conventions
+**Always use `.js` extension** in relative imports (ESM requirement):
+
+```typescript
+// ✅ Correct
+import { Logger } from "./types.js";
+import { createOpencode } from "./opencode-provider.js";
+
+// ❌ Wrong - will fail at runtime
+import { Logger } from "./types";
+```
+
+### Naming
+
+| Type                | Convention | Example                 |
+| ------------------- | ---------- | ----------------------- |
+| Files               | kebab-case | `opencode-provider.ts`  |
+| Classes             | PascalCase | `OpencodeLanguageModel` |
+| Interfaces/Types    | PascalCase | `OpencodeSettings`      |
+| Functions/Variables | camelCase  | `createOpencode`        |
+| Constants           | PascalCase | `OpencodeModels`        |
 
 ### TypeScript
 
-- **Strict Mode**: Enabled with `strict: true` in `tsconfig.json`.
-- **Type Safety**: Use `noUncheckedIndexedAccess` and `noImplicitReturns`.
-- **Avoid `any`**: Prefer specific types or `unknown`. If `any` is necessary, it will trigger an ESLint warning.
+```typescript
+// Prefix unused params with underscore
+function handle(_unused: string, value: number) { ... }
 
-### Naming Conventions
+// Use unknown over any
+function parse(data: unknown): Result { ... }
 
-- **Files**: `kebab-case.ts` (e.g., `opencode-provider.ts`)
-- **Classes**: `PascalCase` (e.g., `OpencodeLanguageModel`)
-- **Interfaces/Types**: `PascalCase` (e.g., `OpencodeSettings`)
-- **Functions/Variables**: `camelCase` (e.g., `createOpencode`)
-- **Constants**: `PascalCase` or `UPPER_SNAKE_CASE` (e.g., `OpencodeModels`)
+// Non-null assertion for array access (noUncheckedIndexedAccess)
+const first = items[0]!;  // or check explicitly
+```
 
-### Import Style
+### Good Examples
 
-- **Extensions**: **MANDATORY** use of `.js` extensions in all relative imports (e.g., `import { ... } from './types.js'`). This is required for ESM compatibility.
-- **Organization**: Group imports: built-in modules, external dependencies, internal modules.
+- **Provider factory**: `src/opencode-provider.ts`
+- **LanguageModelV3 impl**: `src/opencode-language-model.ts`
+- **Stream conversion**: `src/convert-from-opencode-events.ts`
+- **Test mocking**: `src/opencode-provider.test.ts` (lines 6-33)
 
 ## Testing
 
-- **Framework**: Vitest.
-- **Location**: Test files reside alongside the source code with the `.test.ts` suffix.
-- **Patterns**:
-  - Use `describe` for grouping and `it` for individual test cases.
-  - Use `vi.mock()` for external dependencies (especially `@opencode-ai/sdk`).
-  - Follow the Arrange-Act-Assert pattern.
-- **Coverage**: Coverage is tracked via v8. Aim for high coverage of conversion and validation logic.
+Co-located tests with `.test.ts` suffix. Uses Vitest.
 
-## Linting & Formatting
+```typescript
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { createOpencode } from "./opencode-provider.js";
 
-- **ESLint**: Uses the flat config (`eslint.config.js`). Ignores `dist`, `node_modules`, and `examples`.
-- **Prettier**: standard configuration for code formatting.
+// Mock external SDK
+vi.mock("./opencode-client-manager.js", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("./opencode-client-manager.js")>();
+  return {
+    ...original,
+    createClientManagerFromSettings: vi.fn().mockReturnValue({
+      getClient: vi.fn().mockResolvedValue({}),
+      dispose: vi.fn(),
+    }),
+  };
+});
 
-## Build Process
+describe("opencode-provider", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
-- **Tool**: `tsup`.
-- **Formats**: Generates both CommonJS (`.cjs`) and ES Modules (`.js`).
-- **Target**: Node 18.
-- **Output**: Generates declaration files (`.d.ts`) and sourcemaps.
+  it("should create provider", () => {
+    const provider = createOpencode();
+    expect(provider).toBeDefined();
+  });
+});
+```
 
-## Git Conventions
+## Git Workflow
 
-- **Commit Messages**: Use Conventional Commits (`type(scope): subject`).
-  - `feat`: New features
-  - `fix`: Bug fixes
-  - `docs`: Documentation changes
-  - `test`: Adding or updating tests
-  - `refactor`: Code changes that neither fix a bug nor add a feature
+### Commit format
 
-## Common Patterns
+```
+feat(provider): add session persistence
+fix(stream): handle empty delta events
+docs: update AGENTS.md
+test(validation): add edge cases
+refactor(errors): simplify error wrapping
+```
 
-- **Provider Factory**: `createOpencode()` is the primary way to instantiate the provider.
-- **Singleton Client**: `OpencodeClientManager` uses a singleton-like pattern (via `getInstance`) to manage the SDK client across multiple model instances if needed.
-- **Unsupported Feature Logging**: Use `logger.ts` utilities (e.g., `logUnsupportedFeature`) to notify users when AI SDK options are not applicable to OpenCode.
+### PR checklist
 
-## Gotchas & Notes
+- [ ] `npm run ci` passes (typecheck + lint + test)
+- [ ] Tests added for new functionality
+- [ ] No `any` types (ESLint warns)
+- [ ] `.js` extensions in all imports
 
-- **Server-Side Tools**: OpenCode executes tools server-side. Custom tool definitions passed via the AI SDK are currently ignored and will trigger warnings.
-- **File Inputs**: Only base64-encoded file inputs are supported. URL-based file inputs are not supported by the OpenCode SDK.
-- **Session Persistence**: Use `sessionId` in settings to maintain conversation context across multiple `generateText` or `streamText` calls.
-- **Import Extensions**: Forgetting the `.js` extension in imports is the most common cause of build/runtime failures in this project.
+## Boundaries
+
+### Always do
+
+- Use `.js` extensions in relative imports
+- Run `npm run ci` before committing
+- Mock `@opencode-ai/sdk` in tests (never call real API)
+- Use `unknown` instead of `any`
+- Prefix unused parameters with `_`
+
+### Ask first
+
+- Add new dependencies
+- Change public API exports in `index.ts`
+- Modify tsconfig.json compiler options
+- Update @ai-sdk/provider version
+
+### Never do
+
+- Commit without `.js` extensions (breaks ESM)
+- Use `any` to bypass type errors
+- Remove or skip failing tests
+- Call real OpenCode API in tests
+- Commit secrets or API keys
+
+## Gotchas
+
+1. **Import extensions**: Forgetting `.js` is the #1 build failure cause
+2. **Server-side tools**: OpenCode executes tools server-side; custom tool definitions are ignored
+3. **File inputs**: Only base64 data URLs work; HTTP URLs are not supported
+4. **Session persistence**: Use `sessionId` setting to maintain conversation context
+5. **noUncheckedIndexedAccess**: Array access returns `T | undefined`; use `!` or check explicitly
