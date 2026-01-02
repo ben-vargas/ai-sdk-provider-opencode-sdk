@@ -9,16 +9,43 @@
 
 # AI SDK Provider for OpenCode
 
-> **Initial Release**: Version 1.0.0 - Compatible with AI SDK v6 and `@opencode-ai/sdk`.
+> **Latest Release**: Version 1.x supports AI SDK v6. For AI SDK v5 support, use the `ai-sdk-v5` tag (0.x.x).
 
 A community provider for the [Vercel AI SDK](https://sdk.vercel.ai/docs) that enables using AI models through [OpenCode](https://opencode.ai) and the `@opencode-ai/sdk`. OpenCode is a terminal-based AI coding assistant that supports multiple providers (Anthropic, OpenAI, Google, and more).
 
-This provider enables you to use OpenCode's AI capabilities through the familiar Vercel AI SDK interface, supporting `generateText()`, `streamText()`, `generateObject()`, and `streamObject()`.
+This provider enables you to use OpenCode's AI capabilities through the familiar Vercel AI SDK interface, supporting `generateText()`, `streamText()`, `streamObject()`, and structured output via `generateText()` with `Output.object()`.
 
-## Installation
+## Version Compatibility
+
+| Provider Version | AI SDK Version | NPM Tag     | Status      | Branch                                                                                   |
+| ---------------- | -------------- | ----------- | ----------- | ---------------------------------------------------------------------------------------- |
+| 1.x.x            | v6             | `latest`    | Stable      | `main`                                                                                   |
+| 0.x.x            | v5             | `ai-sdk-v5` | Maintenance | [`ai-sdk-v5`](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/tree/ai-sdk-v5) |
+
+### Installing the Right Version
+
+**For AI SDK v6 (recommended):**
 
 ```bash
-npm install ai-sdk-provider-opencode-sdk
+npm install ai-sdk-provider-opencode-sdk ai@^6.0.0
+```
+
+**For AI SDK v5:**
+
+```bash
+npm install ai-sdk-provider-opencode-sdk@ai-sdk-v5 ai@^5.0.0
+```
+
+## Zod Compatibility
+
+This package is compatible with **Zod 3 and Zod 4** (aligned with `ai`):
+
+```bash
+# With Zod 3
+npm install ai-sdk-provider-opencode-sdk ai zod@^3.25.76
+
+# With Zod 4
+npm install ai-sdk-provider-opencode-sdk ai zod@^4.1.8
 ```
 
 ## Prerequisites
@@ -105,9 +132,9 @@ for await (const chunk of result.textStream) {
 ### Conversation History
 
 ```typescript
-import { generateText, type CoreMessage } from "ai";
+import { generateText, type ModelMessage } from "ai";
 
-const messages: CoreMessage[] = [
+const messages: ModelMessage[] = [
   { role: "user", content: "My name is Alice." },
   { role: "assistant", content: "Hello Alice! How can I help you today?" },
   { role: "user", content: "What is my name?" },
@@ -168,7 +195,7 @@ const result = streamText({
 for await (const part of result.fullStream) {
   if (part.type === "tool-call") {
     console.log(`Tool: ${part.toolName}`);
-    console.log(`Input: ${part.args}`);
+    console.log(`Input: ${JSON.stringify(part.input, null, 2)}`);
   }
   if (part.type === "tool-result") {
     console.log(`Result: ${part.result}`);
@@ -178,22 +205,22 @@ for await (const part of result.fullStream) {
 
 ## Feature Support
 
-| Feature                  | Support    | Notes                            |
-| ------------------------ | ---------- | -------------------------------- |
-| Text generation          | ✅ Full    | `generateText()`, `streamText()` |
-| Streaming                | ✅ Full    | Real-time SSE streaming          |
-| Multi-turn conversations | ✅ Full    | Session-based context            |
-| Tool observation         | ✅ Full    | See tool execution               |
-| Reasoning/thinking       | ✅ Full    | ReasoningPart support            |
-| Model selection          | ✅ Full    | Per-request model                |
-| Agent selection          | ✅ Full    | build, plan, general, explore    |
-| Abort/cancellation       | ✅ Full    | AbortSignal support              |
-| Image input (base64)     | ⚠️ Partial | Data URLs only                   |
-| Image input (URL)        | ❌ None    | Not supported                    |
-| JSON mode                | ⚠️ Partial | Prompt-based                     |
-| Custom tools             | ❌ None    | Server-side only                 |
-| temperature/topP/topK    | ❌ None    | Provider defaults                |
-| maxTokens                | ❌ None    | Agent config                     |
+| Feature                  | Support    | Notes                                               |
+| ------------------------ | ---------- | --------------------------------------------------- |
+| Text generation          | ✅ Full    | `generateText()`, `streamText()`                    |
+| Streaming                | ✅ Full    | Real-time SSE streaming                             |
+| Multi-turn conversations | ✅ Full    | Session-based context                               |
+| Tool observation         | ✅ Full    | See tool execution                                  |
+| Reasoning/thinking       | ✅ Full    | ReasoningPart support                               |
+| Model selection          | ✅ Full    | Per-request model                                   |
+| Agent selection          | ✅ Full    | build, plan, general, explore                       |
+| Abort/cancellation       | ✅ Full    | AbortSignal support                                 |
+| Image input (base64)     | ⚠️ Partial | Data URLs only                                      |
+| Image input (URL)        | ❌ None    | Not supported                                       |
+| Structured output (JSON) | ⚠️ Partial | `Output.object()` / `streamObject()` (prompt-based) |
+| Custom tools             | ❌ None    | Server-side only                                    |
+| temperature/topP/topK    | ❌ None    | Provider defaults                                   |
+| maxTokens                | ❌ None    | Agent config                                        |
 
 ## Provider Settings
 
