@@ -7,8 +7,8 @@
  * - Handling tool observations
  */
 
-import { streamText } from 'ai';
-import { createOpencode } from '../dist/index.js';
+import { streamText } from "ai";
+import { createOpencode } from "../dist/index.js";
 
 async function main() {
   // Create provider
@@ -17,30 +17,30 @@ async function main() {
   });
 
   try {
-    console.log('Streaming text with OpenCode...\n');
+    console.log("Streaming text with OpenCode...\n");
 
     // Stream text
     const result = streamText({
-      model: opencode('anthropic/claude-opus-4-5-20251101'),
-      prompt: 'Count from 1 to 5, explaining each number briefly.',
+      model: opencode("anthropic/claude-opus-4-5-20251101"),
+      prompt: "Count from 1 to 5, explaining each number briefly.",
     });
 
     // Process the text stream
-    console.log('Response:\n');
+    console.log("Response:\n");
     for await (const chunk of result.textStream) {
       process.stdout.write(chunk);
     }
-    console.log('\n');
+    console.log("\n");
 
     // Get final result - usage and finishReason are promises that resolve after stream completes
     const [usage, finishReason] = await Promise.all([
       result.usage,
       result.finishReason,
     ]);
-    console.log('\nUsage:', usage);
-    console.log('Finish reason:', finishReason);
+    console.log("\nUsage:", usage);
+    console.log("Finish reason:", finishReason);
   } catch (error) {
-    console.error('Error:', error);
+    console.error("Error:", error);
   } finally {
     await opencode.dispose?.();
   }

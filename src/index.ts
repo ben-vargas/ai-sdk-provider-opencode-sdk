@@ -1,17 +1,21 @@
 // Provider exports
-export { createOpencode, opencode, OpencodeModels } from './opencode-provider.js';
-export type { OpencodeModelShortcut } from './opencode-provider.js';
+export {
+  createOpencode,
+  opencode,
+  OpencodeModels,
+} from "./opencode-provider.js";
+export type { OpencodeModelShortcut } from "./opencode-provider.js";
 
 // Language model export
-export { OpencodeLanguageModel } from './opencode-language-model.js';
+export { OpencodeLanguageModel } from "./opencode-language-model.js";
 
 // Client manager exports
 export {
   OpencodeClientManager,
   createClientManager,
   createClientManagerFromSettings,
-} from './opencode-client-manager.js';
-export type { ClientManagerOptions } from './opencode-client-manager.js';
+} from "./opencode-client-manager.js";
+export type { ClientManagerOptions } from "./opencode-client-manager.js";
 
 // Type exports
 export type {
@@ -24,7 +28,7 @@ export type {
   Logger,
   ToolStreamState,
   StreamingUsage,
-} from './types.js';
+} from "./types.js";
 
 // Validation exports
 export {
@@ -33,7 +37,7 @@ export {
   validateModelId,
   isValidSessionId,
   mergeSettings,
-} from './validation.js';
+} from "./validation.js";
 
 // Error exports
 export {
@@ -46,7 +50,7 @@ export {
   createTimeoutError,
   extractErrorMessage,
   wrapError,
-} from './errors.js';
+} from "./errors.js";
 
 // Logger exports
 export {
@@ -57,19 +61,19 @@ export {
   logUnsupportedFeature,
   logUnsupportedParameter,
   logUnsupportedCallOptions,
-} from './logger.js';
+} from "./logger.js";
 
 // Message conversion exports
 export {
   convertToOpencodeMessages,
   extractTextFromParts,
-} from './convert-to-opencode-messages.js';
+} from "./convert-to-opencode-messages.js";
 export type {
   TextPartInput,
   FilePartInput,
   OpencodePartInput,
   ConversionResult,
-} from './convert-to-opencode-messages.js';
+} from "./convert-to-opencode-messages.js";
 
 // Event conversion exports
 export {
@@ -79,7 +83,7 @@ export {
   createStreamStartPart,
   isEventForSession,
   isSessionComplete,
-} from './convert-from-opencode-events.js';
+} from "./convert-from-opencode-events.js";
 export type {
   OpencodeEvent,
   EventMessagePartUpdated,
@@ -99,12 +103,12 @@ export type {
   Part,
   Message,
   StreamState,
-} from './convert-from-opencode-events.js';
+} from "./convert-from-opencode-events.js";
 
 // Finish reason mapping exports
 export {
   mapOpencodeFinishReason,
   mapErrorToFinishReasonFromUnknown,
   hasToolCalls,
-} from './map-opencode-finish-reason.js';
-export type { MessageInfo } from './map-opencode-finish-reason.js';
+} from "./map-opencode-finish-reason.js";
+export type { MessageInfo } from "./map-opencode-finish-reason.js";

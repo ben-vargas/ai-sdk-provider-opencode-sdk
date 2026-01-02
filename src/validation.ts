@@ -1,13 +1,26 @@
-import { z } from 'zod';
-import type { OpencodeSettings, OpencodeProviderSettings, Logger } from './types.js';
+import { z } from "zod";
+import type {
+  OpencodeSettings,
+  OpencodeProviderSettings,
+  Logger,
+} from "./types.js";
 
 /**
  * Schema for Logger interface.
  */
 const loggerSchema = z.object({
-  warn: z.function().args(z.string()).returns(z.void()),
-  error: z.function().args(z.string()).returns(z.void()),
-  debug: z.function().args(z.string()).returns(z.void()).optional(),
+  warn: z.any().refine((val) => typeof val === "function", {
+    message: "warn must be a function",
+  }),
+  error: z.any().refine((val) => typeof val === "function", {
+    message: "error must be a function",
+  }),
+  debug: z
+    .any()
+    .refine((val) => val === undefined || typeof val === "function", {
+      message: "debug must be a function",
+    })
+    .optional(),
 });
 
 /**
@@ -50,7 +63,7 @@ export interface ValidationResult<T> {
  */
 export function validateSettings(
   settings: OpencodeSettings | undefined,
-  logger?: Logger | false
+  logger?: Logger | false,
 ): ValidationResult<OpencodeSettings> {
   const warnings: string[] = [];
 
@@ -62,8 +75,10 @@ export function validateSettings(
   const result = opcodeSettingsSchema.safeParse(settings);
 
   if (!result.success) {
-    const issues = result.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`);
-    warnings.push(`Settings validation warnings: ${issues.join('; ')}`);
+    const issues = result.error.issues.map(
+      (issue) => `${issue.path.join(".")}: ${issue.message}`,
+    );
+    warnings.push(`Settings validation warnings: ${issues.join("; ")}`);
   }
 
   // Validate session ID format if provided
@@ -86,7 +101,7 @@ export function validateSettings(
  */
 export function validateProviderSettings(
   settings: OpencodeProviderSettings | undefined,
-  logger?: Logger | false
+  logger?: Logger | false,
 ): ValidationResult<OpencodeProviderSettings> {
   const warnings: string[] = [];
 
@@ -98,18 +113,27 @@ export function validateProviderSettings(
   const result = opcodeProviderSettingsSchema.safeParse(settings);
 
   if (!result.success) {
-    const issues = result.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`);
-    warnings.push(`Provider settings validation warnings: ${issues.join('; ')}`);
+    const issues = result.error.issues.map(
+      (issue) => `${issue.path.join(".")}: ${issue.message}`,
+    );
+    warnings.push(
+      `Provider settings validation warnings: ${issues.join("; ")}`,
+    );
   }
 
   // Validate port range
-  if (settings.port !== undefined && (settings.port < 1 || settings.port > 65535)) {
+  if (
+    settings.port !== undefined &&
+    (settings.port < 1 || settings.port > 65535)
+  ) {
     warnings.push(`Port ${settings.port} is outside valid range (1-65535)`);
   }
 
   // Validate timeout
   if (settings.serverTimeout !== undefined && settings.serverTimeout < 1000) {
-    warnings.push(`Server timeout ${settings.serverTimeout}ms is very short, consider at least 5000ms`);
+    warnings.push(
+      `Server timeout ${settings.serverTimeout}ms is very short, consider at least 5000ms`,
+    );
   }
 
   // Log warnings if logger is provided
@@ -128,11 +152,11 @@ export function validateProviderSettings(
  */
 export function validateModelId(
   modelId: string,
-  logger?: Logger | false
+  logger?: Logger | false,
 ): { providerID: string; modelID: string } | null {
-  if (!modelId || typeof modelId !== 'string' || modelId.trim().length === 0) {
+  if (!modelId || typeof modelId !== "string" || modelId.trim().length === 0) {
     if (logger) {
-      logger.error('Model ID is required and must be a non-empty string');
+      logger.error("Model ID is required and must be a non-empty string");
     }
     return null;
   }
@@ -140,8 +164,8 @@ export function validateModelId(
   const trimmedId = modelId.trim();
 
   // Check for provider/model format
-  if (trimmedId.includes('/')) {
-    const parts = trimmedId.split('/');
+  if (trimmedId.includes("/")) {
+    const parts = trimmedId.split("/");
     if (parts.length === 2 && parts[0] && parts[1]) {
       return {
         providerID: parts[0],
@@ -149,19 +173,21 @@ export function validateModelId(
       };
     }
     if (logger) {
-      logger.warn(`Model ID "${modelId}" contains multiple slashes, using last segment as model`);
+      logger.warn(
+        `Model ID "${modelId}" contains multiple slashes, using last segment as model`,
+      );
     }
     const lastPart = parts[parts.length - 1];
-    const providerParts = parts.slice(0, -1).join('/');
+    const providerParts = parts.slice(0, -1).join("/");
     return {
-      providerID: providerParts || 'default',
+      providerID: providerParts || "default",
       modelID: lastPart || trimmedId,
     };
   }
 
   // Just model ID without provider - will use default provider
   return {
-    providerID: '',
+    providerID: "",
     modelID: trimmedId,
   };
 }
@@ -171,13 +197,17 @@ export function validateModelId(
  * Session IDs are typically UUIDs or similar alphanumeric strings.
  */
 export function isValidSessionId(sessionId: string): boolean {
-  if (!sessionId || typeof sessionId !== 'string') {
+  if (!sessionId || typeof sessionId !== "string") {
     return false;
   }
 
   // Allow UUIDs, alphanumeric strings, and strings with hyphens/underscores
   const validPattern = /^[a-zA-Z0-9_-]+$/;
-  return validPattern.test(sessionId) && sessionId.length > 0 && sessionId.length <= 128;
+  return (
+    validPattern.test(sessionId) &&
+    sessionId.length > 0 &&
+    sessionId.length <= 128
+  );
 }
 
 /**
@@ -185,7 +215,7 @@ export function isValidSessionId(sessionId: string): boolean {
  */
 export function mergeSettings(
   defaults: OpencodeSettings | undefined,
-  overrides: OpencodeSettings | undefined
+  overrides: OpencodeSettings | undefined,
 ): OpencodeSettings {
   if (!defaults && !overrides) {
     return {};

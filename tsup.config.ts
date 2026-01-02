@@ -1,13 +1,13 @@
-import { defineConfig } from 'tsup';
+import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ['src/index.ts'],
-  format: ['cjs', 'esm'],
+  entry: ["src/index.ts"],
+  format: ["cjs", "esm"],
   dts: true,
   sourcemap: true,
   clean: true,
   splitting: false,
   treeshake: true,
-  target: 'node18',
-  outDir: 'dist',
+  target: "node18",
+  outDir: "dist",
 });

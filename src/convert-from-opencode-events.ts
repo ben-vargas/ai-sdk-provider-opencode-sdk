@@ -1,11 +1,17 @@
-import type { LanguageModelV2StreamPart, LanguageModelV2CallWarning, LanguageModelV2FinishReason } from '@ai-sdk/provider';
-import type { Logger, ToolStreamState, StreamingUsage } from './types.js';
+import type {
+  JSONValue,
+  LanguageModelV3StreamPart,
+  LanguageModelV3FinishReason,
+  SharedV3Warning,
+  LanguageModelV3Usage,
+} from "@ai-sdk/provider";
+import type { Logger, ToolStreamState, StreamingUsage } from "./types.js";
 
 /**
  * OpenCode event types (from SDK types.gen.ts).
  */
 export interface EventMessagePartUpdated {
-  type: 'message.part.updated';
+  type: "message.part.updated";
   properties: {
     part: Part;
     delta?: string;
@@ -13,22 +19,25 @@ export interface EventMessagePartUpdated {
 }
 
 export interface EventMessageUpdated {
-  type: 'message.updated';
+  type: "message.updated";
   properties: {
     info: Message;
   };
 }
 
 export interface EventSessionStatus {
-  type: 'session.status';
+  type: "session.status";
   properties: {
     sessionID: string;
-    status: { type: 'idle' } | { type: 'busy' } | { type: 'retry'; attempt: number; message: string; next: number };
+    status:
+      | { type: "idle" }
+      | { type: "busy" }
+      | { type: "retry"; attempt: number; message: string; next: number };
   };
 }
 
 export interface EventSessionIdle {
-  type: 'session.idle';
+  type: "session.idle";
   properties: {
     sessionID: string;
   };
@@ -48,7 +57,7 @@ export interface TextPart {
   id: string;
   sessionID: string;
   messageID: string;
-  type: 'text';
+  type: "text";
   text: string;
   synthetic?: boolean;
   ignored?: boolean;
@@ -58,7 +67,7 @@ export interface ReasoningPart {
   id: string;
   sessionID: string;
   messageID: string;
-  type: 'reasoning';
+  type: "reasoning";
   text: string;
 }
 
@@ -66,27 +75,27 @@ export interface ToolPart {
   id: string;
   sessionID: string;
   messageID: string;
-  type: 'tool';
+  type: "tool";
   callID: string;
   tool: string;
   state: ToolState;
 }
 
 export interface ToolStatePending {
-  status: 'pending';
+  status: "pending";
   input: Record<string, unknown>;
   raw: string;
 }
 
 export interface ToolStateRunning {
-  status: 'running';
+  status: "running";
   input: Record<string, unknown>;
   title?: string;
   time: { start: number };
 }
 
 export interface ToolStateCompleted {
-  status: 'completed';
+  status: "completed";
   input: Record<string, unknown>;
   output: string;
   title: string;
@@ -94,19 +103,23 @@ export interface ToolStateCompleted {
 }
 
 export interface ToolStateError {
-  status: 'error';
+  status: "error";
   input: Record<string, unknown>;
   error: string;
   time: { start: number; end: number };
 }
 
-export type ToolState = ToolStatePending | ToolStateRunning | ToolStateCompleted | ToolStateError;
+export type ToolState =
+  | ToolStatePending
+  | ToolStateRunning
+  | ToolStateCompleted
+  | ToolStateError;
 
 export interface StepFinishPart {
   id: string;
   sessionID: string;
   messageID: string;
-  type: 'step-finish';
+  type: "step-finish";
   reason: string;
   cost: number;
   tokens: {
@@ -124,7 +137,7 @@ export interface FilePart {
   id: string;
   sessionID: string;
   messageID: string;
-  type: 'file';
+  type: "file";
   mime: string;
   filename?: string;
   url: string;
@@ -136,12 +149,17 @@ export type Part =
   | ToolPart
   | StepFinishPart
   | FilePart
-  | { type: string; sessionID: string; messageID: string; [key: string]: unknown };
+  | {
+      type: string;
+      sessionID: string;
+      messageID: string;
+      [key: string]: unknown;
+    };
 
 export interface Message {
   id: string;
   sessionID: string;
-  role: 'user' | 'assistant';
+  role: "user" | "assistant";
   error?: { name: string; data?: unknown };
   finish?: string;
 }
@@ -159,7 +177,7 @@ export interface StreamState {
   lastTextContent: string;
   lastReasoningContent: string;
   /** Track message roles to filter user vs assistant parts */
-  messageRoles: Map<string, 'user' | 'assistant'>;
+  messageRoles: Map<string, "user" | "assistant">;
 }
 
 /**
@@ -180,8 +198,8 @@ export function createStreamState(): StreamState {
       cachedWriteTokens: 0,
       totalCost: 0,
     },
-    lastTextContent: '',
-    lastReasoningContent: '',
+    lastTextContent: "",
+    lastReasoningContent: "",
     messageRoles: new Map(),
   };
 }
@@ -189,24 +207,39 @@ export function createStreamState(): StreamState {
 /**
  * Check if an event is for a specific session.
  */
-export function isEventForSession(event: OpencodeEvent, sessionId: string): boolean {
-  if ('properties' in event && typeof event.properties === 'object' && event.properties !== null) {
+export function isEventForSession(
+  event: OpencodeEvent,
+  sessionId: string,
+): boolean {
+  if (
+    "properties" in event &&
+    typeof event.properties === "object" &&
+    event.properties !== null
+  ) {
     const props = event.properties as Record<string, unknown>;
 
     // Check part's sessionID
-    if ('part' in props && typeof props.part === 'object' && props.part !== null) {
+    if (
+      "part" in props &&
+      typeof props.part === "object" &&
+      props.part !== null
+    ) {
       const part = props.part as Record<string, unknown>;
       return part.sessionID === sessionId;
     }
 
     // Check message's sessionID
-    if ('info' in props && typeof props.info === 'object' && props.info !== null) {
+    if (
+      "info" in props &&
+      typeof props.info === "object" &&
+      props.info !== null
+    ) {
       const info = props.info as Record<string, unknown>;
       return info.sessionID === sessionId;
     }
 
     // Check direct sessionID
-    if ('sessionID' in props) {
+    if ("sessionID" in props) {
       return props.sessionID === sessionId;
     }
   }
@@ -217,13 +250,19 @@ export function isEventForSession(event: OpencodeEvent, sessionId: string): bool
 /**
  * Check if an event indicates the session is complete.
  */
-export function isSessionComplete(event: OpencodeEvent, sessionId: string): boolean {
-  if (event.type === 'session.status') {
+export function isSessionComplete(
+  event: OpencodeEvent,
+  sessionId: string,
+): boolean {
+  if (event.type === "session.status") {
     const statusEvent = event as EventSessionStatus;
-    return statusEvent.properties.sessionID === sessionId && statusEvent.properties.status.type === 'idle';
+    return (
+      statusEvent.properties.sessionID === sessionId &&
+      statusEvent.properties.status.type === "idle"
+    );
   }
 
-  if (event.type === 'session.idle') {
+  if (event.type === "session.idle") {
     const idleEvent = event as EventSessionIdle;
     return idleEvent.properties.sessionID === sessionId;
   }
@@ -237,19 +276,19 @@ export function isSessionComplete(event: OpencodeEvent, sessionId: string): bool
 export function convertEventToStreamParts(
   event: OpencodeEvent,
   state: StreamState,
-  logger?: Logger | false
-): LanguageModelV2StreamPart[] {
-  const parts: LanguageModelV2StreamPart[] = [];
+  logger?: Logger | false,
+): LanguageModelV3StreamPart[] {
+  const parts: LanguageModelV3StreamPart[] = [];
 
   switch (event.type) {
-    case 'message.part.updated': {
+    case "message.part.updated": {
       const partEvent = event as EventMessagePartUpdated;
       const partParts = handlePartUpdated(partEvent, state, logger);
       parts.push(...partParts);
       break;
     }
 
-    case 'message.updated': {
+    case "message.updated": {
       // Track message role for filtering parts
       const messageEvent = event as EventMessageUpdated;
       const info = messageEvent.properties.info;
@@ -257,12 +296,12 @@ export function convertEventToStreamParts(
       break;
     }
 
-    case 'session.status':
-    case 'session.idle':
+    case "session.status":
+    case "session.idle":
       // Session status changes - handled separately
       break;
 
-    case 'session.diff':
+    case "session.diff":
       // File diff events - informational, not converted to stream parts
       break;
 
@@ -282,20 +321,20 @@ export function convertEventToStreamParts(
 function handlePartUpdated(
   event: EventMessagePartUpdated,
   state: StreamState,
-  logger?: Logger | false
-): LanguageModelV2StreamPart[] {
+  logger?: Logger | false,
+): LanguageModelV3StreamPart[] {
   const { part, delta } = event.properties;
-  const parts: LanguageModelV2StreamPart[] = [];
+  const parts: LanguageModelV3StreamPart[] = [];
 
   // Get message role - skip parts from user messages (we only want assistant output)
   const messageRole = state.messageRoles.get(part.messageID);
-  if (messageRole === 'user') {
+  if (messageRole === "user") {
     // User message parts are echoed back but should not be streamed to output
     return parts;
   }
 
   switch (part.type) {
-    case 'text': {
+    case "text": {
       const textPart = part as TextPart;
       // Skip synthetic parts (context we added)
       if (textPart.synthetic || textPart.ignored) {
@@ -305,29 +344,29 @@ function handlePartUpdated(
       break;
     }
 
-    case 'reasoning': {
+    case "reasoning": {
       const reasoningPart = part as ReasoningPart;
       parts.push(...handleReasoningPart(reasoningPart, delta, state));
       break;
     }
 
-    case 'tool': {
+    case "tool": {
       const toolPart = part as ToolPart;
       parts.push(...handleToolPart(toolPart, state, logger));
       break;
     }
 
-    case 'step-finish': {
+    case "step-finish": {
       const stepPart = part as StepFinishPart;
       handleStepFinishPart(stepPart, state);
       break;
     }
 
-    case 'step-start':
+    case "step-start":
       // Step start markers - informational, not converted to stream parts
       break;
 
-    case 'file': {
+    case "file": {
       const filePart = part as FilePart;
       parts.push(...handleFilePart(filePart));
       break;
@@ -348,32 +387,32 @@ function handlePartUpdated(
 function handleTextPart(
   part: TextPart,
   delta: string | undefined,
-  state: StreamState
-): LanguageModelV2StreamPart[] {
-  const parts: LanguageModelV2StreamPart[] = [];
+  state: StreamState,
+): LanguageModelV3StreamPart[] {
+  const parts: LanguageModelV3StreamPart[] = [];
   const partId = part.id;
 
   // Start text if not started
   if (!state.textStarted || state.textPartId !== partId) {
     // End previous text if different part
     if (state.textStarted && state.textPartId && state.textPartId !== partId) {
-      parts.push({ type: 'text-end', id: state.textPartId });
+      parts.push({ type: "text-end", id: state.textPartId });
     }
-    parts.push({ type: 'text-start', id: partId });
+    parts.push({ type: "text-start", id: partId });
     state.textStarted = true;
     state.textPartId = partId;
-    state.lastTextContent = '';
+    state.lastTextContent = "";
   }
 
   // Emit delta
   if (delta) {
-    parts.push({ type: 'text-delta', id: partId, delta });
+    parts.push({ type: "text-delta", id: partId, delta });
     state.lastTextContent += delta;
   } else if (part.text && part.text !== state.lastTextContent) {
     // Calculate delta from full text if no delta provided
     const newDelta = part.text.slice(state.lastTextContent.length);
     if (newDelta) {
-      parts.push({ type: 'text-delta', id: partId, delta: newDelta });
+      parts.push({ type: "text-delta", id: partId, delta: newDelta });
       state.lastTextContent = part.text;
     }
   }
@@ -387,32 +426,36 @@ function handleTextPart(
 function handleReasoningPart(
   part: ReasoningPart,
   delta: string | undefined,
-  state: StreamState
-): LanguageModelV2StreamPart[] {
-  const parts: LanguageModelV2StreamPart[] = [];
+  state: StreamState,
+): LanguageModelV3StreamPart[] {
+  const parts: LanguageModelV3StreamPart[] = [];
   const partId = part.id;
 
   // Start reasoning if not started
   if (!state.reasoningStarted || state.reasoningPartId !== partId) {
     // End previous reasoning if different part
-    if (state.reasoningStarted && state.reasoningPartId && state.reasoningPartId !== partId) {
-      parts.push({ type: 'reasoning-end', id: state.reasoningPartId });
+    if (
+      state.reasoningStarted &&
+      state.reasoningPartId &&
+      state.reasoningPartId !== partId
+    ) {
+      parts.push({ type: "reasoning-end", id: state.reasoningPartId });
     }
-    parts.push({ type: 'reasoning-start', id: partId });
+    parts.push({ type: "reasoning-start", id: partId });
     state.reasoningStarted = true;
     state.reasoningPartId = partId;
-    state.lastReasoningContent = '';
+    state.lastReasoningContent = "";
   }
 
   // Emit delta
   if (delta) {
-    parts.push({ type: 'reasoning-delta', id: partId, delta });
+    parts.push({ type: "reasoning-delta", id: partId, delta });
     state.lastReasoningContent += delta;
   } else if (part.text && part.text !== state.lastReasoningContent) {
     // Calculate delta from full text if no delta provided
     const newDelta = part.text.slice(state.lastReasoningContent.length);
     if (newDelta) {
-      parts.push({ type: 'reasoning-delta', id: partId, delta: newDelta });
+      parts.push({ type: "reasoning-delta", id: partId, delta: newDelta });
       state.lastReasoningContent = part.text;
     }
   }
@@ -426,9 +469,9 @@ function handleReasoningPart(
 function handleToolPart(
   part: ToolPart,
   state: StreamState,
-  logger?: Logger | false
-): LanguageModelV2StreamPart[] {
-  const parts: LanguageModelV2StreamPart[] = [];
+  logger?: Logger | false,
+): LanguageModelV3StreamPart[] {
+  const parts: LanguageModelV3StreamPart[] = [];
   const { callID, tool, state: toolState } = part;
 
   // Get or create tool stream state
@@ -446,27 +489,30 @@ function handleToolPart(
   }
 
   switch (toolState.status) {
-    case 'pending':
+    case "pending":
       // Tool is pending - emit input start
       if (!streamState.inputStarted) {
         parts.push({
-          type: 'tool-input-start',
+          type: "tool-input-start",
           id: callID,
           toolName: tool,
           providerExecuted: true,
+          dynamic: true,
         });
         streamState.inputStarted = true;
       }
       break;
 
-    case 'running': {
+    case "running": {
       // Tool is running - emit input delta if input changed
       if (!streamState.inputStarted) {
         parts.push({
-          type: 'tool-input-start',
+          type: "tool-input-start",
           id: callID,
           toolName: tool,
           providerExecuted: true,
+          dynamic: true,
+          ...(toolState.title ? { title: toolState.title } : {}),
         });
         streamState.inputStarted = true;
       }
@@ -476,7 +522,7 @@ function handleToolPart(
         const inputDelta = inputStr.slice(streamState.lastInput.length);
         if (inputDelta) {
           parts.push({
-            type: 'tool-input-delta',
+            type: "tool-input-delta",
             id: callID,
             delta: inputDelta,
           });
@@ -486,81 +532,86 @@ function handleToolPart(
       break;
     }
 
-    case 'completed':
+    case "completed":
       // Tool completed - emit input end, tool call, and result
       if (!streamState.inputClosed) {
         if (!streamState.inputStarted) {
           parts.push({
-            type: 'tool-input-start',
+            type: "tool-input-start",
             id: callID,
             toolName: tool,
             providerExecuted: true,
+            dynamic: true,
           });
           streamState.inputStarted = true;
         }
-        parts.push({ type: 'tool-input-end', id: callID });
+        parts.push({ type: "tool-input-end", id: callID });
         streamState.inputClosed = true;
       }
 
       if (!streamState.callEmitted) {
         parts.push({
-          type: 'tool-call',
+          type: "tool-call",
           toolCallId: callID,
           toolName: tool,
           input: JSON.stringify(toolState.input),
           providerExecuted: true,
+          dynamic: true,
         });
         streamState.callEmitted = true;
       }
 
       if (!streamState.resultEmitted) {
         parts.push({
-          type: 'tool-result',
+          type: "tool-result",
           toolCallId: callID,
           toolName: tool,
-          result: toolState.output,
+          result: (toolState.output ?? "") as NonNullable<JSONValue>,
           isError: false,
-          providerExecuted: true,
+          dynamic: true,
         });
         streamState.resultEmitted = true;
       }
       break;
 
-    case 'error':
+    case "error":
       // Tool errored - emit input end, tool call, and error result
       if (!streamState.inputClosed) {
         if (!streamState.inputStarted) {
           parts.push({
-            type: 'tool-input-start',
+            type: "tool-input-start",
             id: callID,
             toolName: tool,
             providerExecuted: true,
+            dynamic: true,
           });
           streamState.inputStarted = true;
         }
-        parts.push({ type: 'tool-input-end', id: callID });
+        parts.push({ type: "tool-input-end", id: callID });
         streamState.inputClosed = true;
       }
 
       if (!streamState.callEmitted) {
         parts.push({
-          type: 'tool-call',
+          type: "tool-call",
           toolCallId: callID,
           toolName: tool,
           input: JSON.stringify(toolState.input),
           providerExecuted: true,
+          dynamic: true,
         });
         streamState.callEmitted = true;
       }
 
       if (!streamState.resultEmitted) {
         parts.push({
-          type: 'tool-result',
+          type: "tool-result",
           toolCallId: callID,
           toolName: tool,
-          result: toolState.error,
+          result: (toolState.error ??
+            "Unknown error") as NonNullable<JSONValue>,
           isError: true,
-          providerExecuted: true,
+          dynamic: true,
         });
         streamState.resultEmitted = true;
 
@@ -589,7 +640,7 @@ function handleStepFinishPart(part: StepFinishPart, state: StreamState): void {
 /**
  * Handle a file part.
  */
-function handleFilePart(_part: FilePart): LanguageModelV2StreamPart[] {
+function handleFilePart(_part: FilePart): LanguageModelV3StreamPart[] {
   // Convert to AI SDK file format
   // Note: The file data is in URL format (could be data URL or file URL)
   // For now, we skip file parts as they require special handling
@@ -602,31 +653,50 @@ function handleFilePart(_part: FilePart): LanguageModelV2StreamPart[] {
  */
 export function createFinishParts(
   state: StreamState,
-  finishReason: LanguageModelV2FinishReason,
-  sessionId: string
-): LanguageModelV2StreamPart[] {
-  const parts: LanguageModelV2StreamPart[] = [];
+  finishReason: LanguageModelV3FinishReason,
+  sessionId: string,
+): LanguageModelV3StreamPart[] {
+  const parts: LanguageModelV3StreamPart[] = [];
+  const inputTokensTotal =
+    state.usage.inputTokens +
+    state.usage.cachedInputTokens +
+    state.usage.cachedWriteTokens;
+  const usage: LanguageModelV3Usage = {
+    inputTokens: {
+      total: inputTokensTotal,
+      noCache: state.usage.inputTokens,
+      cacheRead: state.usage.cachedInputTokens,
+      cacheWrite: state.usage.cachedWriteTokens,
+    },
+    outputTokens: {
+      total: state.usage.outputTokens,
+      text: undefined,
+      reasoning: state.usage.reasoningTokens,
+    },
+    raw: {
+      input_tokens: state.usage.inputTokens,
+      output_tokens: state.usage.outputTokens,
+      reasoning_tokens: state.usage.reasoningTokens,
+      cache_read_input_tokens: state.usage.cachedInputTokens,
+      cache_write_input_tokens: state.usage.cachedWriteTokens,
+      total_cost: state.usage.totalCost,
+    },
+  };
 
   // Close text if open
   if (state.textStarted && state.textPartId) {
-    parts.push({ type: 'text-end', id: state.textPartId });
+    parts.push({ type: "text-end", id: state.textPartId });
   }
 
   // Close reasoning if open
   if (state.reasoningStarted && state.reasoningPartId) {
-    parts.push({ type: 'reasoning-end', id: state.reasoningPartId });
+    parts.push({ type: "reasoning-end", id: state.reasoningPartId });
   }
 
   // Emit finish with usage
   parts.push({
-    type: 'finish',
-    usage: {
-      inputTokens: state.usage.inputTokens || undefined,
-      outputTokens: state.usage.outputTokens || undefined,
-      totalTokens: (state.usage.inputTokens + state.usage.outputTokens) || undefined,
-      reasoningTokens: state.usage.reasoningTokens || undefined,
-      cachedInputTokens: state.usage.cachedInputTokens || undefined,
-    },
+    type: "finish",
+    usage,
     finishReason,
     providerMetadata: {
       opencode: {
@@ -642,14 +712,16 @@ export function createFinishParts(
 /**
  * Create stream start part with warnings.
  */
-export function createStreamStartPart(warnings: string[]): LanguageModelV2StreamPart {
-  const callWarnings: LanguageModelV2CallWarning[] = warnings.map((warning) => ({
-    type: 'other' as const,
+export function createStreamStartPart(
+  warnings: string[],
+): LanguageModelV3StreamPart {
+  const callWarnings: SharedV3Warning[] = warnings.map((warning) => ({
+    type: "other" as const,
     message: warning,
   }));
 
   return {
-    type: 'stream-start',
+    type: "stream-start",
     warnings: callWarnings,
   };
 }

@@ -1,13 +1,20 @@
 import type {
-  LanguageModelV2,
-  LanguageModelV2CallOptions,
-  LanguageModelV2CallWarning,
-  LanguageModelV2Content,
-  LanguageModelV2StreamPart,
-} from '@ai-sdk/provider';
-import type { Logger, OpencodeSettings, ParsedModelId, StreamingUsage } from './types.js';
-import { OpencodeClientManager } from './opencode-client-manager.js';
-import { convertToOpencodeMessages } from './convert-to-opencode-messages.js';
+  JSONValue,
+  LanguageModelV3,
+  LanguageModelV3CallOptions,
+  LanguageModelV3Content,
+  LanguageModelV3StreamPart,
+  LanguageModelV3Usage,
+  SharedV3Warning,
+} from "@ai-sdk/provider";
+import type {
+  Logger,
+  OpencodeSettings,
+  ParsedModelId,
+  StreamingUsage,
+} from "./types.js";
+import { OpencodeClientManager } from "./opencode-client-manager.js";
+import { convertToOpencodeMessages } from "./convert-to-opencode-messages.js";
 import {
   convertEventToStreamParts,
   createStreamState,
@@ -17,20 +24,50 @@ import {
   isSessionComplete,
   type Message,
   type Part,
-} from './convert-from-opencode-events.js';
-import { mapOpencodeFinishReason } from './map-opencode-finish-reason.js';
-import { getLogger, logUnsupportedCallOptions } from './logger.js';
-import { validateModelId, validateSettings } from './validation.js';
-import { wrapError, extractErrorMessage, isAbortError } from './errors.js';
+} from "./convert-from-opencode-events.js";
+import { mapOpencodeFinishReason } from "./map-opencode-finish-reason.js";
+import { getLogger, logUnsupportedCallOptions } from "./logger.js";
+import { validateModelId, validateSettings } from "./validation.js";
+import { wrapError, extractErrorMessage, isAbortError } from "./errors.js";
 
 /**
- * OpenCode Language Model implementation of LanguageModelV2.
+ * Convert OpenCode token usage to the AI SDK v6 usage shape.
  */
-export class OpencodeLanguageModel implements LanguageModelV2 {
-  readonly specificationVersion = 'v2' as const;
+function convertUsage(usage: StreamingUsage): LanguageModelV3Usage {
+  const inputTokensTotal =
+    usage.inputTokens + usage.cachedInputTokens + usage.cachedWriteTokens;
+
+  return {
+    inputTokens: {
+      total: inputTokensTotal,
+      noCache: usage.inputTokens,
+      cacheRead: usage.cachedInputTokens,
+      cacheWrite: usage.cachedWriteTokens,
+    },
+    outputTokens: {
+      total: usage.outputTokens,
+      text: undefined,
+      reasoning: usage.reasoningTokens,
+    },
+    raw: {
+      input_tokens: usage.inputTokens,
+      output_tokens: usage.outputTokens,
+      reasoning_tokens: usage.reasoningTokens,
+      cache_read_input_tokens: usage.cachedInputTokens,
+      cache_write_input_tokens: usage.cachedWriteTokens,
+      total_cost: usage.totalCost,
+    },
+  };
+}
+
+/**
+ * OpenCode Language Model implementation of LanguageModelV3.
+ */
+export class OpencodeLanguageModel implements LanguageModelV3 {
+  readonly specificationVersion = "v3" as const;
 
   readonly modelId: string;
-  readonly provider = 'opencode';
+  readonly provider = "opencode";
 
   /**
    * OpenCode doesn't support URL-based file inputs.
@@ -73,8 +110,8 @@ export class OpencodeLanguageModel implements LanguageModelV2 {
   /**
    * Non-streaming generation.
    */
-  async doGenerate(options: LanguageModelV2CallOptions) {
-    const warnings: LanguageModelV2CallWarning[] = [];
+  async doGenerate(options: LanguageModelV3CallOptions) {
+    const warnings: SharedV3Warning[] = [];
 
     // Log unsupported options
     const unsupportedWarnings = logUnsupportedCallOptions(this.logger, {
@@ -89,35 +126,44 @@ export class OpencodeLanguageModel implements LanguageModelV2 {
     });
 
     for (const warning of unsupportedWarnings) {
-      warnings.push({ type: 'other', message: warning });
+      warnings.push({ type: "other", message: warning });
     }
 
     // Warn about tools (we can observe but not provide custom tools)
     if (options.tools && options.tools.length > 0) {
-      const toolWarning = 'Custom tool definitions are ignored. OpenCode executes tools server-side.';
+      const toolWarning =
+        "Custom tool definitions are ignored. OpenCode executes tools server-side.";
       this.logger.warn(toolWarning);
-      warnings.push({ type: 'other', message: toolWarning });
+      warnings.push({ type: "other", message: toolWarning });
     }
 
     // Convert messages
-    const mode = options.responseFormat?.type === 'json'
-      ? { type: 'object-json' as const, schema: options.responseFormat.schema }
-      : { type: 'regular' as const };
+    const mode =
+      options.responseFormat?.type === "json"
+        ? {
+            type: "object-json" as const,
+            schema: options.responseFormat.schema,
+          }
+        : { type: "regular" as const };
 
-    const { parts, systemPrompt, warnings: conversionWarnings } = convertToOpencodeMessages(
-      options.prompt,
-      { logger: this.logger, mode }
-    );
+    const {
+      parts,
+      systemPrompt,
+      warnings: conversionWarnings,
+    } = convertToOpencodeMessages(options.prompt, {
+      logger: this.logger,
+      mode,
+    });
 
     for (const warning of conversionWarnings) {
-      warnings.push({ type: 'other', message: warning });
+      warnings.push({ type: "other", message: warning });
     }
 
     try {
       // Check if already aborted
       if (options.abortSignal?.aborted) {
-        const error = new Error('Request aborted');
-        error.name = 'AbortError';
+        const error = new Error("Request aborted");
+        error.name = "AbortError";
         throw error;
       }
 
@@ -130,11 +176,17 @@ export class OpencodeLanguageModel implements LanguageModelV2 {
       // Build request body
       const requestBody = {
         model: this.parsedModelId.providerID
-          ? { providerID: this.parsedModelId.providerID, modelID: this.parsedModelId.modelID }
+          ? {
+              providerID: this.parsedModelId.providerID,
+              modelID: this.parsedModelId.modelID,
+            }
           : undefined,
         agent: this.settings.agent,
         system: systemPrompt ?? this.settings.systemPrompt,
-        parts: parts as Array<{ type: 'text'; text: string } | { type: 'file'; mime: string; url: string }>,
+        parts: parts as Array<
+          | { type: "text"; text: string }
+          | { type: "file"; mime: string; url: string }
+        >,
         tools: this.settings.tools,
       };
 
@@ -147,7 +199,7 @@ export class OpencodeLanguageModel implements LanguageModelV2 {
       // Extract response data
       const data = result.data;
       if (!data) {
-        throw new Error('No response data from OpenCode');
+        throw new Error("No response data from OpenCode");
       }
 
       // Type assertion for the response structure
@@ -158,14 +210,16 @@ export class OpencodeLanguageModel implements LanguageModelV2 {
 
       // Extract text content
       const textContent = this.extractTextFromParts(responseData.parts ?? []);
-      const content: LanguageModelV2Content[] = [];
+      const content: LanguageModelV3Content[] = [];
 
       if (textContent) {
-        content.push({ type: 'text', text: textContent });
+        content.push({ type: "text", text: textContent });
       }
 
       // Extract tool calls
-      const toolCalls = this.extractToolCallsFromParts(responseData.parts ?? []);
+      const toolCalls = this.extractToolCallsFromParts(
+        responseData.parts ?? [],
+      );
       for (const toolCall of toolCalls) {
         content.push(toolCall);
       }
@@ -179,13 +233,7 @@ export class OpencodeLanguageModel implements LanguageModelV2 {
       return {
         content,
         finishReason,
-        usage: {
-          inputTokens: usage.inputTokens || undefined,
-          outputTokens: usage.outputTokens || undefined,
-          totalTokens: (usage.inputTokens + usage.outputTokens) || undefined,
-          reasoningTokens: usage.reasoningTokens || undefined,
-          cachedInputTokens: usage.cachedInputTokens || undefined,
-        },
+        usage: convertUsage(usage),
         providerMetadata: {
           opencode: {
             sessionId,
@@ -209,8 +257,8 @@ export class OpencodeLanguageModel implements LanguageModelV2 {
   /**
    * Streaming generation.
    */
-  async doStream(options: LanguageModelV2CallOptions): Promise<{
-    stream: ReadableStream<LanguageModelV2StreamPart>;
+  async doStream(options: LanguageModelV3CallOptions): Promise<{
+    stream: ReadableStream<LanguageModelV3StreamPart>;
     request?: { body?: unknown };
     response?: { headers?: Record<string, string> };
   }> {
@@ -231,20 +279,29 @@ export class OpencodeLanguageModel implements LanguageModelV2 {
 
     // Warn about tools
     if (options.tools && options.tools.length > 0) {
-      const toolWarning = 'Custom tool definitions are ignored. OpenCode executes tools server-side.';
+      const toolWarning =
+        "Custom tool definitions are ignored. OpenCode executes tools server-side.";
       this.logger.warn(toolWarning);
       warnings.push(toolWarning);
     }
 
     // Convert messages
-    const mode = options.responseFormat?.type === 'json'
-      ? { type: 'object-json' as const, schema: options.responseFormat.schema }
-      : { type: 'regular' as const };
+    const mode =
+      options.responseFormat?.type === "json"
+        ? {
+            type: "object-json" as const,
+            schema: options.responseFormat.schema,
+          }
+        : { type: "regular" as const };
 
-    const { parts, systemPrompt, warnings: conversionWarnings } = convertToOpencodeMessages(
-      options.prompt,
-      { logger: this.logger, mode }
-    );
+    const {
+      parts,
+      systemPrompt,
+      warnings: conversionWarnings,
+    } = convertToOpencodeMessages(options.prompt, {
+      logger: this.logger,
+      mode,
+    });
     warnings.push(...conversionWarnings);
 
     // Get or create session
@@ -256,11 +313,17 @@ export class OpencodeLanguageModel implements LanguageModelV2 {
     // Build request body
     const requestBody = {
       model: this.parsedModelId.providerID
-        ? { providerID: this.parsedModelId.providerID, modelID: this.parsedModelId.modelID }
+        ? {
+            providerID: this.parsedModelId.providerID,
+            modelID: this.parsedModelId.modelID,
+          }
         : undefined,
       agent: this.settings.agent,
       system: systemPrompt ?? this.settings.systemPrompt,
-      parts: parts as Array<{ type: 'text'; text: string } | { type: 'file'; mime: string; url: string }>,
+      parts: parts as Array<
+        | { type: "text"; text: string }
+        | { type: "file"; mime: string; url: string }
+      >,
       tools: this.settings.tools,
     };
 
@@ -268,7 +331,7 @@ export class OpencodeLanguageModel implements LanguageModelV2 {
     const logger = this.logger;
 
     // Create the stream
-    const stream = new ReadableStream<LanguageModelV2StreamPart>({
+    const stream = new ReadableStream<LanguageModelV3StreamPart>({
       async start(controller) {
         // Emit stream start with warnings
         controller.enqueue(createStreamStartPart(warnings));
@@ -280,17 +343,19 @@ export class OpencodeLanguageModel implements LanguageModelV2 {
           // The stream is an async generator
           const eventStream = eventsResult.stream;
           if (!eventStream) {
-            throw new Error('Failed to subscribe to events');
+            throw new Error("Failed to subscribe to events");
           }
 
           // Send prompt asynchronously (don't await)
-          client.session.prompt({
-            path: { id: sessionId },
-            body: requestBody,
-          }).catch((error) => {
-            logger.error(`Prompt error: ${extractErrorMessage(error)}`);
-            controller.enqueue({ type: 'error', error });
-          });
+          client.session
+            .prompt({
+              path: { id: sessionId },
+              body: requestBody,
+            })
+            .catch((error) => {
+              logger.error(`Prompt error: ${extractErrorMessage(error)}`);
+              controller.enqueue({ type: "error", error });
+            });
 
           // Create stream state
           const state = createStreamState();
@@ -321,9 +386,9 @@ export class OpencodeLanguageModel implements LanguageModelV2 {
             }
 
             // Track message info for finish reason
-            if (event.type === 'message.updated') {
+            if (event.type === "message.updated") {
               const messageEvent = event as { properties: { info: Message } };
-              if (messageEvent.properties.info.role === 'assistant') {
+              if (messageEvent.properties.info.role === "assistant") {
                 lastMessageInfo = messageEvent.properties.info;
               }
             }
@@ -334,7 +399,11 @@ export class OpencodeLanguageModel implements LanguageModelV2 {
               const finishReason = mapOpencodeFinishReason(lastMessageInfo);
 
               // Emit final parts
-              const finishParts = createFinishParts(state, finishReason, sessionId);
+              const finishParts = createFinishParts(
+                state,
+                finishReason,
+                sessionId,
+              );
               for (const part of finishParts) {
                 controller.enqueue(part);
               }
@@ -345,7 +414,7 @@ export class OpencodeLanguageModel implements LanguageModelV2 {
         } catch (error) {
           if (!isAbortError(error)) {
             logger.error(`Stream error: ${extractErrorMessage(error)}`);
-            controller.enqueue({ type: 'error', error: wrapError(error) });
+            controller.enqueue({ type: "error", error: wrapError(error) });
           }
         } finally {
           controller.close();
@@ -373,13 +442,13 @@ export class OpencodeLanguageModel implements LanguageModelV2 {
 
     const result = await client.session.create({
       body: {
-        title: this.settings.sessionTitle ?? 'AI SDK Session',
+        title: this.settings.sessionTitle ?? "AI SDK Session",
       },
     });
 
     const data = result.data as { id: string } | undefined;
     if (!data?.id) {
-      throw new Error('Failed to create session');
+      throw new Error("Failed to create session");
     }
 
     this.sessionId = data.id;
@@ -393,56 +462,74 @@ export class OpencodeLanguageModel implements LanguageModelV2 {
    */
   private extractTextFromParts(parts: Part[]): string {
     return parts
-      .filter((part): part is Part & { type: 'text'; text: string } =>
-        part.type === 'text' && typeof (part as { text?: string }).text === 'string'
+      .filter(
+        (part): part is Part & { type: "text"; text: string } =>
+          part.type === "text" &&
+          typeof (part as { text?: string }).text === "string",
       )
-      .filter((part) => !(part as { synthetic?: boolean }).synthetic && !(part as { ignored?: boolean }).ignored)
+      .filter(
+        (part) =>
+          !(part as { synthetic?: boolean }).synthetic &&
+          !(part as { ignored?: boolean }).ignored,
+      )
       .map((part) => part.text)
-      .join('');
+      .join("");
   }
 
   /**
    * Extract tool calls from parts.
    */
-  private extractToolCallsFromParts(parts: Part[]): LanguageModelV2Content[] {
-    const toolCalls: LanguageModelV2Content[] = [];
+  private extractToolCallsFromParts(parts: Part[]): LanguageModelV3Content[] {
+    const toolCalls: LanguageModelV3Content[] = [];
 
     for (const part of parts) {
-      if (part.type === 'tool') {
+      if (part.type === "tool") {
         const toolPart = part as {
           callID: string;
           tool: string;
-          state: { status: string; input: Record<string, unknown>; output?: string; error?: string };
+          state: {
+            status: string;
+            input: Record<string, unknown>;
+            output?: string;
+            error?: string;
+          };
         };
 
-        if (toolPart.state.status === 'completed') {
+        if (toolPart.state.status === "completed") {
           toolCalls.push({
-            type: 'tool-call',
+            type: "tool-call",
             toolCallId: toolPart.callID,
             toolName: toolPart.tool,
             input: JSON.stringify(toolPart.state.input),
+            providerExecuted: true,
+            dynamic: true,
           });
 
           toolCalls.push({
-            type: 'tool-result',
+            type: "tool-result",
             toolCallId: toolPart.callID,
             toolName: toolPart.tool,
-            result: toolPart.state.output ?? '',
+            result: (toolPart.state.output ?? "") as NonNullable<JSONValue>,
+            dynamic: true,
           });
-        } else if (toolPart.state.status === 'error') {
+        } else if (toolPart.state.status === "error") {
           toolCalls.push({
-            type: 'tool-call',
+            type: "tool-call",
             toolCallId: toolPart.callID,
             toolName: toolPart.tool,
             input: JSON.stringify(toolPart.state.input),
+            providerExecuted: true,
+            dynamic: true,
           });
 
           toolCalls.push({
-            type: 'tool-result',
+            type: "tool-result",
             toolCallId: toolPart.callID,
             toolName: toolPart.tool,
-            result: toolPart.state.error ?? 'Unknown error',
+            result: (toolPart.state.error ??
+              "Unknown error") as NonNullable<JSONValue>,
             isError: true,
+            dynamic: true,
           });
         }
       }
@@ -465,7 +552,7 @@ export class OpencodeLanguageModel implements LanguageModelV2 {
     };
 
     for (const part of parts) {
-      if (part.type === 'step-finish') {
+      if (part.type === "step-finish") {
         const stepPart = part as {
           cost: number;
           tokens: {
