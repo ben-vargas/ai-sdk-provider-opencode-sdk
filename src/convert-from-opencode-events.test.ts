@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi } from "vitest";
 import {
   createStreamState,
   isEventForSession,
@@ -13,12 +13,12 @@ import {
   type ReasoningPart,
   type ToolPart,
   type StepFinishPart,
-} from './convert-from-opencode-events.js';
-import type { Logger } from './types.js';
+} from "./convert-from-opencode-events.js";
+import type { Logger } from "./types.js";
 
-describe('convert-from-opencode-events', () => {
-  describe('createStreamState', () => {
-    it('should create initial stream state', () => {
+describe("convert-from-opencode-events", () => {
+  describe("createStreamState", () => {
+    it("should create initial stream state", () => {
       const state = createStreamState();
 
       expect(state).toEqual({
@@ -35,212 +35,220 @@ describe('convert-from-opencode-events', () => {
           cachedWriteTokens: 0,
           totalCost: 0,
         },
-        lastTextContent: '',
-        lastReasoningContent: '',
+        lastTextContent: "",
+        lastReasoningContent: "",
         messageRoles: expect.any(Map),
       });
     });
   });
 
-  describe('isEventForSession', () => {
-    it('should return true when part sessionID matches', () => {
+  describe("isEventForSession", () => {
+    it("should return true when part sessionID matches", () => {
       const event: EventMessagePartUpdated = {
-        type: 'message.part.updated',
+        type: "message.part.updated",
         properties: {
           part: {
-            id: 'part-1',
-            sessionID: 'session-123',
-            messageID: 'msg-1',
-            type: 'text',
-            text: 'Hello',
+            id: "part-1",
+            sessionID: "session-123",
+            messageID: "msg-1",
+            type: "text",
+            text: "Hello",
           },
         },
       };
 
-      expect(isEventForSession(event, 'session-123')).toBe(true);
+      expect(isEventForSession(event, "session-123")).toBe(true);
     });
 
-    it('should return false when part sessionID does not match', () => {
+    it("should return false when part sessionID does not match", () => {
       const event: EventMessagePartUpdated = {
-        type: 'message.part.updated',
+        type: "message.part.updated",
         properties: {
           part: {
-            id: 'part-1',
-            sessionID: 'session-other',
-            messageID: 'msg-1',
-            type: 'text',
-            text: 'Hello',
+            id: "part-1",
+            sessionID: "session-other",
+            messageID: "msg-1",
+            type: "text",
+            text: "Hello",
           },
         },
       };
 
-      expect(isEventForSession(event, 'session-123')).toBe(false);
+      expect(isEventForSession(event, "session-123")).toBe(false);
     });
 
-    it('should check message info sessionID', () => {
+    it("should check message info sessionID", () => {
       const event = {
-        type: 'message.updated',
+        type: "message.updated",
         properties: {
           info: {
-            id: 'msg-1',
-            sessionID: 'session-123',
-            role: 'assistant',
+            id: "msg-1",
+            sessionID: "session-123",
+            role: "assistant",
           },
         },
       };
 
-      expect(isEventForSession(event, 'session-123')).toBe(true);
+      expect(isEventForSession(event, "session-123")).toBe(true);
     });
 
-    it('should check direct sessionID property', () => {
+    it("should check direct sessionID property", () => {
       const event: EventSessionIdle = {
-        type: 'session.idle',
+        type: "session.idle",
         properties: {
-          sessionID: 'session-123',
+          sessionID: "session-123",
         },
       };
 
-      expect(isEventForSession(event, 'session-123')).toBe(true);
+      expect(isEventForSession(event, "session-123")).toBe(true);
     });
 
-    it('should return false for events without sessionID', () => {
+    it("should return false for events without sessionID", () => {
       const event = {
-        type: 'unknown.event',
+        type: "unknown.event",
         properties: {},
       };
 
-      expect(isEventForSession(event, 'session-123')).toBe(false);
+      expect(isEventForSession(event, "session-123")).toBe(false);
     });
   });
 
-  describe('isSessionComplete', () => {
-    it('should return true for session.status with idle status', () => {
+  describe("isSessionComplete", () => {
+    it("should return true for session.status with idle status", () => {
       const event: EventSessionStatus = {
-        type: 'session.status',
+        type: "session.status",
         properties: {
-          sessionID: 'session-123',
-          status: { type: 'idle' },
+          sessionID: "session-123",
+          status: { type: "idle" },
         },
       };
 
-      expect(isSessionComplete(event, 'session-123')).toBe(true);
+      expect(isSessionComplete(event, "session-123")).toBe(true);
     });
 
-    it('should return false for session.status with busy status', () => {
+    it("should return false for session.status with busy status", () => {
       const event: EventSessionStatus = {
-        type: 'session.status',
+        type: "session.status",
         properties: {
-          sessionID: 'session-123',
-          status: { type: 'busy' },
+          sessionID: "session-123",
+          status: { type: "busy" },
         },
       };
 
-      expect(isSessionComplete(event, 'session-123')).toBe(false);
+      expect(isSessionComplete(event, "session-123")).toBe(false);
     });
 
-    it('should return false for different session', () => {
+    it("should return false for different session", () => {
       const event: EventSessionStatus = {
-        type: 'session.status',
+        type: "session.status",
         properties: {
-          sessionID: 'session-other',
-          status: { type: 'idle' },
+          sessionID: "session-other",
+          status: { type: "idle" },
         },
       };
 
-      expect(isSessionComplete(event, 'session-123')).toBe(false);
+      expect(isSessionComplete(event, "session-123")).toBe(false);
     });
 
-    it('should return true for session.idle event', () => {
+    it("should return true for session.idle event", () => {
       const event: EventSessionIdle = {
-        type: 'session.idle',
+        type: "session.idle",
         properties: {
-          sessionID: 'session-123',
+          sessionID: "session-123",
         },
       };
 
-      expect(isSessionComplete(event, 'session-123')).toBe(true);
+      expect(isSessionComplete(event, "session-123")).toBe(true);
     });
 
-    it('should return false for other event types', () => {
+    it("should return false for other event types", () => {
       const event: EventMessagePartUpdated = {
-        type: 'message.part.updated',
+        type: "message.part.updated",
         properties: {
           part: {
-            id: 'part-1',
-            sessionID: 'session-123',
-            messageID: 'msg-1',
-            type: 'text',
-            text: 'Hello',
+            id: "part-1",
+            sessionID: "session-123",
+            messageID: "msg-1",
+            type: "text",
+            text: "Hello",
           },
         },
       };
 
-      expect(isSessionComplete(event, 'session-123')).toBe(false);
+      expect(isSessionComplete(event, "session-123")).toBe(false);
     });
   });
 
-  describe('convertEventToStreamParts', () => {
-    describe('text parts', () => {
-      it('should emit text-start and text-delta for new text', () => {
+  describe("convertEventToStreamParts", () => {
+    describe("text parts", () => {
+      it("should emit text-start and text-delta for new text", () => {
         const state = createStreamState();
         const event: EventMessagePartUpdated = {
-          type: 'message.part.updated',
+          type: "message.part.updated",
           properties: {
             part: {
-              id: 'part-1',
-              sessionID: 'session-123',
-              messageID: 'msg-1',
-              type: 'text',
-              text: 'Hello',
+              id: "part-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "text",
+              text: "Hello",
             } as TextPart,
-            delta: 'Hello',
+            delta: "Hello",
           },
         };
 
         const parts = convertEventToStreamParts(event, state);
 
         expect(parts).toHaveLength(2);
-        expect(parts[0]).toEqual({ type: 'text-start', id: 'part-1' });
-        expect(parts[1]).toEqual({ type: 'text-delta', id: 'part-1', delta: 'Hello' });
+        expect(parts[0]).toEqual({ type: "text-start", id: "part-1" });
+        expect(parts[1]).toEqual({
+          type: "text-delta",
+          id: "part-1",
+          delta: "Hello",
+        });
       });
 
-      it('should only emit text-delta for subsequent updates', () => {
+      it("should only emit text-delta for subsequent updates", () => {
         const state = createStreamState();
         state.textStarted = true;
-        state.textPartId = 'part-1';
-        state.lastTextContent = 'Hello';
+        state.textPartId = "part-1";
+        state.lastTextContent = "Hello";
 
         const event: EventMessagePartUpdated = {
-          type: 'message.part.updated',
+          type: "message.part.updated",
           properties: {
             part: {
-              id: 'part-1',
-              sessionID: 'session-123',
-              messageID: 'msg-1',
-              type: 'text',
-              text: 'Hello World',
+              id: "part-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "text",
+              text: "Hello World",
             } as TextPart,
-            delta: ' World',
+            delta: " World",
           },
         };
 
         const parts = convertEventToStreamParts(event, state);
 
         expect(parts).toHaveLength(1);
-        expect(parts[0]).toEqual({ type: 'text-delta', id: 'part-1', delta: ' World' });
+        expect(parts[0]).toEqual({
+          type: "text-delta",
+          id: "part-1",
+          delta: " World",
+        });
       });
 
-      it('should skip synthetic text parts', () => {
+      it("should skip synthetic text parts", () => {
         const state = createStreamState();
         const event: EventMessagePartUpdated = {
-          type: 'message.part.updated',
+          type: "message.part.updated",
           properties: {
             part: {
-              id: 'part-1',
-              sessionID: 'session-123',
-              messageID: 'msg-1',
-              type: 'text',
-              text: 'Context',
+              id: "part-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "text",
+              text: "Context",
               synthetic: true,
             } as TextPart,
           },
@@ -251,17 +259,17 @@ describe('convert-from-opencode-events', () => {
         expect(parts).toHaveLength(0);
       });
 
-      it('should skip ignored text parts', () => {
+      it("should skip ignored text parts", () => {
         const state = createStreamState();
         const event: EventMessagePartUpdated = {
-          type: 'message.part.updated',
+          type: "message.part.updated",
           properties: {
             part: {
-              id: 'part-1',
-              sessionID: 'session-123',
-              messageID: 'msg-1',
-              type: 'text',
-              text: 'Ignored',
+              id: "part-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "text",
+              text: "Ignored",
               ignored: true,
             } as TextPart,
           },
@@ -272,21 +280,21 @@ describe('convert-from-opencode-events', () => {
         expect(parts).toHaveLength(0);
       });
 
-      it('should calculate delta from full text when delta not provided', () => {
+      it("should calculate delta from full text when delta not provided", () => {
         const state = createStreamState();
         state.textStarted = true;
-        state.textPartId = 'part-1';
-        state.lastTextContent = 'Hello';
+        state.textPartId = "part-1";
+        state.lastTextContent = "Hello";
 
         const event: EventMessagePartUpdated = {
-          type: 'message.part.updated',
+          type: "message.part.updated",
           properties: {
             part: {
-              id: 'part-1',
-              sessionID: 'session-123',
-              messageID: 'msg-1',
-              type: 'text',
-              text: 'Hello World',
+              id: "part-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "text",
+              text: "Hello World",
             } as TextPart,
           },
         };
@@ -294,51 +302,59 @@ describe('convert-from-opencode-events', () => {
         const parts = convertEventToStreamParts(event, state);
 
         expect(parts).toHaveLength(1);
-        expect(parts[0]).toEqual({ type: 'text-delta', id: 'part-1', delta: ' World' });
+        expect(parts[0]).toEqual({
+          type: "text-delta",
+          id: "part-1",
+          delta: " World",
+        });
       });
     });
 
-    describe('reasoning parts', () => {
-      it('should emit reasoning-start and reasoning-delta', () => {
+    describe("reasoning parts", () => {
+      it("should emit reasoning-start and reasoning-delta", () => {
         const state = createStreamState();
         const event: EventMessagePartUpdated = {
-          type: 'message.part.updated',
+          type: "message.part.updated",
           properties: {
             part: {
-              id: 'part-1',
-              sessionID: 'session-123',
-              messageID: 'msg-1',
-              type: 'reasoning',
-              text: 'Thinking...',
+              id: "part-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "reasoning",
+              text: "Thinking...",
             } as ReasoningPart,
-            delta: 'Thinking...',
+            delta: "Thinking...",
           },
         };
 
         const parts = convertEventToStreamParts(event, state);
 
         expect(parts).toHaveLength(2);
-        expect(parts[0]).toEqual({ type: 'reasoning-start', id: 'part-1' });
-        expect(parts[1]).toEqual({ type: 'reasoning-delta', id: 'part-1', delta: 'Thinking...' });
+        expect(parts[0]).toEqual({ type: "reasoning-start", id: "part-1" });
+        expect(parts[1]).toEqual({
+          type: "reasoning-delta",
+          id: "part-1",
+          delta: "Thinking...",
+        });
       });
     });
 
-    describe('tool parts', () => {
-      it('should emit tool-input-start for pending tool', () => {
+    describe("tool parts", () => {
+      it("should emit tool-input-start for pending tool", () => {
         const state = createStreamState();
         const event: EventMessagePartUpdated = {
-          type: 'message.part.updated',
+          type: "message.part.updated",
           properties: {
             part: {
-              id: 'part-1',
-              sessionID: 'session-123',
-              messageID: 'msg-1',
-              type: 'tool',
-              callID: 'call-1',
-              tool: 'Bash',
+              id: "part-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "tool",
+              callID: "call-1",
+              tool: "Bash",
               state: {
-                status: 'pending',
-                input: { command: 'ls' },
+                status: "pending",
+                input: { command: "ls" },
                 raw: '{"command":"ls"}',
               },
             } as ToolPart,
@@ -349,30 +365,30 @@ describe('convert-from-opencode-events', () => {
 
         expect(parts).toHaveLength(1);
         expect(parts[0]).toMatchObject({
-          type: 'tool-input-start',
-          id: 'call-1',
-          toolName: 'Bash',
+          type: "tool-input-start",
+          id: "call-1",
+          toolName: "Bash",
           providerExecuted: true,
         });
       });
 
-      it('should emit tool-call and tool-result for completed tool', () => {
+      it("should emit tool-call and tool-result for completed tool", () => {
         const state = createStreamState();
         const event: EventMessagePartUpdated = {
-          type: 'message.part.updated',
+          type: "message.part.updated",
           properties: {
             part: {
-              id: 'part-1',
-              sessionID: 'session-123',
-              messageID: 'msg-1',
-              type: 'tool',
-              callID: 'call-1',
-              tool: 'Bash',
+              id: "part-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "tool",
+              callID: "call-1",
+              tool: "Bash",
               state: {
-                status: 'completed',
-                input: { command: 'ls' },
-                output: 'file1.txt\nfile2.txt',
-                title: 'List files',
+                status: "completed",
+                input: { command: "ls" },
+                output: "file1.txt\nfile2.txt",
+                title: "List files",
                 time: { start: 1000, end: 2000 },
               },
             } as ToolPart,
@@ -382,45 +398,45 @@ describe('convert-from-opencode-events', () => {
         const parts = convertEventToStreamParts(event, state);
 
         // Should emit: tool-input-start, tool-input-end, tool-call, tool-result
-        expect(parts.some((p) => p.type === 'tool-input-start')).toBe(true);
-        expect(parts.some((p) => p.type === 'tool-input-end')).toBe(true);
-        expect(parts.some((p) => p.type === 'tool-call')).toBe(true);
-        expect(parts.some((p) => p.type === 'tool-result')).toBe(true);
+        expect(parts.some((p) => p.type === "tool-input-start")).toBe(true);
+        expect(parts.some((p) => p.type === "tool-input-end")).toBe(true);
+        expect(parts.some((p) => p.type === "tool-call")).toBe(true);
+        expect(parts.some((p) => p.type === "tool-result")).toBe(true);
 
-        const toolCall = parts.find((p) => p.type === 'tool-call');
+        const toolCall = parts.find((p) => p.type === "tool-call");
         expect(toolCall).toMatchObject({
-          toolCallId: 'call-1',
-          toolName: 'Bash',
+          toolCallId: "call-1",
+          toolName: "Bash",
           providerExecuted: true,
         });
 
-        const toolResult = parts.find((p) => p.type === 'tool-result');
+        const toolResult = parts.find((p) => p.type === "tool-result");
         expect(toolResult).toMatchObject({
-          toolCallId: 'call-1',
-          toolName: 'Bash',
-          result: 'file1.txt\nfile2.txt',
+          toolCallId: "call-1",
+          toolName: "Bash",
+          result: "file1.txt\nfile2.txt",
           isError: false,
         });
       });
 
-      it('should emit error result for failed tool', () => {
+      it("should emit error result for failed tool", () => {
         const state = createStreamState();
         const logger: Logger = { warn: vi.fn(), error: vi.fn() };
 
         const event: EventMessagePartUpdated = {
-          type: 'message.part.updated',
+          type: "message.part.updated",
           properties: {
             part: {
-              id: 'part-1',
-              sessionID: 'session-123',
-              messageID: 'msg-1',
-              type: 'tool',
-              callID: 'call-1',
-              tool: 'Bash',
+              id: "part-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "tool",
+              callID: "call-1",
+              tool: "Bash",
               state: {
-                status: 'error',
-                input: { command: 'invalid' },
-                error: 'Command not found',
+                status: "error",
+                input: { command: "invalid" },
+                error: "Command not found",
                 time: { start: 1000, end: 2000 },
               },
             } as ToolPart,
@@ -429,33 +445,33 @@ describe('convert-from-opencode-events', () => {
 
         const parts = convertEventToStreamParts(event, state, logger);
 
-        const toolResult = parts.find((p) => p.type === 'tool-result');
+        const toolResult = parts.find((p) => p.type === "tool-result");
         expect(toolResult).toMatchObject({
-          result: 'Command not found',
+          result: "Command not found",
           isError: true,
         });
 
         expect(logger.warn).toHaveBeenCalled();
       });
 
-      it('should not duplicate emissions for same tool', () => {
+      it("should not duplicate emissions for same tool", () => {
         const state = createStreamState();
 
         // First event - pending
         const event1: EventMessagePartUpdated = {
-          type: 'message.part.updated',
+          type: "message.part.updated",
           properties: {
             part: {
-              id: 'part-1',
-              sessionID: 'session-123',
-              messageID: 'msg-1',
-              type: 'tool',
-              callID: 'call-1',
-              tool: 'Bash',
+              id: "part-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "tool",
+              callID: "call-1",
+              tool: "Bash",
               state: {
-                status: 'pending',
-                input: { command: 'ls' },
-                raw: '{}',
+                status: "pending",
+                input: { command: "ls" },
+                raw: "{}",
               },
             } as ToolPart,
           },
@@ -465,20 +481,20 @@ describe('convert-from-opencode-events', () => {
 
         // Second event - completed
         const event2: EventMessagePartUpdated = {
-          type: 'message.part.updated',
+          type: "message.part.updated",
           properties: {
             part: {
-              id: 'part-1',
-              sessionID: 'session-123',
-              messageID: 'msg-1',
-              type: 'tool',
-              callID: 'call-1',
-              tool: 'Bash',
+              id: "part-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "tool",
+              callID: "call-1",
+              tool: "Bash",
               state: {
-                status: 'completed',
-                input: { command: 'ls' },
-                output: 'result',
-                title: 'List',
+                status: "completed",
+                input: { command: "ls" },
+                output: "result",
+                title: "List",
                 time: { start: 1000, end: 2000 },
               },
             } as ToolPart,
@@ -488,22 +504,24 @@ describe('convert-from-opencode-events', () => {
         const parts2 = convertEventToStreamParts(event2, state);
 
         // Should not emit tool-input-start again
-        expect(parts2.filter((p) => p.type === 'tool-input-start')).toHaveLength(0);
+        expect(
+          parts2.filter((p) => p.type === "tool-input-start"),
+        ).toHaveLength(0);
       });
     });
 
-    describe('step-finish parts', () => {
-      it('should accumulate usage from step-finish', () => {
+    describe("step-finish parts", () => {
+      it("should accumulate usage from step-finish", () => {
         const state = createStreamState();
         const event: EventMessagePartUpdated = {
-          type: 'message.part.updated',
+          type: "message.part.updated",
           properties: {
             part: {
-              id: 'part-1',
-              sessionID: 'session-123',
-              messageID: 'msg-1',
-              type: 'step-finish',
-              reason: 'end_turn',
+              id: "part-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "step-finish",
+              reason: "end_turn",
               cost: 0.01,
               tokens: {
                 input: 100,
@@ -527,18 +545,18 @@ describe('convert-from-opencode-events', () => {
         });
       });
 
-      it('should accumulate multiple step-finish parts', () => {
+      it("should accumulate multiple step-finish parts", () => {
         const state = createStreamState();
 
         const event1: EventMessagePartUpdated = {
-          type: 'message.part.updated',
+          type: "message.part.updated",
           properties: {
             part: {
-              id: 'part-1',
-              sessionID: 'session-123',
-              messageID: 'msg-1',
-              type: 'step-finish',
-              reason: 'tool_use',
+              id: "part-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "step-finish",
+              reason: "tool_use",
               cost: 0.01,
               tokens: {
                 input: 100,
@@ -551,14 +569,14 @@ describe('convert-from-opencode-events', () => {
         };
 
         const event2: EventMessagePartUpdated = {
-          type: 'message.part.updated',
+          type: "message.part.updated",
           properties: {
             part: {
-              id: 'part-2',
-              sessionID: 'session-123',
-              messageID: 'msg-1',
-              type: 'step-finish',
-              reason: 'end_turn',
+              id: "part-2",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "step-finish",
+              reason: "end_turn",
               cost: 0.02,
               tokens: {
                 input: 200,
@@ -584,16 +602,16 @@ describe('convert-from-opencode-events', () => {
       });
     });
 
-    describe('unknown events', () => {
-      it('should return empty array for message.updated', () => {
+    describe("unknown events", () => {
+      it("should return empty array for message.updated", () => {
         const state = createStreamState();
         const event = {
-          type: 'message.updated',
+          type: "message.updated",
           properties: {
             info: {
-              id: 'msg-1',
-              sessionID: 'session-123',
-              role: 'assistant',
+              id: "msg-1",
+              sessionID: "session-123",
+              role: "assistant",
             },
           },
         };
@@ -603,7 +621,7 @@ describe('convert-from-opencode-events', () => {
         expect(parts).toHaveLength(0);
       });
 
-      it('should log unknown event types when debug enabled', () => {
+      it("should log unknown event types when debug enabled", () => {
         const state = createStreamState();
         const logger: Logger = {
           warn: vi.fn(),
@@ -612,39 +630,49 @@ describe('convert-from-opencode-events', () => {
         };
 
         const event = {
-          type: 'custom.event',
+          type: "custom.event",
           properties: {},
         };
 
         convertEventToStreamParts(event as any, state, logger);
 
-        expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining('custom.event'));
+        expect(logger.debug).toHaveBeenCalledWith(
+          expect.stringContaining("custom.event"),
+        );
       });
     });
   });
 
-  describe('createFinishParts', () => {
-    it('should close text if open', () => {
+  describe("createFinishParts", () => {
+    it("should close text if open", () => {
       const state = createStreamState();
       state.textStarted = true;
-      state.textPartId = 'text-1';
+      state.textPartId = "text-1";
 
-      const parts = createFinishParts(state, 'stop', 'session-123');
+      const parts = createFinishParts(
+        state,
+        { unified: "stop", raw: undefined },
+        "session-123",
+      );
 
-      expect(parts.some((p) => p.type === 'text-end')).toBe(true);
+      expect(parts.some((p) => p.type === "text-end")).toBe(true);
     });
 
-    it('should close reasoning if open', () => {
+    it("should close reasoning if open", () => {
       const state = createStreamState();
       state.reasoningStarted = true;
-      state.reasoningPartId = 'reason-1';
+      state.reasoningPartId = "reason-1";
 
-      const parts = createFinishParts(state, 'stop', 'session-123');
+      const parts = createFinishParts(
+        state,
+        { unified: "stop", raw: undefined },
+        "session-123",
+      );
 
-      expect(parts.some((p) => p.type === 'reasoning-end')).toBe(true);
+      expect(parts.some((p) => p.type === "reasoning-end")).toBe(true);
     });
 
-    it('should emit finish with usage and metadata', () => {
+    it("should emit finish with usage and metadata", () => {
       const state = createStreamState();
       state.usage = {
         inputTokens: 100,
@@ -655,126 +683,145 @@ describe('convert-from-opencode-events', () => {
         totalCost: 0.01,
       };
 
-      const parts = createFinishParts(state, 'stop', 'session-123');
+      const parts = createFinishParts(
+        state,
+        { unified: "stop", raw: undefined },
+        "session-123",
+      );
 
-      const finishPart = parts.find((p) => p.type === 'finish');
+      const finishPart = parts.find((p) => p.type === "finish");
       expect(finishPart).toMatchObject({
-        type: 'finish',
-        finishReason: 'stop',
+        type: "finish",
+        finishReason: { unified: "stop", raw: undefined },
         usage: {
-          inputTokens: 100,
-          outputTokens: 50,
-          totalTokens: 150,
-          reasoningTokens: 25,
-          cachedInputTokens: 10,
+          inputTokens: {
+            total: 115,
+            noCache: 100,
+            cacheRead: 10,
+            cacheWrite: 5,
+          },
+          outputTokens: {
+            total: 50,
+            reasoning: 25,
+          },
         },
         providerMetadata: {
           opencode: {
-            sessionId: 'session-123',
+            sessionId: "session-123",
             cost: 0.01,
           },
         },
       });
     });
 
-    it('should handle zero usage values', () => {
+    it("should handle zero usage values", () => {
       const state = createStreamState();
 
-      const parts = createFinishParts(state, 'stop', 'session-123');
+      const parts = createFinishParts(
+        state,
+        { unified: "stop", raw: undefined },
+        "session-123",
+      );
 
-      const finishPart = parts.find((p) => p.type === 'finish');
+      const finishPart = parts.find((p) => p.type === "finish");
       expect(finishPart).toMatchObject({
-        type: 'finish',
+        type: "finish",
         usage: {
-          inputTokens: undefined,
-          outputTokens: undefined,
-          totalTokens: undefined,
+          inputTokens: {
+            total: 0,
+            noCache: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+          },
+          outputTokens: {
+            total: 0,
+          },
         },
       });
     });
   });
 
-  describe('createStreamStartPart', () => {
-    it('should create stream-start with empty warnings', () => {
+  describe("createStreamStartPart", () => {
+    it("should create stream-start with empty warnings", () => {
       const part = createStreamStartPart([]);
 
       expect(part).toEqual({
-        type: 'stream-start',
+        type: "stream-start",
         warnings: [],
       });
     });
 
-    it('should convert warnings to CallWarning format', () => {
+    it("should convert warnings to CallWarning format", () => {
       const part = createStreamStartPart([
-        'Temperature not supported',
-        'TopP not supported',
+        "Temperature not supported",
+        "TopP not supported",
       ]);
 
       expect(part).toEqual({
-        type: 'stream-start',
+        type: "stream-start",
         warnings: [
-          { type: 'other', message: 'Temperature not supported' },
-          { type: 'other', message: 'TopP not supported' },
+          { type: "other", message: "Temperature not supported" },
+          { type: "other", message: "TopP not supported" },
         ],
       });
     });
   });
 
-  describe('message role tracking', () => {
-    it('should track message roles from message.updated events', () => {
+  describe("message role tracking", () => {
+    it("should track message roles from message.updated events", () => {
       const state = createStreamState();
       const event = {
-        type: 'message.updated',
+        type: "message.updated",
         properties: {
           info: {
-            id: 'msg-1',
-            sessionID: 'session-123',
-            role: 'assistant',
+            id: "msg-1",
+            sessionID: "session-123",
+            role: "assistant",
           },
         },
       };
 
       convertEventToStreamParts(event as any, state);
 
-      expect(state.messageRoles.get('msg-1')).toBe('assistant');
+      expect(state.messageRoles.get("msg-1")).toBe("assistant");
     });
 
-    it('should track user message roles', () => {
+    it("should track user message roles", () => {
       const state = createStreamState();
       const event = {
-        type: 'message.updated',
+        type: "message.updated",
         properties: {
           info: {
-            id: 'msg-user-1',
-            sessionID: 'session-123',
-            role: 'user',
+            id: "msg-user-1",
+            sessionID: "session-123",
+            role: "user",
           },
         },
       };
 
       convertEventToStreamParts(event as any, state);
 
-      expect(state.messageRoles.get('msg-user-1')).toBe('user');
+      expect(state.messageRoles.get("msg-user-1")).toBe("user");
     });
   });
 
-  describe('user message filtering', () => {
-    it('should filter out parts from user messages', () => {
+  describe("user message filtering", () => {
+    it("should filter out parts from user messages", () => {
       const state = createStreamState();
       // First, register the user message
-      state.messageRoles.set('user-msg-1', 'user');
+      state.messageRoles.set("user-msg-1", "user");
 
       const event: EventMessagePartUpdated = {
-        type: 'message.part.updated',
+        type: "message.part.updated",
         properties: {
           part: {
-            id: 'part-1',
-            sessionID: 'session-123',
-            messageID: 'user-msg-1', // User message ID
-            type: 'text',
-            text: 'User prompt that should be filtered',
+            id: "part-1",
+            sessionID: "session-123",
+            messageID: "user-msg-1", // User message ID
+            type: "text",
+            text: "User prompt that should be filtered",
           } as TextPart,
-          delta: 'User prompt that should be filtered',
+          delta: "User prompt that should be filtered",
         },
       };
 
@@ -784,22 +831,22 @@ describe('convert-from-opencode-events', () => {
       expect(parts).toHaveLength(0);
     });
 
-    it('should process parts from assistant messages', () => {
+    it("should process parts from assistant messages", () => {
       const state = createStreamState();
       // Register an assistant message
-      state.messageRoles.set('assistant-msg-1', 'assistant');
+      state.messageRoles.set("assistant-msg-1", "assistant");
 
       const event: EventMessagePartUpdated = {
-        type: 'message.part.updated',
+        type: "message.part.updated",
         properties: {
           part: {
-            id: 'part-1',
-            sessionID: 'session-123',
-            messageID: 'assistant-msg-1', // Assistant message ID
-            type: 'text',
-            text: 'Assistant response',
+            id: "part-1",
+            sessionID: "session-123",
+            messageID: "assistant-msg-1", // Assistant message ID
+            type: "text",
+            text: "Assistant response",
           } as TextPart,
-          delta: 'Assistant response',
+          delta: "Assistant response",
         },
       };
 
@@ -807,25 +854,29 @@ describe('convert-from-opencode-events', () => {
 
       // Should process assistant messages
       expect(parts).toHaveLength(2);
-      expect(parts[0]).toEqual({ type: 'text-start', id: 'part-1' });
-      expect(parts[1]).toEqual({ type: 'text-delta', id: 'part-1', delta: 'Assistant response' });
+      expect(parts[0]).toEqual({ type: "text-start", id: "part-1" });
+      expect(parts[1]).toEqual({
+        type: "text-delta",
+        id: "part-1",
+        delta: "Assistant response",
+      });
     });
 
-    it('should process parts from unknown messages (role not yet tracked)', () => {
+    it("should process parts from unknown messages (role not yet tracked)", () => {
       const state = createStreamState();
       // No message role registered yet
 
       const event: EventMessagePartUpdated = {
-        type: 'message.part.updated',
+        type: "message.part.updated",
         properties: {
           part: {
-            id: 'part-1',
-            sessionID: 'session-123',
-            messageID: 'unknown-msg-1', // Role not tracked
-            type: 'text',
-            text: 'Unknown message',
+            id: "part-1",
+            sessionID: "session-123",
+            messageID: "unknown-msg-1", // Role not tracked
+            type: "text",
+            text: "Unknown message",
           } as TextPart,
-          delta: 'Unknown message',
+          delta: "Unknown message",
         },
       };
 
@@ -836,14 +887,14 @@ describe('convert-from-opencode-events', () => {
     });
   });
 
-  describe('session.diff event', () => {
-    it('should return empty array for session.diff events', () => {
+  describe("session.diff event", () => {
+    it("should return empty array for session.diff events", () => {
       const state = createStreamState();
       const event = {
-        type: 'session.diff',
+        type: "session.diff",
         properties: {
-          sessionID: 'session-123',
-          diff: [{ path: 'file.ts', additions: 10, deletions: 5 }],
+          sessionID: "session-123",
+          diff: [{ path: "file.ts", additions: 10, deletions: 5 }],
         },
       };
 
@@ -852,7 +903,7 @@ describe('convert-from-opencode-events', () => {
       expect(parts).toHaveLength(0);
     });
 
-    it('should not log session.diff as unknown event type', () => {
+    it("should not log session.diff as unknown event type", () => {
       const state = createStreamState();
       const logger: Logger = {
         warn: vi.fn(),
@@ -861,9 +912,9 @@ describe('convert-from-opencode-events', () => {
       };
 
       const event = {
-        type: 'session.diff',
+        type: "session.diff",
         properties: {
-          sessionID: 'session-123',
+          sessionID: "session-123",
           diff: [],
         },
       };
@@ -874,18 +925,18 @@ describe('convert-from-opencode-events', () => {
     });
   });
 
-  describe('step-start parts', () => {
-    it('should return empty array for step-start parts', () => {
+  describe("step-start parts", () => {
+    it("should return empty array for step-start parts", () => {
       const state = createStreamState();
       const event: EventMessagePartUpdated = {
-        type: 'message.part.updated',
+        type: "message.part.updated",
         properties: {
           part: {
-            id: 'part-1',
-            sessionID: 'session-123',
-            messageID: 'msg-1',
-            type: 'step-start',
-            snapshot: 'some-snapshot-id',
+            id: "part-1",
+            sessionID: "session-123",
+            messageID: "msg-1",
+            type: "step-start",
+            snapshot: "some-snapshot-id",
           } as any,
         },
       };
@@ -895,7 +946,7 @@ describe('convert-from-opencode-events', () => {
       expect(parts).toHaveLength(0);
     });
 
-    it('should not log step-start as unknown part type', () => {
+    it("should not log step-start as unknown part type", () => {
       const state = createStreamState();
       const logger: Logger = {
         warn: vi.fn(),
@@ -904,13 +955,13 @@ describe('convert-from-opencode-events', () => {
       };
 
       const event: EventMessagePartUpdated = {
-        type: 'message.part.updated',
+        type: "message.part.updated",
         properties: {
           part: {
-            id: 'part-1',
-            sessionID: 'session-123',
-            messageID: 'msg-1',
-            type: 'step-start',
+            id: "part-1",
+            sessionID: "session-123",
+            messageID: "msg-1",
+            type: "step-start",
           } as any,
         },
       };

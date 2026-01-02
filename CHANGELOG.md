@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-01-01
+
+### Changed
+
+- **AI SDK v6 migration** - Updated to Language Model Specification V3 (LanguageModelV3 / ProviderV3).
+- **Usage/finish metadata** - Nested V3 usage shape and unified finish reasons with raw provider values.
+- **Streaming updates** - V3 stream parts and warnings with SharedV3Warning format.
+- **Dependencies** - Bumped `@ai-sdk/provider` to v3, `@ai-sdk/provider-utils` to v4, and `ai` to v6.
+
 ## [0.0.2] - 2025-12-10
 
 ### Changed

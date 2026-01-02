@@ -1,4 +1,4 @@
-import type { Logger } from './types.js';
+import type { Logger } from "./types.js";
 
 /**
  * Default console-based logger.
@@ -29,7 +29,10 @@ export const silentLogger: Logger = {
  * @param logger - Logger instance, false to disable, or undefined for default
  * @param verbose - Enable verbose/debug logging
  */
-export function getLogger(logger: Logger | false | undefined, verbose?: boolean): Logger {
+export function getLogger(
+  logger: Logger | false | undefined,
+  verbose?: boolean,
+): Logger {
   if (logger === false) {
     return silentLogger;
   }
@@ -60,7 +63,10 @@ export function getLogger(logger: Logger | false | undefined, verbose?: boolean)
 /**
  * Create a verbose logger that prefixes all messages with a context.
  */
-export function createContextLogger(baseLogger: Logger, context: string): Logger {
+export function createContextLogger(
+  baseLogger: Logger,
+  context: string,
+): Logger {
   return {
     warn: (message: string) => baseLogger.warn(`[${context}] ${message}`),
     error: (message: string) => baseLogger.error(`[${context}] ${message}`),
@@ -76,7 +82,7 @@ export function createContextLogger(baseLogger: Logger, context: string): Logger
 export function logUnsupportedFeature(
   logger: Logger,
   feature: string,
-  details?: string
+  details?: string,
 ): void {
   const message = details
     ? `Unsupported feature: ${feature} - ${details}`
@@ -90,10 +96,12 @@ export function logUnsupportedFeature(
 export function logUnsupportedParameter(
   logger: Logger,
   parameter: string,
-  value?: unknown
+  value?: unknown,
 ): void {
   if (value !== undefined) {
-    logger.warn(`Parameter '${parameter}' is not supported by OpenCode (value: ${JSON.stringify(value)})`);
+    logger.warn(
+      `Parameter '${parameter}' is not supported by OpenCode (value: ${JSON.stringify(value)})`,
+    );
   } else {
     logger.warn(`Parameter '${parameter}' is not supported by OpenCode`);
   }
@@ -114,19 +122,19 @@ export function logUnsupportedCallOptions(
     stopSequences?: string[];
     seed?: number;
     maxTokens?: number;
-  }
+  },
 ): string[] {
   const warnings: string[] = [];
 
   const unsupportedParams = [
-    { name: 'temperature', value: options.temperature },
-    { name: 'topP', value: options.topP },
-    { name: 'topK', value: options.topK },
-    { name: 'frequencyPenalty', value: options.frequencyPenalty },
-    { name: 'presencePenalty', value: options.presencePenalty },
-    { name: 'stopSequences', value: options.stopSequences },
-    { name: 'seed', value: options.seed },
-    { name: 'maxTokens', value: options.maxTokens },
+    { name: "temperature", value: options.temperature },
+    { name: "topP", value: options.topP },
+    { name: "topK", value: options.topK },
+    { name: "frequencyPenalty", value: options.frequencyPenalty },
+    { name: "presencePenalty", value: options.presencePenalty },
+    { name: "stopSequences", value: options.stopSequences },
+    { name: "seed", value: options.seed },
+    { name: "maxTokens", value: options.maxTokens },
   ];
 
   for (const param of unsupportedParams) {

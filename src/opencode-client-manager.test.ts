@@ -1,8 +1,12 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { OpencodeClientManager, createClientManager, createClientManagerFromSettings } from './opencode-client-manager.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  OpencodeClientManager,
+  createClientManager,
+  createClientManagerFromSettings,
+} from "./opencode-client-manager.js";
 
 // Mock the @opencode-ai/sdk module
-vi.mock('@opencode-ai/sdk', () => ({
+vi.mock("@opencode-ai/sdk", () => ({
   createOpencodeClient: vi.fn().mockResolvedValue({
     session: {
       create: vi.fn(),
@@ -14,7 +18,7 @@ vi.mock('@opencode-ai/sdk', () => ({
     },
   }),
   createOpencodeServer: vi.fn().mockResolvedValue({
-    url: 'http://127.0.0.1:4096',
+    url: "http://127.0.0.1:4096",
     close: vi.fn(),
   }),
 }));
@@ -23,38 +27,38 @@ vi.mock('@opencode-ai/sdk', () => ({
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
-describe('opencode-client-manager', () => {
+describe("opencode-client-manager", () => {
   beforeEach(() => {
     // Reset singleton before each test
     OpencodeClientManager.resetInstance();
     vi.clearAllMocks();
 
     // Default: server not running (health check fails)
-    mockFetch.mockRejectedValue(new Error('Connection refused'));
+    mockFetch.mockRejectedValue(new Error("Connection refused"));
   });
 
   afterEach(() => {
     OpencodeClientManager.resetInstance();
   });
 
-  describe('getInstance', () => {
-    it('should return singleton instance', () => {
+  describe("getInstance", () => {
+    it("should return singleton instance", () => {
       const instance1 = OpencodeClientManager.getInstance();
       const instance2 = OpencodeClientManager.getInstance();
 
       expect(instance1).toBe(instance2);
     });
 
-    it('should accept options on first call', () => {
+    it("should accept options on first call", () => {
       const instance = OpencodeClientManager.getInstance({
-        hostname: 'localhost',
+        hostname: "localhost",
         port: 5000,
       });
 
       expect(instance).toBeDefined();
     });
 
-    it('should not update options after client initialized', async () => {
+    it("should not update options after client initialized", async () => {
       const instance = OpencodeClientManager.getInstance({ port: 4096 });
       await instance.getClient();
 
@@ -62,12 +66,12 @@ describe('opencode-client-manager', () => {
       OpencodeClientManager.getInstance({ port: 5000 });
 
       // Should still use original port
-      expect(instance.getServerUrl()).toContain('4096');
+      expect(instance.getServerUrl()).toContain("4096");
     });
   });
 
-  describe('resetInstance', () => {
-    it('should reset singleton instance', async () => {
+  describe("resetInstance", () => {
+    it("should reset singleton instance", async () => {
       const instance1 = OpencodeClientManager.getInstance();
       await instance1.getClient();
 
@@ -78,8 +82,8 @@ describe('opencode-client-manager', () => {
     });
   });
 
-  describe('getClient', () => {
-    it('should create client when server starts successfully', async () => {
+  describe("getClient", () => {
+    it("should create client when server starts successfully", async () => {
       const instance = OpencodeClientManager.getInstance({
         autoStartServer: true,
       });
@@ -90,7 +94,7 @@ describe('opencode-client-manager', () => {
       expect(client.session).toBeDefined();
     });
 
-    it('should return same client on subsequent calls', async () => {
+    it("should return same client on subsequent calls", async () => {
       const instance = OpencodeClientManager.getInstance();
 
       const client1 = await instance.getClient();
@@ -99,14 +103,14 @@ describe('opencode-client-manager', () => {
       expect(client1).toBe(client2);
     });
 
-    it('should throw when disposed', async () => {
+    it("should throw when disposed", async () => {
       const instance = OpencodeClientManager.getInstance();
       await instance.dispose();
 
-      await expect(instance.getClient()).rejects.toThrow('disposed');
+      await expect(instance.getClient()).rejects.toThrow("disposed");
     });
 
-    it('should connect to existing server if running', async () => {
+    it("should connect to existing server if running", async () => {
       // Simulate server running
       mockFetch.mockResolvedValueOnce({ ok: true });
 
@@ -118,10 +122,10 @@ describe('opencode-client-manager', () => {
       expect(client).toBeDefined();
     });
 
-    it('should try config endpoint if health fails', async () => {
+    it("should try config endpoint if health fails", async () => {
       // Health fails, config succeeds
       mockFetch
-        .mockRejectedValueOnce(new Error('Health failed'))
+        .mockRejectedValueOnce(new Error("Health failed"))
         .mockResolvedValueOnce({ ok: true });
 
       const instance = OpencodeClientManager.getInstance({
@@ -132,30 +136,32 @@ describe('opencode-client-manager', () => {
       expect(client).toBeDefined();
     });
 
-    it('should throw when server not running and autoStart disabled', async () => {
+    it("should throw when server not running and autoStart disabled", async () => {
       const instance = OpencodeClientManager.getInstance({
         autoStartServer: false,
       });
 
-      await expect(instance.getClient()).rejects.toThrow('No OpenCode server running');
+      await expect(instance.getClient()).rejects.toThrow(
+        "No OpenCode server running",
+      );
     });
 
-    it('should use baseUrl if provided', async () => {
+    it("should use baseUrl if provided", async () => {
       const instance = OpencodeClientManager.getInstance({
-        baseUrl: 'http://custom-server:8080',
+        baseUrl: "http://custom-server:8080",
       });
 
       await instance.getClient();
 
-      const { createOpencodeClient } = await import('@opencode-ai/sdk');
+      const { createOpencodeClient } = await import("@opencode-ai/sdk");
       expect(createOpencodeClient).toHaveBeenCalledWith(
         expect.objectContaining({
-          baseUrl: 'http://custom-server:8080',
-        })
+          baseUrl: "http://custom-server:8080",
+        }),
       );
     });
 
-    it('should handle concurrent getClient calls', async () => {
+    it("should handle concurrent getClient calls", async () => {
       const instance = OpencodeClientManager.getInstance();
 
       const [client1, client2] = await Promise.all([
@@ -167,39 +173,39 @@ describe('opencode-client-manager', () => {
     });
   });
 
-  describe('getServerUrl', () => {
-    it('should return URL from managed server', async () => {
+  describe("getServerUrl", () => {
+    it("should return URL from managed server", async () => {
       const instance = OpencodeClientManager.getInstance();
       await instance.getClient();
 
-      expect(instance.getServerUrl()).toBe('http://127.0.0.1:4096');
+      expect(instance.getServerUrl()).toBe("http://127.0.0.1:4096");
     });
 
-    it('should return baseUrl if provided', () => {
+    it("should return baseUrl if provided", () => {
       const instance = OpencodeClientManager.getInstance({
-        baseUrl: 'http://custom:8080',
+        baseUrl: "http://custom:8080",
       });
 
-      expect(instance.getServerUrl()).toBe('http://custom:8080');
+      expect(instance.getServerUrl()).toBe("http://custom:8080");
     });
 
-    it('should return constructed URL from hostname and port', () => {
+    it("should return constructed URL from hostname and port", () => {
       const instance = OpencodeClientManager.getInstance({
-        hostname: 'localhost',
+        hostname: "localhost",
         port: 5000,
       });
 
-      expect(instance.getServerUrl()).toBe('http://localhost:5000');
+      expect(instance.getServerUrl()).toBe("http://localhost:5000");
     });
   });
 
-  describe('isServerManaged', () => {
-    it('should return false before client created', () => {
+  describe("isServerManaged", () => {
+    it("should return false before client created", () => {
       const instance = OpencodeClientManager.getInstance();
       expect(instance.isServerManaged()).toBe(false);
     });
 
-    it('should return true when server is started by manager', async () => {
+    it("should return true when server is started by manager", async () => {
       const instance = OpencodeClientManager.getInstance({
         autoStartServer: true,
       });
@@ -209,7 +215,7 @@ describe('opencode-client-manager', () => {
       expect(instance.isServerManaged()).toBe(true);
     });
 
-    it('should return false when connecting to external server', async () => {
+    it("should return false when connecting to external server", async () => {
       // Server already running
       mockFetch.mockResolvedValueOnce({ ok: true });
 
@@ -223,19 +229,20 @@ describe('opencode-client-manager', () => {
     });
   });
 
-  describe('dispose', () => {
-    it('should close managed server', async () => {
+  describe("dispose", () => {
+    it("should close managed server", async () => {
       const instance = OpencodeClientManager.getInstance();
       await instance.getClient();
 
       await instance.dispose();
 
-      const { createOpencodeServer } = await import('@opencode-ai/sdk');
-      const server = await (createOpencodeServer as ReturnType<typeof vi.fn>).mock.results[0].value;
+      const { createOpencodeServer } = await import("@opencode-ai/sdk");
+      const server = await (createOpencodeServer as ReturnType<typeof vi.fn>)
+        .mock.results[0].value;
       expect(server.close).toHaveBeenCalled();
     });
 
-    it('should be idempotent', async () => {
+    it("should be idempotent", async () => {
       const instance = OpencodeClientManager.getInstance();
       await instance.getClient();
 
@@ -245,52 +252,52 @@ describe('opencode-client-manager', () => {
       // Should not throw
     });
 
-    it('should clear client reference', async () => {
+    it("should clear client reference", async () => {
       const instance = OpencodeClientManager.getInstance();
       await instance.getClient();
       await instance.dispose();
 
       // Attempting to get client should throw
-      await expect(instance.getClient()).rejects.toThrow('disposed');
+      await expect(instance.getClient()).rejects.toThrow("disposed");
     });
   });
 
-  describe('createClientManager', () => {
-    it('should return singleton instance', () => {
+  describe("createClientManager", () => {
+    it("should return singleton instance", () => {
       const manager1 = createClientManager();
       const manager2 = createClientManager();
 
       expect(manager1).toBe(manager2);
     });
 
-    it('should accept options', () => {
+    it("should accept options", () => {
       const manager = createClientManager({ port: 5000 });
       expect(manager).toBeDefined();
     });
   });
 
-  describe('createClientManagerFromSettings', () => {
-    it('should create manager from provider settings', () => {
+  describe("createClientManagerFromSettings", () => {
+    it("should create manager from provider settings", () => {
       const manager = createClientManagerFromSettings({
-        hostname: 'localhost',
+        hostname: "localhost",
         port: 5000,
         autoStartServer: false,
         serverTimeout: 15000,
         defaultSettings: {
-          cwd: '/home/user/project',
+          cwd: "/home/user/project",
         },
       });
 
       expect(manager).toBeDefined();
-      expect(manager.getServerUrl()).toBe('http://localhost:5000');
+      expect(manager.getServerUrl()).toBe("http://localhost:5000");
     });
 
-    it('should use baseUrl if provided', () => {
+    it("should use baseUrl if provided", () => {
       const manager = createClientManagerFromSettings({
-        baseUrl: 'http://custom:8080',
+        baseUrl: "http://custom:8080",
       });
 
-      expect(manager.getServerUrl()).toBe('http://custom:8080');
+      expect(manager.getServerUrl()).toBe("http://custom:8080");
     });
   });
 });
