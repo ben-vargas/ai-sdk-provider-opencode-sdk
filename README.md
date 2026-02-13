@@ -73,7 +73,7 @@ import { generateText } from "ai";
 import { opencode } from "ai-sdk-provider-opencode-sdk";
 
 const result = await generateText({
-  model: opencode("anthropic/claude-opus-4-5-20251101"),
+  model: opencode("openai/gpt-5.3-codex-spark"),
   prompt: "What is the capital of France?",
 });
 
@@ -113,11 +113,10 @@ opencode("anthropic/claude-sonnet-4-5-20250929");
 opencode("anthropic/claude-haiku-4-5-20251001");
 opencode("anthropic/claude-opus-4-5-20251101");
 
-// OpenAI models (GPT-5.1 series)
+// OpenAI models (GPT-5.3 / GPT-5.1 series)
+opencode("openai/gpt-5.3-codex-spark");
 opencode("openai/gpt-5.1");
 opencode("openai/gpt-5.1-codex");
-opencode("openai/gpt-5.1-codex-mini");
-opencode("openai/gpt-5.1-codex-max");
 
 // Google Gemini models
 opencode("google/gemini-3-pro-preview");
@@ -132,7 +131,7 @@ opencode("google/gemini-2.0-flash");
 import { streamText } from "ai";
 
 const result = streamText({
-  model: opencode("anthropic/claude-opus-4-5-20251101"),
+  model: opencode("openai/gpt-5.3-codex-spark"),
   prompt: "Write a haiku about coding.",
 });
 
@@ -153,7 +152,7 @@ const messages: ModelMessage[] = [
 ];
 
 const result = await generateText({
-  model: opencode("anthropic/claude-opus-4-5-20251101"),
+  model: opencode("openai/gpt-5.3-codex-spark"),
   messages,
 });
 ```
@@ -163,7 +162,7 @@ const result = await generateText({
 OpenCode supports different agents for different tasks:
 
 ```typescript
-const model = opencode("anthropic/claude-opus-4-5-20251101", {
+const model = opencode("openai/gpt-5.3-codex-spark", {
   agent: "build", // or 'plan', 'general', 'explore'
 });
 ```
@@ -173,7 +172,7 @@ const model = opencode("anthropic/claude-opus-4-5-20251101", {
 Sessions maintain conversation context:
 
 ```typescript
-const model = opencode("anthropic/claude-opus-4-5-20251101", {
+const model = opencode("openai/gpt-5.3-codex-spark", {
   sessionTitle: "Code Review Session",
 });
 
@@ -187,7 +186,7 @@ const result2 = await generateText({ model, prompt: "What did you find?" });
 const sessionId = result1.providerMetadata?.opencode?.sessionId;
 
 // Resume a specific session
-const resumeModel = opencode("anthropic/claude-opus-4-5-20251101", {
+const resumeModel = opencode("openai/gpt-5.3-codex-spark", {
   sessionId: sessionId,
 });
 ```
@@ -200,17 +199,36 @@ OpenCode executes tools server-side. You can observe tool execution but cannot p
 import { streamText } from "ai";
 
 const result = streamText({
-  model: opencode("anthropic/claude-opus-4-5-20251101"),
+  model: opencode("openai/gpt-5.3-codex-spark"),
   prompt: "List files in the current directory.",
 });
 
 for await (const part of result.fullStream) {
-  if (part.type === "tool-call") {
-    console.log(`Tool: ${part.toolName}`);
-    console.log(`Input: ${JSON.stringify(part.input, null, 2)}`);
-  }
-  if (part.type === "tool-result") {
-    console.log(`Result: ${part.result}`);
+  switch (part.type) {
+    case "tool-call":
+      console.log(`tool-call: ${part.toolName}`);
+      break;
+    case "tool-result":
+      console.log(`tool-result: ${part.toolName}`);
+      break;
+    case "tool-approval-request":
+      console.log(`approval-request: ${part.approvalId}`);
+      break;
+    case "file":
+      console.log(`file: ${part.file.mediaType}`);
+      break;
+    case "source":
+      console.log(`source: ${part.sourceType}`);
+      break;
+    case "text-delta":
+      process.stdout.write(part.text ?? "");
+      break;
+    case "finish":
+      console.log(`finish: ${part.finishReason}`);
+      break;
+    case "error":
+      console.error(part.error);
+      break;
   }
 }
 ```
@@ -235,6 +253,20 @@ for await (const part of result.fullStream) {
 | File/source streaming    | ✅ Full    | Emits `file` and `source` stream parts             |
 | temperature/topP/topK    | ❌ None    | Provider defaults                                  |
 | maxTokens                | ❌ None    | Agent config                                       |
+
+## Examples
+
+- `examples/basic-usage.ts` - Minimal text generation.
+- `examples/streaming.ts` - Streaming text chunks and final usage.
+- `examples/conversation-history.ts` - Multi-turn prompts with session continuity.
+- `examples/generate-object.ts` - Native object mode with robust JSON fallback.
+- `examples/stream-object.ts` - Streaming structured output with fallback parsing.
+- `examples/tool-observation.ts` - Observe tool calls, results, approvals, files, and sources.
+- `examples/abort-signal.ts` - Cancellation patterns for generate and stream calls.
+- `examples/image-input.ts` - File/image input using base64 or data URLs.
+- `examples/custom-config.ts` - Provider/model configuration and reliability controls.
+- `examples/limitations.ts` - Practical limitations and expected behaviors.
+- `examples/long-running-tasks.ts` - Patterns for longer tasks and retries.
 
 ## Provider Settings
 
@@ -272,6 +304,17 @@ interface OpencodeSettings {
   verbose?: boolean; // Debug logging
 }
 ```
+
+## Advanced Exports
+
+The package also exports lower-level APIs for advanced integrations:
+
+- Runtime classes: `OpencodeLanguageModel`, `OpencodeClientManager`
+- Validation/config helpers: `validateSettings`, `validateProviderSettings`, `validateModelId`, `mergeSettings`
+- Logging helpers: `getLogger`, `defaultLogger`, `silentLogger`, `createContextLogger`
+- Event/message utilities: `convertToOpencodeMessages`, `convertEventToStreamParts`, `createStreamState`, `createFinishParts`
+
+These are intended for power users and tooling integrations. Most applications should use `createOpencode()` / `opencode()` directly.
 
 ## Error Handling
 

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- No changes yet.
+
 ## [2.0.0] - 2026-02-13
 
 - **Breaking release** - OpenCode SDK v2 migration and AI SDK v6 hardening.
@@ -28,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Approval response handling** - Applied `tool-approval-response` prompt parts through OpenCode `permission.reply()` before sending prompts.
 - **New model settings** - Added `permission`, `variant`, `directory`, and `outputFormatRetryCount` settings.
 - **File/source streaming output** - Added conversion for OpenCode file parts and source metadata into AI SDK `file` / `source` stream/content parts.
+- **Provider lifecycle cleanup API** - Added provider `dispose()` method for managed server/client cleanup.
+- **Event typing exports** - Added `EventQuestionAsked` export for SDK v2 question events.
+- **Approval metadata** - Added `approvalRequestId` in provider metadata for approval request correlation.
 
 ### Fixed
 
