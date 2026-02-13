@@ -9,7 +9,7 @@ async function main() {
     },
   });
 
-  const model = opencode("anthropic/claude-opus-4-5-20251101");
+  const model = opencode("openai/gpt-5.3-codex-spark");
   const messages: ModelMessage[] = [];
   const userTurns = [
     "My name is Alice. Remember this.",

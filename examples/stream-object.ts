@@ -2,7 +2,7 @@ import { streamObject, streamText } from "ai";
 import { createOpencode } from "../dist/index.js";
 import { z } from "zod";
 
-const MODEL = "anthropic/claude-opus-4-5-20251101";
+const MODEL = "openai/gpt-5.3-codex-spark";
 
 const checklistSchema = z.object({
   topic: z.string(),

@@ -9,7 +9,7 @@ async function main() {
 
   try {
     const result = await generateText({
-      model: opencode("anthropic/claude-opus-4-5-20251101"),
+      model: opencode("openai/gpt-5.3-codex-spark"),
       prompt: "What is the capital of France? Answer in one sentence.",
     });
 

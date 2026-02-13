@@ -35,7 +35,7 @@ async function main() {
     const controller1 = createTimeoutController(45000, "Request timeout");
     try {
       const { text } = await generateText({
-        model: opencode("anthropic/claude-opus-4-5-20251101"),
+        model: opencode("openai/gpt-5.3-codex-spark"),
         prompt: "What is 2 + 2? Respond with only the number.",
         abortSignal: controller1.signal,
       });
@@ -57,7 +57,7 @@ async function main() {
 
     try {
       await generateText({
-        model: opencode("anthropic/claude-opus-4-5-20251101"),
+        model: opencode("openai/gpt-5.3-codex-spark"),
         prompt: "This request is pre-aborted.",
         abortSignal: controller2.signal,
       });
@@ -76,7 +76,7 @@ async function main() {
 
     try {
       const { textStream } = streamText({
-        model: opencode("anthropic/claude-opus-4-5-20251101"),
+        model: opencode("openai/gpt-5.3-codex-spark"),
         prompt: "Count from 1 to 20 and briefly explain each number.",
         abortSignal: controller3.signal,
       });

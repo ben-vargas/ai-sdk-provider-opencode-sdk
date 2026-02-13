@@ -50,7 +50,7 @@ async function main() {
     const mediaType = SUPPORTED_EXTENSIONS[ext]!;
 
     const result = streamText({
-      model: opencode("anthropic/claude-opus-4-5-20251101"),
+      model: opencode("openai/gpt-5.3-codex-spark"),
       messages: [
         {
           role: "user",

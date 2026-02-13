@@ -9,18 +9,30 @@
 
 # AI SDK Provider for OpenCode
 
-> **Latest Release**: Version 1.x supports AI SDK v6. For AI SDK v5 support, use the `ai-sdk-v5` tag (0.x.x).
+> **Latest Release**: Version 2.x supports AI SDK v6. For AI SDK v5 support, use the `ai-sdk-v5` tag (0.x.x).
 
 A community provider for the [Vercel AI SDK](https://sdk.vercel.ai/docs) that enables using AI models through [OpenCode](https://opencode.ai) and the `@opencode-ai/sdk/v2` APIs. OpenCode is a terminal-based AI coding assistant that supports multiple providers (Anthropic, OpenAI, Google, and more).
 
-This provider enables you to use OpenCode's AI capabilities through the familiar Vercel AI SDK interface, supporting `generateText()`, `streamText()`, `streamObject()`, native JSON-schema structured output, tool approval flows, and file/source streaming parts.
+This provider enables you to use OpenCode's AI capabilities through the familiar Vercel AI SDK interface, supporting `generateText()`, `streamText()`, `streamObject()`, native JSON-schema structured output with practical fallback patterns, tool approval flows, and file/source streaming parts.
 
 ## Version Compatibility
 
 | Provider Version | AI SDK Version | NPM Tag     | Status      | Branch                                                                                   |
 | ---------------- | -------------- | ----------- | ----------- | ---------------------------------------------------------------------------------------- |
-| 1.x.x            | v6             | `latest`    | Stable      | `main`                                                                                   |
+| 2.x.x            | v6             | `latest`    | Stable      | `main`                                                                                   |
+| 1.x.x            | v6             | N/A         | Legacy      | historical                                                                               |
 | 0.x.x            | v5             | `ai-sdk-v5` | Maintenance | [`ai-sdk-v5`](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/tree/ai-sdk-v5) |
+
+## Breaking Changes in 2.0.0
+
+This release upgrades the provider internals to OpenCode SDK v2 and includes behavior changes that can affect existing integrations:
+
+- OpenCode request/response routing now uses v2 parameter shapes (`sessionID`, top-level args).
+- New settings are available: `permission`, `variant`, `directory`, `outputFormatRetryCount`.
+- `cwd` and `tools` remain supported but are now legacy/deprecated pathways.
+- Structured output uses OpenCode native `json_schema` mode. Depending on model/backend route, strict object generation can still be inconsistent.
+
+For production object extraction, use a two-step pattern: try `Output.object(...)` first, then fallback to strict JSON prompting + parse/validate.
 
 ### Installing the Right Version
 
@@ -217,7 +229,7 @@ for await (const part of result.fullStream) {
 | Abort/cancellation       | ✅ Full    | AbortSignal support                                |
 | Image input (base64)     | ⚠️ Partial | Data URLs only                                     |
 | Image input (URL)        | ❌ None    | Not supported                                      |
-| Structured output (JSON) | ✅ Full    | OpenCode native `json_schema` output mode          |
+| Structured output (JSON) | ⚠️ Partial | Native `json_schema`; use prompt+validation fallback for strict reliability |
 | Custom tools             | ❌ None    | Server-side only                                   |
 | Tool approvals           | ✅ Full    | `tool-approval-request` / `tool-approval-response` |
 | File/source streaming    | ✅ Full    | Emits `file` and `source` stream parts             |
@@ -281,6 +293,16 @@ try {
   }
 }
 ```
+
+## Structured Output Reliability
+
+When using `Output.object(...)`, the provider sends OpenCode native `format: { type: "json_schema", schema }`. This is the preferred path and works in many cases.
+
+Some model/backend routes can still return output that does not parse into a strict object every time. The examples `examples/generate-object.ts` and `examples/stream-object.ts` intentionally demonstrate a robust fallback strategy:
+
+1. Try native structured output.
+2. Retry a small number of times.
+3. Fallback to strict JSON prompting and validate with Zod.
 
 ## Cleanup
 

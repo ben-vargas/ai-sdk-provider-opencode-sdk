@@ -3,7 +3,7 @@ import { createOpencode } from "../dist/index.js";
 import type { Logger } from "../dist/index.js";
 import { z } from "zod";
 
-const MODEL = "anthropic/claude-opus-4-5-20251101";
+const MODEL = "openai/gpt-5.3-codex-spark";
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

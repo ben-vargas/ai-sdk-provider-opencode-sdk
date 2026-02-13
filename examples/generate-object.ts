@@ -2,7 +2,7 @@ import { generateText, Output } from "ai";
 import { createOpencode } from "../dist/index.js";
 import { z } from "zod";
 
-const MODEL = "anthropic/claude-opus-4-5-20251101";
+const MODEL = "openai/gpt-5.3-codex-spark";
 
 const profileSchema = z.object({
   name: z.string(),
@@ -10,6 +10,11 @@ const profileSchema = z.object({
   yearsExperience: z.number(),
   skills: z.array(z.string()),
 });
+
+// Preferred flow:
+// 1) Try native structured output (Output.object -> provider json_schema format).
+// 2) If native mode is unreliable for the selected model/backend route, fallback
+//    to strict JSON prompting and local parse+Zod validation.
 
 function extractJsonObject(text: string): string | null {
   const trimmed = text.trim();
@@ -50,20 +55,37 @@ async function generateNativeObject(
 async function generateFallbackJson(
   opencode: ReturnType<typeof createOpencode>,
 ) {
-  const { text } = await generateText({
-    model: opencode(MODEL),
-    prompt: [
-      "Return only valid JSON (no prose, no markdown).",
-      'Use exactly: {"name":string,"role":string,"yearsExperience":number,"skills":string[]}.',
-      "Generate a realistic senior backend developer profile.",
-    ].join(" "),
-  });
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const { text } = await generateText({
+      model: opencode(MODEL),
+      prompt: [
+        "Return only valid JSON (no prose, no markdown).",
+        'Required shape example: {"name":"Jane Doe","role":"Staff Engineer","yearsExperience":12,"skills":["Go","PostgreSQL","Kubernetes"]}.',
+        "Generate a realistic senior backend developer profile.",
+      ].join(" "),
+    });
 
-  const json = extractJsonObject(text);
-  if (!json) {
-    throw new Error("Fallback response did not contain a JSON object.");
+    const json = extractJsonObject(text);
+    if (!json) {
+      if (attempt === 3) {
+        throw new Error("Fallback response did not contain a JSON object.");
+      }
+      continue;
+    }
+
+    try {
+      return profileSchema.parse(JSON.parse(json));
+    } catch (error) {
+      if (attempt === 3) {
+        throw error;
+      }
+      console.log(
+        `Fallback attempt ${attempt} failed: ${error instanceof Error ? error.message : String(error)}. Retrying...`,
+      );
+    }
   }
-  return profileSchema.parse(JSON.parse(json));
+
+  throw new Error("Unreachable");
 }
 
 async function main() {

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-02-13
+
+- **Breaking release** - OpenCode SDK v2 migration and AI SDK v6 hardening.
+
 ### Changed
 
 - **OpenCode SDK v2 cutover** - Migrated runtime client/server integration to `@opencode-ai/sdk/v2`.

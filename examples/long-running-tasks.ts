@@ -35,7 +35,7 @@ async function runWithTimeout(
   const controller = createTimeoutController(timeoutMs);
   try {
     const { text } = await generateText({
-      model: opencode("anthropic/claude-opus-4-5-20251101"),
+      model: opencode("openai/gpt-5.3-codex-spark"),
       prompt,
       abortSignal: controller.signal,
     });
@@ -74,7 +74,7 @@ async function withUserCancellation() {
 
   try {
     const { textStream } = streamText({
-      model: opencode("anthropic/claude-opus-4-5-20251101"),
+      model: opencode("openai/gpt-5.3-codex-spark"),
       prompt: "Write a comprehensive guide to machine learning.",
       abortSignal: controller.signal,
     });

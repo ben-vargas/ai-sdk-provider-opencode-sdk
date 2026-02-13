@@ -8,7 +8,7 @@ async function main() {
 
   try {
     const result = streamText({
-      model: opencode("anthropic/claude-opus-4-5-20251101"),
+      model: opencode("openai/gpt-5.3-codex-spark"),
       prompt: "Count from 1 to 5, explaining each number briefly.",
     });
 
