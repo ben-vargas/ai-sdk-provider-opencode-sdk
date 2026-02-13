@@ -9,6 +9,7 @@ export interface OpencodeErrorMetadata {
   statusCode?: number;
   isRetryable: boolean;
   errorType?: string;
+  timeoutMs?: number;
 }
 
 /**
@@ -62,7 +63,7 @@ export function isTimeoutError(error: unknown): boolean {
   // Check error name
   if (typeof err.name === "string") {
     const name = err.name.toLowerCase();
-    if (name.includes("timeout") || name === "aborterror") {
+    if (name.includes("timeout")) {
       return true;
     }
   }
@@ -70,11 +71,7 @@ export function isTimeoutError(error: unknown): boolean {
   // Check error code
   if (typeof err.code === "string") {
     const code = err.code.toUpperCase();
-    if (
-      code === "ETIMEDOUT" ||
-      code === "ESOCKETTIMEDOUT" ||
-      code === "ABORT_ERR"
-    ) {
+    if (code === "ETIMEDOUT" || code === "ESOCKETTIMEDOUT") {
       return true;
     }
   }
@@ -124,6 +121,10 @@ export function isOutputLengthError(error: unknown): boolean {
   const err = error as Record<string, unknown>;
 
   if (typeof err.name === "string" && err.name === "MessageOutputLengthError") {
+    return true;
+  }
+
+  if (typeof err.name === "string" && err.name === "ContextOverflowError") {
     return true;
   }
 
@@ -299,14 +300,14 @@ function extractProviderInfo(error: unknown): string | undefined {
  * Check if an error is retryable.
  */
 function isRetryableError(error: unknown): boolean {
-  // Timeout errors are retryable
-  if (isTimeoutError(error)) {
-    return true;
-  }
-
   // Abort errors are not retryable
   if (isAbortError(error)) {
     return false;
+  }
+
+  // Timeout errors are retryable
+  if (isTimeoutError(error)) {
+    return true;
   }
 
   // Auth errors are not retryable
@@ -349,8 +350,34 @@ export function wrapError(
   }
 
   if (isTimeoutError(error)) {
-    return createTimeoutError(5000, "request");
+    const timeoutMs =
+      metadata?.timeoutMs ??
+      extractTimeoutMs(error) ??
+      DEFAULT_REQUEST_TIMEOUT_MS;
+    return createTimeoutError(timeoutMs, "request");
   }
 
   return createAPICallError(error, metadata);
+}
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
+
+function extractTimeoutMs(error: unknown): number | undefined {
+  if (!error || typeof error !== "object") {
+    return undefined;
+  }
+
+  const err = error as Record<string, unknown>;
+  const maybeTimeout =
+    typeof err.timeoutMs === "number"
+      ? err.timeoutMs
+      : typeof err.timeout === "number"
+        ? err.timeout
+        : undefined;
+
+  if (maybeTimeout === undefined || !Number.isFinite(maybeTimeout)) {
+    return undefined;
+  }
+
+  return maybeTimeout > 0 ? maybeTimeout : undefined;
 }

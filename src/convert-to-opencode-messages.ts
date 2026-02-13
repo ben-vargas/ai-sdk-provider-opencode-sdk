@@ -48,6 +48,7 @@ export function convertToOpencodeMessages(
   options?: {
     logger?: Logger | false;
     mode?: { type: "regular" } | { type: "object-json"; schema?: unknown };
+    includeToolApprovalResponsesAsContext?: boolean;
   },
 ): ConversionResult {
   const parts: OpencodePartInput[] = [];
@@ -93,6 +94,7 @@ export function convertToOpencodeMessages(
           message.content,
           warnings,
           logger,
+          options?.includeToolApprovalResponsesAsContext ?? false,
         );
         parts.push(...toolResultParts);
         break;
@@ -306,6 +308,7 @@ function convertToolResults(
   >,
   warnings: string[],
   logger?: Logger | false,
+  includeToolApprovalResponsesAsContext = false,
 ): OpencodePartInput[] {
   const parts: OpencodePartInput[] = [];
 
@@ -315,7 +318,8 @@ function convertToolResults(
     "Tool results in prompts are included as context only. " +
     "OpenCode executes tools server-side and cannot use client-provided results.";
 
-  if (content.length > 0 && !warnings.includes(warning)) {
+  const hasToolResult = content.some((part) => part.type === "tool-result");
+  if (hasToolResult && !warnings.includes(warning)) {
     warnings.push(warning);
     if (logger) {
       logger.warn(warning);
@@ -333,7 +337,10 @@ function convertToolResults(
       continue;
     }
 
-    if (part.type === "tool-approval-response") {
+    if (
+      part.type === "tool-approval-response" &&
+      includeToolApprovalResponsesAsContext
+    ) {
       const reasonText = part.reason ? ` (${part.reason})` : "";
       parts.push({
         type: "text",
@@ -414,9 +421,8 @@ function createJsonModeInstruction(schema?: unknown): string {
 
   if (schema) {
     instruction +=
-      "\n\nThe JSON must conform to this schema:\n```json\n" +
-      JSON.stringify(schema, null, 2) +
-      "\n```";
+      "\n\nThe JSON must conform to this schema:\n" +
+      JSON.stringify(schema, null, 2);
   }
 
   return instruction;

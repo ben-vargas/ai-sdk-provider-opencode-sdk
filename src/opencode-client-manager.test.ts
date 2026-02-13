@@ -5,8 +5,8 @@ import {
   createClientManagerFromSettings,
 } from "./opencode-client-manager.js";
 
-// Mock the @opencode-ai/sdk module
-vi.mock("@opencode-ai/sdk", () => ({
+// Mock the @opencode-ai/sdk/v2 module
+vi.mock("@opencode-ai/sdk/v2", () => ({
   createOpencodeClient: vi.fn().mockResolvedValue({
     session: {
       create: vi.fn(),
@@ -153,7 +153,7 @@ describe("opencode-client-manager", () => {
 
       await instance.getClient();
 
-      const { createOpencodeClient } = await import("@opencode-ai/sdk");
+      const { createOpencodeClient } = await import("@opencode-ai/sdk/v2");
       expect(createOpencodeClient).toHaveBeenCalledWith(
         expect.objectContaining({
           baseUrl: "http://custom-server:8080",
@@ -236,7 +236,7 @@ describe("opencode-client-manager", () => {
 
       await instance.dispose();
 
-      const { createOpencodeServer } = await import("@opencode-ai/sdk");
+      const { createOpencodeServer } = await import("@opencode-ai/sdk/v2");
       const server = await (createOpencodeServer as ReturnType<typeof vi.fn>)
         .mock.results[0].value;
       expect(server.close).toHaveBeenCalled();
@@ -298,6 +298,16 @@ describe("opencode-client-manager", () => {
       });
 
       expect(manager.getServerUrl()).toBe("http://custom:8080");
+    });
+
+    it("should accept defaultSettings.directory", () => {
+      const manager = createClientManagerFromSettings({
+        defaultSettings: {
+          directory: "/tmp/project",
+        },
+      });
+
+      expect(manager).toBeDefined();
     });
   });
 });

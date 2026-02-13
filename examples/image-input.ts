@@ -1,15 +1,3 @@
-/**
- * Image Input example for the OpenCode AI SDK provider.
- *
- * This example demonstrates:
- * - Sending images to vision-capable models
- * - Converting local images to base64 data URLs
- * - Using the file part type in messages
- *
- * Note: Image input requires a vision-capable model (e.g., Claude, GPT-4o).
- * Only base64/data URL images are supported - remote URLs are not supported.
- */
-
 import { readFileSync } from "node:fs";
 import { extname, basename, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -44,7 +32,6 @@ async function main() {
   });
 
   try {
-    // Use bundled bull.webp as default if no path provided
     const __dirname = dirname(fileURLToPath(import.meta.url));
     const defaultImagePath = join(__dirname, "bull.webp");
 
@@ -52,7 +39,7 @@ async function main() {
     if (!process.argv[2]) {
       console.log(`Using default image: ${defaultImagePath}`);
       console.log(
-        "Tip: Pass a custom image path as argument: node image-input.ts /path/to/image.png\n",
+        "Tip: Pass a custom image path: npx tsx examples/image-input.ts /path/to/image.png\n",
       );
     }
 
@@ -63,7 +50,7 @@ async function main() {
     const mediaType = SUPPORTED_EXTENSIONS[ext]!;
 
     const result = streamText({
-      model: opencode("anthropic/claude-opus-4-5-20251101"),
+      model: opencode("openai/gpt-5.3-codex"),
       messages: [
         {
           role: "user",
@@ -84,7 +71,6 @@ async function main() {
     }
     process.stdout.write("\n");
 
-    // Get final usage
     const [usage, finishReason] = await Promise.all([
       result.usage,
       result.finishReason,

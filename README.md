@@ -9,18 +9,30 @@
 
 # AI SDK Provider for OpenCode
 
-> **Latest Release**: Version 1.x supports AI SDK v6. For AI SDK v5 support, use the `ai-sdk-v5` tag (0.x.x).
+> **Latest Release**: Version 2.x supports AI SDK v6. For AI SDK v5 support, use the `ai-sdk-v5` tag (0.x.x).
 
-A community provider for the [Vercel AI SDK](https://sdk.vercel.ai/docs) that enables using AI models through [OpenCode](https://opencode.ai) and the `@opencode-ai/sdk`. OpenCode is a terminal-based AI coding assistant that supports multiple providers (Anthropic, OpenAI, Google, and more).
+A community provider for the [Vercel AI SDK](https://sdk.vercel.ai/docs) that enables using AI models through [OpenCode](https://opencode.ai) and the `@opencode-ai/sdk/v2` APIs. OpenCode is a terminal-based AI coding assistant that supports multiple providers (Anthropic, OpenAI, Google, and more).
 
-This provider enables you to use OpenCode's AI capabilities through the familiar Vercel AI SDK interface, supporting `generateText()`, `streamText()`, `streamObject()`, and structured output via `generateText()` with `Output.object()`.
+This provider enables you to use OpenCode's AI capabilities through the familiar Vercel AI SDK interface, supporting `generateText()`, `streamText()`, `streamObject()`, native JSON-schema structured output with practical fallback patterns, tool approval flows, and file/source streaming parts.
 
 ## Version Compatibility
 
 | Provider Version | AI SDK Version | NPM Tag     | Status      | Branch                                                                                   |
 | ---------------- | -------------- | ----------- | ----------- | ---------------------------------------------------------------------------------------- |
-| 1.x.x            | v6             | `latest`    | Stable      | `main`                                                                                   |
+| 2.x.x            | v6             | `latest`    | Stable      | `main`                                                                                   |
+| 1.x.x            | v6             | N/A         | Legacy      | historical                                                                               |
 | 0.x.x            | v5             | `ai-sdk-v5` | Maintenance | [`ai-sdk-v5`](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/tree/ai-sdk-v5) |
+
+## Breaking Changes in 2.0.0
+
+This release upgrades the provider internals to OpenCode SDK v2 and includes behavior changes that can affect existing integrations:
+
+- OpenCode request/response routing now uses v2 parameter shapes (`sessionID`, top-level args).
+- New settings are available: `permission`, `variant`, `directory`, `outputFormatRetryCount`.
+- `cwd` and `tools` remain supported but are now legacy/deprecated pathways.
+- Structured output uses OpenCode native `json_schema` mode. Depending on model/backend route, strict object generation can still be inconsistent.
+
+For production object extraction, use a two-step pattern: try `Output.object(...)` first, then fallback to strict JSON prompting + parse/validate.
 
 ### Installing the Right Version
 
@@ -61,7 +73,7 @@ import { generateText } from "ai";
 import { opencode } from "ai-sdk-provider-opencode-sdk";
 
 const result = await generateText({
-  model: opencode("anthropic/claude-opus-4-5-20251101"),
+  model: opencode("openai/gpt-5.3-codex-spark"),
   prompt: "What is the capital of France?",
 });
 
@@ -101,11 +113,10 @@ opencode("anthropic/claude-sonnet-4-5-20250929");
 opencode("anthropic/claude-haiku-4-5-20251001");
 opencode("anthropic/claude-opus-4-5-20251101");
 
-// OpenAI models (GPT-5.1 series)
+// OpenAI models (GPT-5.3 / GPT-5.1 series)
+opencode("openai/gpt-5.3-codex-spark");
 opencode("openai/gpt-5.1");
 opencode("openai/gpt-5.1-codex");
-opencode("openai/gpt-5.1-codex-mini");
-opencode("openai/gpt-5.1-codex-max");
 
 // Google Gemini models
 opencode("google/gemini-3-pro-preview");
@@ -120,7 +131,7 @@ opencode("google/gemini-2.0-flash");
 import { streamText } from "ai";
 
 const result = streamText({
-  model: opencode("anthropic/claude-opus-4-5-20251101"),
+  model: opencode("openai/gpt-5.3-codex-spark"),
   prompt: "Write a haiku about coding.",
 });
 
@@ -141,7 +152,7 @@ const messages: ModelMessage[] = [
 ];
 
 const result = await generateText({
-  model: opencode("anthropic/claude-opus-4-5-20251101"),
+  model: opencode("openai/gpt-5.3-codex-spark"),
   messages,
 });
 ```
@@ -151,7 +162,7 @@ const result = await generateText({
 OpenCode supports different agents for different tasks:
 
 ```typescript
-const model = opencode("anthropic/claude-opus-4-5-20251101", {
+const model = opencode("openai/gpt-5.3-codex-spark", {
   agent: "build", // or 'plan', 'general', 'explore'
 });
 ```
@@ -161,7 +172,7 @@ const model = opencode("anthropic/claude-opus-4-5-20251101", {
 Sessions maintain conversation context:
 
 ```typescript
-const model = opencode("anthropic/claude-opus-4-5-20251101", {
+const model = opencode("openai/gpt-5.3-codex-spark", {
   sessionTitle: "Code Review Session",
 });
 
@@ -175,7 +186,7 @@ const result2 = await generateText({ model, prompt: "What did you find?" });
 const sessionId = result1.providerMetadata?.opencode?.sessionId;
 
 // Resume a specific session
-const resumeModel = opencode("anthropic/claude-opus-4-5-20251101", {
+const resumeModel = opencode("openai/gpt-5.3-codex-spark", {
   sessionId: sessionId,
 });
 ```
@@ -188,39 +199,74 @@ OpenCode executes tools server-side. You can observe tool execution but cannot p
 import { streamText } from "ai";
 
 const result = streamText({
-  model: opencode("anthropic/claude-opus-4-5-20251101"),
+  model: opencode("openai/gpt-5.3-codex-spark"),
   prompt: "List files in the current directory.",
 });
 
 for await (const part of result.fullStream) {
-  if (part.type === "tool-call") {
-    console.log(`Tool: ${part.toolName}`);
-    console.log(`Input: ${JSON.stringify(part.input, null, 2)}`);
-  }
-  if (part.type === "tool-result") {
-    console.log(`Result: ${part.result}`);
+  switch (part.type) {
+    case "tool-call":
+      console.log(`tool-call: ${part.toolName}`);
+      break;
+    case "tool-result":
+      console.log(`tool-result: ${part.toolName}`);
+      break;
+    case "tool-approval-request":
+      console.log(`approval-request: ${part.approvalId}`);
+      break;
+    case "file":
+      console.log(`file: ${part.file.mediaType}`);
+      break;
+    case "source":
+      console.log(`source: ${part.sourceType}`);
+      break;
+    case "text-delta":
+      process.stdout.write(part.text ?? "");
+      break;
+    case "finish":
+      console.log(`finish: ${part.finishReason}`);
+      break;
+    case "error":
+      console.error(part.error);
+      break;
   }
 }
 ```
 
 ## Feature Support
 
-| Feature                  | Support    | Notes                                               |
-| ------------------------ | ---------- | --------------------------------------------------- |
-| Text generation          | ✅ Full    | `generateText()`, `streamText()`                    |
-| Streaming                | ✅ Full    | Real-time SSE streaming                             |
-| Multi-turn conversations | ✅ Full    | Session-based context                               |
-| Tool observation         | ✅ Full    | See tool execution                                  |
-| Reasoning/thinking       | ✅ Full    | ReasoningPart support                               |
-| Model selection          | ✅ Full    | Per-request model                                   |
-| Agent selection          | ✅ Full    | build, plan, general, explore                       |
-| Abort/cancellation       | ✅ Full    | AbortSignal support                                 |
-| Image input (base64)     | ⚠️ Partial | Data URLs only                                      |
-| Image input (URL)        | ❌ None    | Not supported                                       |
-| Structured output (JSON) | ⚠️ Partial | `Output.object()` / `streamObject()` (prompt-based) |
-| Custom tools             | ❌ None    | Server-side only                                    |
-| temperature/topP/topK    | ❌ None    | Provider defaults                                   |
-| maxTokens                | ❌ None    | Agent config                                        |
+| Feature                  | Support    | Notes                                                                       |
+| ------------------------ | ---------- | --------------------------------------------------------------------------- |
+| Text generation          | ✅ Full    | `generateText()`, `streamText()`                                            |
+| Streaming                | ✅ Full    | Real-time SSE streaming                                                     |
+| Multi-turn conversations | ✅ Full    | Session-based context                                                       |
+| Tool observation         | ✅ Full    | See tool execution                                                          |
+| Reasoning/thinking       | ✅ Full    | ReasoningPart support                                                       |
+| Model selection          | ✅ Full    | Per-request model                                                           |
+| Agent selection          | ✅ Full    | build, plan, general, explore                                               |
+| Abort/cancellation       | ✅ Full    | AbortSignal support                                                         |
+| Image input (base64)     | ⚠️ Partial | Data URLs only                                                              |
+| Image input (URL)        | ❌ None    | Not supported                                                               |
+| Structured output (JSON) | ⚠️ Partial | Native `json_schema`; use prompt+validation fallback for strict reliability |
+| Custom tools             | ❌ None    | Server-side only                                                            |
+| Tool approvals           | ✅ Full    | `tool-approval-request` / `tool-approval-response`                          |
+| File/source streaming    | ✅ Full    | Emits `file` and `source` stream parts                                      |
+| temperature/topP/topK    | ❌ None    | Provider defaults                                                           |
+| maxTokens                | ❌ None    | Agent config                                                                |
+
+## Examples
+
+- `examples/basic-usage.ts` - Minimal text generation.
+- `examples/streaming.ts` - Streaming text chunks and final usage.
+- `examples/conversation-history.ts` - Multi-turn prompts with session continuity.
+- `examples/generate-object.ts` - Native object mode with robust JSON fallback.
+- `examples/stream-object.ts` - Streaming structured output with fallback parsing.
+- `examples/tool-observation.ts` - Observe tool calls, results, approvals, files, and sources.
+- `examples/abort-signal.ts` - Cancellation patterns for generate and stream calls.
+- `examples/image-input.ts` - File/image input using base64 or data URLs.
+- `examples/custom-config.ts` - Provider/model configuration and reliability controls.
+- `examples/limitations.ts` - Practical limitations and expected behaviors.
+- `examples/long-running-tasks.ts` - Patterns for longer tasks and retries.
 
 ## Provider Settings
 
@@ -244,12 +290,31 @@ interface OpencodeSettings {
   sessionTitle?: string; // Title for new sessions
   agent?: string; // Agent name
   systemPrompt?: string; // Override system prompt
-  tools?: Record<string, boolean>; // Enable/disable tools
-  cwd?: string; // Working directory
+  tools?: Record<string, boolean>; // Enable/disable tools (deprecated in favor of permissions)
+  permission?: Array<{
+    permission: string;
+    pattern: string;
+    action: "allow" | "deny" | "ask";
+  }>; // Session ruleset
+  variant?: string; // OpenCode variant
+  directory?: string; // Per-request directory
+  cwd?: string; // Legacy working directory alias
+  outputFormatRetryCount?: number; // JSON schema retry count
   logger?: Logger | false; // Logging
   verbose?: boolean; // Debug logging
 }
 ```
+
+## Advanced Exports
+
+The package also exports lower-level APIs for advanced integrations:
+
+- Runtime classes: `OpencodeLanguageModel`, `OpencodeClientManager`
+- Validation/config helpers: `validateSettings`, `validateProviderSettings`, `validateModelId`, `mergeSettings`
+- Logging helpers: `getLogger`, `defaultLogger`, `silentLogger`, `createContextLogger`
+- Event/message utilities: `convertToOpencodeMessages`, `convertEventToStreamParts`, `createStreamState`, `createFinishParts`
+
+These are intended for power users and tooling integrations. Most applications should use `createOpencode()` / `opencode()` directly.
 
 ## Error Handling
 
@@ -271,6 +336,16 @@ try {
   }
 }
 ```
+
+## Structured Output Reliability
+
+When using `Output.object(...)`, the provider sends OpenCode native `format: { type: "json_schema", schema }`. This is the preferred path and works in many cases.
+
+Some model/backend routes can still return output that does not parse into a strict object every time. The examples `examples/generate-object.ts` and `examples/stream-object.ts` intentionally demonstrate a robust fallback strategy:
+
+1. Try native structured output.
+2. Retry a small number of times.
+3. Fallback to strict JSON prompting and validate with Zod.
 
 ## Cleanup
 

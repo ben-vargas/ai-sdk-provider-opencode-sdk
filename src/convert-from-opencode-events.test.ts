@@ -9,8 +9,11 @@ import {
   type EventMessagePartUpdated,
   type EventSessionStatus,
   type EventSessionIdle,
+  type EventPermissionAsked,
+  type EventQuestionAsked,
   type TextPart,
   type ReasoningPart,
+  type FilePart,
   type ToolPart,
   type StepFinishPart,
 } from "./convert-from-opencode-events.js";
@@ -38,6 +41,8 @@ describe("convert-from-opencode-events", () => {
         lastTextContent: "",
         lastReasoningContent: "",
         messageRoles: expect.any(Map),
+        permissionRequests: expect.any(Set),
+        questionRequests: expect.any(Set),
       });
     });
   });
@@ -508,6 +513,149 @@ describe("convert-from-opencode-events", () => {
           parts2.filter((p) => p.type === "tool-input-start"),
         ).toHaveLength(0);
       });
+
+      it("should emit running input delta only when input changes", () => {
+        const state = createStreamState();
+
+        const runningEvent = (input: Record<string, unknown>) =>
+          ({
+            type: "message.part.updated",
+            properties: {
+              part: {
+                id: "part-1",
+                sessionID: "session-123",
+                messageID: "msg-1",
+                type: "tool",
+                callID: "call-1",
+                tool: "Bash",
+                state: {
+                  status: "running",
+                  input,
+                  time: { start: 1000 },
+                },
+              } as ToolPart,
+            },
+          }) satisfies EventMessagePartUpdated;
+
+        const parts1 = convertEventToStreamParts(
+          runningEvent({ command: "ls" }),
+          state,
+        );
+        const deltas1 = parts1.filter((p) => p.type === "tool-input-delta");
+        expect(deltas1).toHaveLength(1);
+        expect((deltas1[0] as any).delta).toBe(
+          JSON.stringify({ command: "ls" }),
+        );
+
+        const parts2 = convertEventToStreamParts(
+          runningEvent({ command: "ls" }),
+          state,
+        );
+        const deltas2 = parts2.filter((p) => p.type === "tool-input-delta");
+        expect(deltas2).toHaveLength(0);
+
+        const parts3 = convertEventToStreamParts(
+          runningEvent({ command: "ls -la" }),
+          state,
+        );
+        const deltas3 = parts3.filter((p) => p.type === "tool-input-delta");
+        expect(deltas3).toHaveLength(1);
+      });
+
+      it("should dedupe attachment file parts across repeated completed events", () => {
+        const state = createStreamState();
+
+        const makeCompletedEvent = (
+          attachmentIds: string[],
+        ): EventMessagePartUpdated => ({
+          type: "message.part.updated",
+          properties: {
+            part: {
+              id: "part-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "tool",
+              callID: "call-1",
+              tool: "Read",
+              state: {
+                status: "completed",
+                input: { file: "README.md" },
+                output: "ok",
+                title: "Read file",
+                time: { start: 1000, end: 2000 },
+                attachments: attachmentIds.map((id) => ({
+                  id,
+                  sessionID: "session-123",
+                  messageID: "msg-1",
+                  type: "file" as const,
+                  mime: "text/plain",
+                  url: "data:text/plain;base64,SGVsbG8=",
+                  filename: `${id}.txt`,
+                })),
+              },
+            } as ToolPart,
+          },
+        });
+
+        const parts1 = convertEventToStreamParts(
+          makeCompletedEvent(["file-1"]),
+          state,
+        );
+        const files1 = parts1.filter((p) => p.type === "file");
+        expect(files1).toHaveLength(1);
+
+        const parts2 = convertEventToStreamParts(
+          makeCompletedEvent(["file-1"]),
+          state,
+        );
+        const files2 = parts2.filter((p) => p.type === "file");
+        expect(files2).toHaveLength(0);
+
+        const parts3 = convertEventToStreamParts(
+          makeCompletedEvent(["file-1", "file-2"]),
+          state,
+        );
+        const files3 = parts3.filter((p) => p.type === "file");
+        expect(files3).toHaveLength(1);
+      });
+
+      it("should safely handle non-serializable tool input", () => {
+        const state = createStreamState();
+        const logger: Logger = {
+          warn: vi.fn(),
+          error: vi.fn(),
+          debug: vi.fn(),
+        };
+
+        const circular: Record<string, unknown> = {};
+        circular.self = circular;
+
+        const event: EventMessagePartUpdated = {
+          type: "message.part.updated",
+          properties: {
+            part: {
+              id: "part-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "tool",
+              callID: "call-1",
+              tool: "Bash",
+              state: {
+                status: "running",
+                input: circular,
+                time: { start: 1000 },
+              },
+            } as ToolPart,
+          },
+        };
+
+        const parts = convertEventToStreamParts(event, state, logger);
+        const delta = parts.find((p) => p.type === "tool-input-delta") as
+          | { delta?: string }
+          | undefined;
+        expect(delta?.delta).toBe("{}");
+        expect(logger.warn).toHaveBeenCalled();
+      });
     });
 
     describe("step-finish parts", () => {
@@ -639,6 +787,180 @@ describe("convert-from-opencode-events", () => {
         expect(logger.debug).toHaveBeenCalledWith(
           expect.stringContaining("custom.event"),
         );
+      });
+    });
+
+    describe("permission events", () => {
+      it("should emit tool-approval-request for permission.asked", () => {
+        const state = createStreamState();
+        const event: EventPermissionAsked = {
+          type: "permission.asked",
+          properties: {
+            id: "approval-1",
+            sessionID: "session-123",
+            permission: "bash",
+            patterns: ["npm test"],
+            tool: {
+              messageID: "msg-1",
+              callID: "call-1",
+            },
+          },
+        };
+
+        const parts = convertEventToStreamParts(event, state);
+        expect(parts).toEqual([
+          {
+            type: "tool-approval-request",
+            approvalId: "approval-1",
+            toolCallId: "call-1",
+            providerMetadata: {
+              opencode: {
+                sessionId: "session-123",
+                permission: "bash",
+                patterns: ["npm test"],
+              },
+            },
+          },
+        ]);
+      });
+    });
+
+    describe("question events", () => {
+      it("should emit an error for question.asked (once per question id)", () => {
+        const state = createStreamState();
+        const logger: Logger = {
+          warn: vi.fn(),
+          error: vi.fn(),
+          debug: vi.fn(),
+        };
+
+        const event: EventQuestionAsked = {
+          type: "question.asked",
+          properties: {
+            id: "question-1",
+            sessionID: "session-123",
+            questions: [
+              {
+                header: "Deploy",
+                question: "Pick deployment strategy",
+                options: [
+                  { label: "Blue/Green", description: "Safer rollout" },
+                  { label: "In-place", description: "Faster" },
+                ],
+              },
+            ],
+          },
+        };
+
+        const parts1 = convertEventToStreamParts(event, state, logger);
+        expect(parts1).toHaveLength(1);
+        expect(parts1[0]).toMatchObject({ type: "error" });
+        expect(logger.warn).toHaveBeenCalled();
+
+        const parts2 = convertEventToStreamParts(event, state, logger);
+        expect(parts2).toHaveLength(0);
+      });
+    });
+
+    describe("file parts", () => {
+      it("should emit file parts for data URLs", () => {
+        const state = createStreamState();
+        const event: EventMessagePartUpdated = {
+          type: "message.part.updated",
+          properties: {
+            part: {
+              id: "file-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "file",
+              mime: "text/plain",
+              url: "data:text/plain;base64,SGVsbG8=",
+            } as FilePart,
+          },
+        };
+
+        const parts = convertEventToStreamParts(event, state);
+        expect(parts).toEqual([
+          {
+            type: "file",
+            mediaType: "text/plain",
+            data: "SGVsbG8=",
+          },
+        ]);
+      });
+
+      it("should ignore malformed non-base64 data URLs without throwing", () => {
+        const state = createStreamState();
+        const event: EventMessagePartUpdated = {
+          type: "message.part.updated",
+          properties: {
+            part: {
+              id: "file-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "file",
+              mime: "text/plain",
+              url: "data:text/plain,%ZZ",
+            } as FilePart,
+          },
+        };
+
+        expect(() => convertEventToStreamParts(event, state)).not.toThrow();
+        expect(convertEventToStreamParts(event, state)).toEqual([]);
+      });
+
+      it("should handle data URLs with parameters before base64", () => {
+        const state = createStreamState();
+        const event: EventMessagePartUpdated = {
+          type: "message.part.updated",
+          properties: {
+            part: {
+              id: "file-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "file",
+              mime: "text/plain",
+              url: "data:text/plain;charset=utf-8;base64,SGVsbG8=",
+            } as FilePart,
+          },
+        };
+
+        const parts = convertEventToStreamParts(event, state);
+        expect(parts).toEqual([
+          {
+            type: "file",
+            mediaType: "text/plain",
+            data: "SGVsbG8=",
+          },
+        ]);
+      });
+
+      it("should not emit duplicate document sources for local files with source metadata", () => {
+        const state = createStreamState();
+        const event: EventMessagePartUpdated = {
+          type: "message.part.updated",
+          properties: {
+            part: {
+              id: "file-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "file",
+              mime: "text/plain",
+              filename: "README.md",
+              url: "/workspace/README.md",
+              source: {
+                type: "file",
+                path: "/workspace/README.md",
+              },
+            } as FilePart,
+          },
+        };
+
+        const parts = convertEventToStreamParts(event, state);
+        const documentSources = parts.filter(
+          (p) => p.type === "source" && p.sourceType === "document",
+        );
+        expect(documentSources).toHaveLength(1);
       });
     });
   });
@@ -967,6 +1289,72 @@ describe("convert-from-opencode-events", () => {
       };
 
       convertEventToStreamParts(event, state, logger);
+
+      expect(logger.debug).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("known v2 events and parts", () => {
+    it("should not log known v2 event types as unknown", () => {
+      const state = createStreamState();
+      const logger: Logger = {
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+      };
+
+      const knownEvents = [
+        { type: "question.replied", properties: { sessionID: "session-123" } },
+        { type: "question.rejected", properties: { sessionID: "session-123" } },
+        { type: "project.updated", properties: {} },
+        { type: "server.instance.disposed", properties: {} },
+        { type: "global.disposed", properties: {} },
+        { type: "worktree.ready", properties: {} },
+        { type: "worktree.failed", properties: {} },
+        { type: "mcp.tools.changed", properties: {} },
+      ];
+
+      for (const event of knownEvents) {
+        const parts = convertEventToStreamParts(event as any, state, logger);
+        expect(parts).toHaveLength(0);
+      }
+
+      expect(logger.debug).not.toHaveBeenCalled();
+    });
+
+    it("should not log known v2 part types as unknown", () => {
+      const state = createStreamState();
+      const logger: Logger = {
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+      };
+
+      const knownPartTypes = [
+        "subtask",
+        "snapshot",
+        "patch",
+        "agent",
+        "retry",
+        "compaction",
+      ];
+
+      for (const partType of knownPartTypes) {
+        const event: EventMessagePartUpdated = {
+          type: "message.part.updated",
+          properties: {
+            part: {
+              id: `part-${partType}`,
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: partType,
+            } as any,
+          },
+        };
+
+        const parts = convertEventToStreamParts(event, state, logger);
+        expect(parts).toHaveLength(0);
+      }
 
       expect(logger.debug).not.toHaveBeenCalled();
     });

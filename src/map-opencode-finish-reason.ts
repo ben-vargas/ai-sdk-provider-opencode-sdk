@@ -54,6 +54,12 @@ function mapErrorToFinishReason(error: {
       // Token limit exceeded
       return { unified: "length", raw: name };
 
+    case "ContextOverflowError":
+      return { unified: "length", raw: name };
+
+    case "StructuredOutputError":
+      return { unified: "error", raw: name };
+
     case "ProviderAuthError":
     case "APIError":
     case "UnknownError":

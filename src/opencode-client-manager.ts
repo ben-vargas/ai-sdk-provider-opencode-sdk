@@ -5,10 +5,10 @@ import { createTimeoutError, extractErrorMessage } from "./errors.js";
 // Import types from the SDK
 // We'll use dynamic import to handle the async nature of the SDK
 type OpencodeClient = Awaited<
-  ReturnType<typeof import("@opencode-ai/sdk").createOpencodeClient>
+  ReturnType<typeof import("@opencode-ai/sdk/v2").createOpencodeClient>
 >;
 type OpencodeServer = Awaited<
-  ReturnType<typeof import("@opencode-ai/sdk").createOpencodeServer>
+  ReturnType<typeof import("@opencode-ai/sdk/v2").createOpencodeServer>
 >;
 
 /**
@@ -141,7 +141,7 @@ export class OpencodeClientManager {
    */
   private async initializeClient(): Promise<OpencodeClient> {
     const { createOpencodeClient, createOpencodeServer } =
-      await import("@opencode-ai/sdk");
+      await import("@opencode-ai/sdk/v2");
 
     // Check if we should use an external URL
     if (this.options.baseUrl) {
@@ -371,7 +371,8 @@ export function createClientManagerFromSettings(
     baseUrl: settings.baseUrl,
     autoStartServer: settings.autoStartServer,
     serverTimeout: settings.serverTimeout,
-    cwd: settings.defaultSettings?.cwd,
+    // Prefer explicit v2 directory setting; fall back to legacy cwd.
+    cwd: settings.defaultSettings?.directory ?? settings.defaultSettings?.cwd,
     logger,
   });
 }

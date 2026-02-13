@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- No changes yet.
+
+## [2.0.0] - 2026-02-13
+
+- **Breaking release** - OpenCode SDK v2 migration and AI SDK v6 hardening.
+
+### Changed
+
+- **OpenCode SDK v2 cutover** - Migrated runtime client/server integration to `@opencode-ai/sdk/v2`.
+- **Request shape updates** - Updated session APIs to v2 parameter style (`sessionID`, top-level args) instead of legacy `path/body`.
+- **Structured output** - Mapped AI SDK JSON response format to OpenCode native `format: { type: \"json_schema\", schema }`.
+- **Dependencies** - Bumped to latest stable compatible versions:
+  - `@opencode-ai/sdk` -> `^1.1.65`
+  - `@ai-sdk/provider` -> `^3.0.8`
+  - `@ai-sdk/provider-utils` -> `^4.0.15`
+  - `ai` (dev) -> `^6.0.85`
+
+### Added
+
+- **Permission/approval flow** - Added support for OpenCode permission events as AI SDK `tool-approval-request` stream parts.
+- **Approval response handling** - Applied `tool-approval-response` prompt parts through OpenCode `permission.reply()` before sending prompts.
+- **New model settings** - Added `permission`, `variant`, `directory`, and `outputFormatRetryCount` settings.
+- **File/source streaming output** - Added conversion for OpenCode file parts and source metadata into AI SDK `file` / `source` stream/content parts.
+- **Provider lifecycle cleanup API** - Added provider `dispose()` method for managed server/client cleanup.
+- **Event typing exports** - Added `EventQuestionAsked` export for SDK v2 question events.
+- **Approval metadata** - Added `approvalRequestId` in provider metadata for approval request correlation.
+
+### Fixed
+
+- **Finish reason mapping** - Added `ContextOverflowError` and `StructuredOutputError` handling in finish-reason conversion.
+- **Output-length detection** - Treated `ContextOverflowError` as output-length overflow for AI SDK error utilities.
+
 ## [1.0.0] - 2026-01-01
 
 ### Changed

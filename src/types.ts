@@ -18,6 +18,25 @@ export interface Logger {
 }
 
 /**
+ * OpenCode session permission action.
+ */
+export type OpencodePermissionAction = "allow" | "deny" | "ask";
+
+/**
+ * OpenCode session permission rule.
+ */
+export interface OpencodePermissionRule {
+  permission: string;
+  pattern: string;
+  action: OpencodePermissionAction;
+}
+
+/**
+ * OpenCode permission ruleset.
+ */
+export type OpencodePermissionRuleset = OpencodePermissionRule[];
+
+/**
  * Settings for individual model instances.
  */
 export interface OpencodeSettings {
@@ -55,14 +74,38 @@ export interface OpencodeSettings {
    * Enable or disable specific tools.
    * Keys are tool names, values are boolean (enabled/disabled).
    * @example { "Bash": true, "Write": false }
+   * @deprecated OpenCode v2 merges tools with permissions for most flows.
    */
   tools?: Record<string, boolean>;
 
   /**
+   * Session permission ruleset.
+   * Applied when creating a new session.
+   */
+  permission?: OpencodePermissionRuleset;
+
+  /**
+   * OpenCode variant identifier.
+   */
+  variant?: string;
+
+  /**
    * Working directory for file operations.
    * @default process.cwd()
+   * @deprecated Use `directory` for per-request routing.
    */
   cwd?: string;
+
+  /**
+   * Request directory for OpenCode API calls.
+   * If not provided, falls back to `cwd` and then SDK defaults.
+   */
+  directory?: string;
+
+  /**
+   * Number of OpenCode retries for JSON schema output formatting.
+   */
+  outputFormatRetryCount?: number;
 
   /**
    * Logger instance or false to disable logging.
@@ -144,6 +187,11 @@ export interface OpencodeProvider extends ProviderV3 {
    * @param settings - Optional settings for this model instance
    */
   chat(modelId: OpencodeModelId, settings?: OpencodeSettings): LanguageModelV3;
+
+  /**
+   * Dispose provider resources (for example managed OpenCode server processes).
+   */
+  dispose(): Promise<void>;
 }
 
 /**
@@ -161,6 +209,7 @@ export interface OpencodeProviderMetadata {
   opencode: {
     sessionId: string;
     messageId?: string;
+    approvalRequestId?: string;
     cost?: number;
     reasoning?: string;
   };
@@ -176,6 +225,7 @@ export interface ToolStreamState {
   inputClosed: boolean;
   callEmitted: boolean;
   resultEmitted: boolean;
+  emittedAttachmentIds: Set<string>;
   lastInput?: string;
 }
 

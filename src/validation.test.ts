@@ -24,7 +24,17 @@ describe("validation", () => {
         agent: "build",
         systemPrompt: "You are helpful",
         tools: { Bash: true, Write: false },
+        permission: [
+          {
+            permission: "bash",
+            pattern: "npm test",
+            action: "ask",
+          },
+        ],
+        variant: "safe",
         cwd: "/home/user",
+        directory: "/home/user",
+        outputFormatRetryCount: 2,
         verbose: true,
       };
 
@@ -241,6 +251,22 @@ describe("validation", () => {
         Write: false,
         Read: true,
       });
+    });
+
+    it("should prefer override permission rules", () => {
+      const defaults = {
+        permission: [
+          { permission: "bash", pattern: "*", action: "ask" as const },
+        ],
+      };
+      const overrides = {
+        permission: [
+          { permission: "bash", pattern: "npm test", action: "allow" as const },
+        ],
+      };
+      const result = mergeSettings(defaults, overrides);
+
+      expect(result.permission).toEqual(overrides.permission);
     });
 
     it("should handle tools in defaults only", () => {

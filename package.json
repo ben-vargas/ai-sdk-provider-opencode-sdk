@@ -1,6 +1,6 @@
 {
   "name": "ai-sdk-provider-opencode-sdk",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "AI SDK v6 provider for OpenCode via @opencode-ai/sdk",
   "keywords": [
     "ai-sdk",
@@ -55,9 +55,9 @@
     "example:streaming": "npm run build && npx tsx examples/streaming.ts"
   },
   "dependencies": {
-    "@ai-sdk/provider": "^3.0.0",
-    "@ai-sdk/provider-utils": "^4.0.1",
-    "@opencode-ai/sdk": "^1.0.207"
+    "@ai-sdk/provider": "^3.0.8",
+    "@ai-sdk/provider-utils": "^4.0.15",
+    "@opencode-ai/sdk": "^1.1.65"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
@@ -65,7 +65,7 @@
     "@typescript-eslint/eslint-plugin": "8.34.0",
     "@typescript-eslint/parser": "8.34.0",
     "@vitest/coverage-v8": "^3.2.4",
-    "ai": "^6.0.3",
+    "ai": "^6.0.85",
     "eslint": "9.28.0",
     "prettier": "^3.6.2",
     "tsup": "8.5.0",

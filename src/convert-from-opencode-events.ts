@@ -6,6 +6,10 @@ import type {
   LanguageModelV3Usage,
 } from "@ai-sdk/provider";
 import type { Logger, ToolStreamState, StreamingUsage } from "./types.js";
+import {
+  safeStringifyToolInput,
+  planFilePartConversion,
+} from "./opencode-part-utils.js";
 
 /**
  * OpenCode event types (from SDK types.gen.ts).
@@ -43,11 +47,51 @@ export interface EventSessionIdle {
   };
 }
 
+export interface EventPermissionAsked {
+  type: "permission.asked";
+  properties: {
+    id: string;
+    sessionID: string;
+    permission: string;
+    patterns: string[];
+    metadata?: Record<string, unknown>;
+    always?: string[];
+    tool?: {
+      messageID: string;
+      callID: string;
+    };
+  };
+}
+
+export interface EventQuestionAsked {
+  type: "question.asked";
+  properties: {
+    id: string;
+    sessionID: string;
+    questions: Array<{
+      header: string;
+      question: string;
+      options: Array<{
+        label: string;
+        description: string;
+      }>;
+      multiple?: boolean;
+      custom?: boolean;
+    }>;
+    tool?: {
+      messageID: string;
+      callID: string;
+    };
+  };
+}
+
 export type OpencodeEvent =
   | EventMessagePartUpdated
   | EventMessageUpdated
   | EventSessionStatus
   | EventSessionIdle
+  | EventPermissionAsked
+  | EventQuestionAsked
   | { type: string; properties: unknown };
 
 /**
@@ -69,6 +113,22 @@ export interface ReasoningPart {
   messageID: string;
   type: "reasoning";
   text: string;
+}
+
+export interface FilePart {
+  id: string;
+  sessionID: string;
+  messageID: string;
+  type: "file";
+  mime: string;
+  filename?: string;
+  url: string;
+  source?: {
+    type?: string;
+    path?: string;
+    uri?: string;
+    [key: string]: unknown;
+  };
 }
 
 export interface ToolPart {
@@ -100,6 +160,7 @@ export interface ToolStateCompleted {
   output: string;
   title: string;
   time: { start: number; end: number };
+  attachments?: FilePart[];
 }
 
 export interface ToolStateError {
@@ -131,16 +192,6 @@ export interface StepFinishPart {
       write: number;
     };
   };
-}
-
-export interface FilePart {
-  id: string;
-  sessionID: string;
-  messageID: string;
-  type: "file";
-  mime: string;
-  filename?: string;
-  url: string;
 }
 
 export type Part =
@@ -176,8 +227,9 @@ export interface StreamState {
   usage: StreamingUsage;
   lastTextContent: string;
   lastReasoningContent: string;
-  /** Track message roles to filter user vs assistant parts */
   messageRoles: Map<string, "user" | "assistant">;
+  permissionRequests: Set<string>;
+  questionRequests: Set<string>;
 }
 
 /**
@@ -201,6 +253,8 @@ export function createStreamState(): StreamState {
     lastTextContent: "",
     lastReasoningContent: "",
     messageRoles: new Map(),
+    permissionRequests: new Set(),
+    questionRequests: new Set(),
   };
 }
 
@@ -218,7 +272,6 @@ export function isEventForSession(
   ) {
     const props = event.properties as Record<string, unknown>;
 
-    // Check part's sessionID
     if (
       "part" in props &&
       typeof props.part === "object" &&
@@ -228,7 +281,6 @@ export function isEventForSession(
       return part.sessionID === sessionId;
     }
 
-    // Check message's sessionID
     if (
       "info" in props &&
       typeof props.info === "object" &&
@@ -238,7 +290,6 @@ export function isEventForSession(
       return info.sessionID === sessionId;
     }
 
-    // Check direct sessionID
     if ("sessionID" in props) {
       return props.sessionID === sessionId;
     }
@@ -289,24 +340,73 @@ export function convertEventToStreamParts(
     }
 
     case "message.updated": {
-      // Track message role for filtering parts
       const messageEvent = event as EventMessageUpdated;
       const info = messageEvent.properties.info;
       state.messageRoles.set(info.id, info.role);
       break;
     }
 
+    case "permission.asked": {
+      const permissionEvent = event as EventPermissionAsked;
+      const requestId = permissionEvent.properties.id;
+
+      if (!state.permissionRequests.has(requestId)) {
+        state.permissionRequests.add(requestId);
+        parts.push({
+          type: "tool-approval-request",
+          approvalId: requestId,
+          toolCallId: permissionEvent.properties.tool?.callID ?? requestId,
+          providerMetadata: {
+            opencode: {
+              sessionId: permissionEvent.properties.sessionID,
+              permission: permissionEvent.properties.permission,
+              patterns: permissionEvent.properties.patterns,
+            },
+          },
+        });
+      }
+      break;
+    }
+
+    case "question.asked": {
+      const questionEvent = event as EventQuestionAsked;
+      const questionId = questionEvent.properties.id;
+
+      if (!state.questionRequests.has(questionId)) {
+        state.questionRequests.add(questionId);
+
+        const warning =
+          "OpenCode question.asked events are not yet mapped to AI SDK responses. " +
+          "The provider cannot answer interactive questions automatically.";
+        if (logger) {
+          logger.warn(warning);
+        }
+
+        parts.push({
+          type: "error",
+          error: new Error(
+            `${warning} Question ID: ${questionId}. ` +
+              "If this blocks generation, answer/reject the question in OpenCode directly.",
+          ),
+        });
+      }
+      break;
+    }
+
     case "session.status":
     case "session.idle":
-      // Session status changes - handled separately
-      break;
-
     case "session.diff":
-      // File diff events - informational, not converted to stream parts
+    case "question.replied":
+    case "question.rejected":
+    case "project.updated":
+    case "server.instance.disposed":
+    case "global.disposed":
+    case "worktree.ready":
+    case "worktree.failed":
+    case "mcp.tools.changed":
       break;
 
     default:
-      // Unknown event type - log if verbose
       if (logger && logger.debug) {
         logger.debug(`Unknown event type: ${event.type}`);
       }
@@ -326,17 +426,14 @@ function handlePartUpdated(
   const { part, delta } = event.properties;
   const parts: LanguageModelV3StreamPart[] = [];
 
-  // Get message role - skip parts from user messages (we only want assistant output)
   const messageRole = state.messageRoles.get(part.messageID);
   if (messageRole === "user") {
-    // User message parts are echoed back but should not be streamed to output
     return parts;
   }
 
   switch (part.type) {
     case "text": {
       const textPart = part as TextPart;
-      // Skip synthetic parts (context we added)
       if (textPart.synthetic || textPart.ignored) {
         break;
       }
@@ -363,7 +460,12 @@ function handlePartUpdated(
     }
 
     case "step-start":
-      // Step start markers - informational, not converted to stream parts
+    case "subtask":
+    case "snapshot":
+    case "patch":
+    case "agent":
+    case "retry":
+    case "compaction":
       break;
 
     case "file": {
@@ -381,9 +483,6 @@ function handlePartUpdated(
   return parts;
 }
 
-/**
- * Handle a text part update.
- */
 function handleTextPart(
   part: TextPart,
   delta: string | undefined,
@@ -392,9 +491,7 @@ function handleTextPart(
   const parts: LanguageModelV3StreamPart[] = [];
   const partId = part.id;
 
-  // Start text if not started
   if (!state.textStarted || state.textPartId !== partId) {
-    // End previous text if different part
     if (state.textStarted && state.textPartId && state.textPartId !== partId) {
       parts.push({ type: "text-end", id: state.textPartId });
     }
@@ -404,12 +501,10 @@ function handleTextPart(
     state.lastTextContent = "";
   }
 
-  // Emit delta
   if (delta) {
     parts.push({ type: "text-delta", id: partId, delta });
     state.lastTextContent += delta;
   } else if (part.text && part.text !== state.lastTextContent) {
-    // Calculate delta from full text if no delta provided
     const newDelta = part.text.slice(state.lastTextContent.length);
     if (newDelta) {
       parts.push({ type: "text-delta", id: partId, delta: newDelta });
@@ -420,9 +515,6 @@ function handleTextPart(
   return parts;
 }
 
-/**
- * Handle a reasoning part update.
- */
 function handleReasoningPart(
   part: ReasoningPart,
   delta: string | undefined,
@@ -431,9 +523,7 @@ function handleReasoningPart(
   const parts: LanguageModelV3StreamPart[] = [];
   const partId = part.id;
 
-  // Start reasoning if not started
   if (!state.reasoningStarted || state.reasoningPartId !== partId) {
-    // End previous reasoning if different part
     if (
       state.reasoningStarted &&
       state.reasoningPartId &&
@@ -447,12 +537,10 @@ function handleReasoningPart(
     state.lastReasoningContent = "";
   }
 
-  // Emit delta
   if (delta) {
     parts.push({ type: "reasoning-delta", id: partId, delta });
     state.lastReasoningContent += delta;
   } else if (part.text && part.text !== state.lastReasoningContent) {
-    // Calculate delta from full text if no delta provided
     const newDelta = part.text.slice(state.lastReasoningContent.length);
     if (newDelta) {
       parts.push({ type: "reasoning-delta", id: partId, delta: newDelta });
@@ -463,9 +551,6 @@ function handleReasoningPart(
   return parts;
 }
 
-/**
- * Handle a tool part update.
- */
 function handleToolPart(
   part: ToolPart,
   state: StreamState,
@@ -474,7 +559,6 @@ function handleToolPart(
   const parts: LanguageModelV3StreamPart[] = [];
   const { callID, tool, state: toolState } = part;
 
-  // Get or create tool stream state
   let streamState = state.toolStates.get(callID);
   if (!streamState) {
     streamState = {
@@ -484,13 +568,13 @@ function handleToolPart(
       inputClosed: false,
       callEmitted: false,
       resultEmitted: false,
+      emittedAttachmentIds: new Set(),
     };
     state.toolStates.set(callID, streamState);
   }
 
   switch (toolState.status) {
     case "pending":
-      // Tool is pending - emit input start
       if (!streamState.inputStarted) {
         parts.push({
           type: "tool-input-start",
@@ -504,7 +588,6 @@ function handleToolPart(
       break;
 
     case "running": {
-      // Tool is running - emit input delta if input changed
       if (!streamState.inputStarted) {
         parts.push({
           type: "tool-input-start",
@@ -517,8 +600,22 @@ function handleToolPart(
         streamState.inputStarted = true;
       }
 
-      const inputStr = JSON.stringify(toolState.input);
-      if (streamState.lastInput && inputStr.startsWith(streamState.lastInput)) {
+      const inputStr = safeStringifyToolInput(toolState.input, (message) => {
+        if (logger) {
+          logger.warn(
+            `Failed to serialize tool input for ${callID}: ${message}`,
+          );
+        }
+      });
+      if (!streamState.lastInput) {
+        if (inputStr) {
+          parts.push({
+            type: "tool-input-delta",
+            id: callID,
+            delta: inputStr,
+          });
+        }
+      } else if (inputStr.startsWith(streamState.lastInput)) {
         const inputDelta = inputStr.slice(streamState.lastInput.length);
         if (inputDelta) {
           parts.push({
@@ -527,13 +624,19 @@ function handleToolPart(
             delta: inputDelta,
           });
         }
+      } else if (inputStr) {
+        // Input changed in a non-prefix way; emit the full input to avoid data loss.
+        parts.push({
+          type: "tool-input-delta",
+          id: callID,
+          delta: inputStr,
+        });
       }
       streamState.lastInput = inputStr;
       break;
     }
 
     case "completed":
-      // Tool completed - emit input end, tool call, and result
       if (!streamState.inputClosed) {
         if (!streamState.inputStarted) {
           parts.push({
@@ -554,7 +657,13 @@ function handleToolPart(
           type: "tool-call",
           toolCallId: callID,
           toolName: tool,
-          input: JSON.stringify(toolState.input),
+          input: safeStringifyToolInput(toolState.input, (message) => {
+            if (logger) {
+              logger.warn(
+                `Failed to serialize tool input for ${callID}: ${message}`,
+              );
+            }
+          }),
           providerExecuted: true,
           dynamic: true,
         });
@@ -572,10 +681,22 @@ function handleToolPart(
         });
         streamState.resultEmitted = true;
       }
+
+      if (Array.isArray(toolState.attachments)) {
+        for (const attachment of toolState.attachments) {
+          const attachmentId =
+            attachment.id ??
+            `${attachment.url}|${attachment.mime}|${attachment.filename ?? ""}`;
+          if (streamState.emittedAttachmentIds.has(attachmentId)) {
+            continue;
+          }
+          parts.push(...handleFilePart(attachment));
+          streamState.emittedAttachmentIds.add(attachmentId);
+        }
+      }
       break;
 
     case "error":
-      // Tool errored - emit input end, tool call, and error result
       if (!streamState.inputClosed) {
         if (!streamState.inputStarted) {
           parts.push({
@@ -596,7 +717,13 @@ function handleToolPart(
           type: "tool-call",
           toolCallId: callID,
           toolName: tool,
-          input: JSON.stringify(toolState.input),
+          input: safeStringifyToolInput(toolState.input, (message) => {
+            if (logger) {
+              logger.warn(
+                `Failed to serialize tool input for ${callID}: ${message}`,
+              );
+            }
+          }),
           providerExecuted: true,
           dynamic: true,
         });
@@ -625,9 +752,6 @@ function handleToolPart(
   return parts;
 }
 
-/**
- * Handle a step finish part (contains token usage).
- */
 function handleStepFinishPart(part: StepFinishPart, state: StreamState): void {
   state.usage.inputTokens += part.tokens.input;
   state.usage.outputTokens += part.tokens.output;
@@ -637,15 +761,79 @@ function handleStepFinishPart(part: StepFinishPart, state: StreamState): void {
   state.usage.totalCost += part.cost;
 }
 
-/**
- * Handle a file part.
- */
-function handleFilePart(_part: FilePart): LanguageModelV3StreamPart[] {
-  // Convert to AI SDK file format
-  // Note: The file data is in URL format (could be data URL or file URL)
-  // For now, we skip file parts as they require special handling
-  // TODO: Implement file part conversion if needed
-  return [];
+function handleFilePart(part: FilePart): LanguageModelV3StreamPart[] {
+  const parts: LanguageModelV3StreamPart[] = [];
+  const { plan } = planFilePartConversion(part);
+  if (!plan) {
+    return parts;
+  }
+
+  if (plan.primary.type === "file") {
+    parts.push({
+      type: "file",
+      mediaType: plan.primary.mediaType,
+      data: plan.primary.data,
+      ...(plan.sourceMetadata
+        ? {
+            providerMetadata: {
+              opencode: {
+                source: plan.sourceMetadata as unknown as JSONValue,
+              },
+            },
+          }
+        : {}),
+    });
+  } else if (plan.primary.type === "source-url") {
+    parts.push({
+      type: "source",
+      sourceType: "url",
+      id: plan.primary.id,
+      url: plan.primary.url,
+      ...(plan.primary.title ? { title: plan.primary.title } : {}),
+    });
+  } else {
+    parts.push({
+      type: "source",
+      sourceType: "document",
+      id: plan.primary.id,
+      mediaType: plan.primary.mediaType,
+      title: plan.primary.title,
+      ...(plan.primary.filename ? { filename: plan.primary.filename } : {}),
+      ...(plan.sourceMetadata
+        ? {
+            providerMetadata: {
+              opencode: {
+                source: plan.sourceMetadata as unknown as JSONValue,
+              },
+            },
+          }
+        : {}),
+    });
+  }
+
+  if (plan.secondaryDocumentSource) {
+    parts.push({
+      type: "source",
+      sourceType: "document",
+      id: plan.secondaryDocumentSource.id,
+      mediaType: plan.secondaryDocumentSource.mediaType,
+      title: plan.secondaryDocumentSource.title,
+      ...(plan.secondaryDocumentSource.filename
+        ? { filename: plan.secondaryDocumentSource.filename }
+        : {}),
+      ...(plan.sourceMetadata
+        ? {
+            providerMetadata: {
+              opencode: {
+                source: plan.sourceMetadata as unknown as JSONValue,
+              },
+            },
+          }
+        : {}),
+    });
+  }
+
+  return parts;
 }
 
 /**
@@ -655,6 +843,7 @@ export function createFinishParts(
   state: StreamState,
   finishReason: LanguageModelV3FinishReason,
   sessionId: string,
+  messageId?: string,
 ): LanguageModelV3StreamPart[] {
   const parts: LanguageModelV3StreamPart[] = [];
   const inputTokensTotal =
@@ -683,17 +872,14 @@ export function createFinishParts(
     },
   };
 
-  // Close text if open
   if (state.textStarted && state.textPartId) {
     parts.push({ type: "text-end", id: state.textPartId });
   }
 
-  // Close reasoning if open
   if (state.reasoningStarted && state.reasoningPartId) {
     parts.push({ type: "reasoning-end", id: state.reasoningPartId });
   }
 
-  // Emit finish with usage
   parts.push({
     type: "finish",
     usage,
@@ -701,6 +887,7 @@ export function createFinishParts(
     providerMetadata: {
       opencode: {
         sessionId,
+        ...(messageId ? { messageId } : {}),
         cost: state.usage.totalCost,
       },
     },
