@@ -543,7 +543,9 @@ describe("convert-from-opencode-events", () => {
         );
         const deltas1 = parts1.filter((p) => p.type === "tool-input-delta");
         expect(deltas1).toHaveLength(1);
-        expect((deltas1[0] as any).delta).toBe(JSON.stringify({ command: "ls" }));
+        expect((deltas1[0] as any).delta).toBe(
+          JSON.stringify({ command: "ls" }),
+        );
 
         const parts2 = convertEventToStreamParts(
           runningEvent({ command: "ls" }),

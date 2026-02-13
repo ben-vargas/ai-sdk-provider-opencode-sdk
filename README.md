@@ -235,24 +235,24 @@ for await (const part of result.fullStream) {
 
 ## Feature Support
 
-| Feature                  | Support    | Notes                                              |
-| ------------------------ | ---------- | -------------------------------------------------- |
-| Text generation          | ✅ Full    | `generateText()`, `streamText()`                   |
-| Streaming                | ✅ Full    | Real-time SSE streaming                            |
-| Multi-turn conversations | ✅ Full    | Session-based context                              |
-| Tool observation         | ✅ Full    | See tool execution                                 |
-| Reasoning/thinking       | ✅ Full    | ReasoningPart support                              |
-| Model selection          | ✅ Full    | Per-request model                                  |
-| Agent selection          | ✅ Full    | build, plan, general, explore                      |
-| Abort/cancellation       | ✅ Full    | AbortSignal support                                |
-| Image input (base64)     | ⚠️ Partial | Data URLs only                                     |
-| Image input (URL)        | ❌ None    | Not supported                                      |
+| Feature                  | Support    | Notes                                                                       |
+| ------------------------ | ---------- | --------------------------------------------------------------------------- |
+| Text generation          | ✅ Full    | `generateText()`, `streamText()`                                            |
+| Streaming                | ✅ Full    | Real-time SSE streaming                                                     |
+| Multi-turn conversations | ✅ Full    | Session-based context                                                       |
+| Tool observation         | ✅ Full    | See tool execution                                                          |
+| Reasoning/thinking       | ✅ Full    | ReasoningPart support                                                       |
+| Model selection          | ✅ Full    | Per-request model                                                           |
+| Agent selection          | ✅ Full    | build, plan, general, explore                                               |
+| Abort/cancellation       | ✅ Full    | AbortSignal support                                                         |
+| Image input (base64)     | ⚠️ Partial | Data URLs only                                                              |
+| Image input (URL)        | ❌ None    | Not supported                                                               |
 | Structured output (JSON) | ⚠️ Partial | Native `json_schema`; use prompt+validation fallback for strict reliability |
-| Custom tools             | ❌ None    | Server-side only                                   |
-| Tool approvals           | ✅ Full    | `tool-approval-request` / `tool-approval-response` |
-| File/source streaming    | ✅ Full    | Emits `file` and `source` stream parts             |
-| temperature/topP/topK    | ❌ None    | Provider defaults                                  |
-| maxTokens                | ❌ None    | Agent config                                       |
+| Custom tools             | ❌ None    | Server-side only                                                            |
+| Tool approvals           | ✅ Full    | `tool-approval-request` / `tool-approval-response`                          |
+| File/source streaming    | ✅ Full    | Emits `file` and `source` stream parts                                      |
+| temperature/topP/topK    | ❌ None    | Provider defaults                                                           |
+| maxTokens                | ❌ None    | Agent config                                                                |
 
 ## Examples
 

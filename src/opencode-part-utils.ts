@@ -104,9 +104,10 @@ export function parseDataUrl(
   };
 }
 
-export function planFilePartConversion(
-  part: OpencodeFilePartLike,
-): { plan?: FilePartPlan; error?: FilePartPlanError } {
+export function planFilePartConversion(part: OpencodeFilePartLike): {
+  plan?: FilePartPlan;
+  error?: FilePartPlanError;
+} {
   if (!part.url || !part.mime) {
     return { error: "missing-metadata" };
   }

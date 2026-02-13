@@ -351,7 +351,9 @@ export function wrapError(
 
   if (isTimeoutError(error)) {
     const timeoutMs =
-      metadata?.timeoutMs ?? extractTimeoutMs(error) ?? DEFAULT_REQUEST_TIMEOUT_MS;
+      metadata?.timeoutMs ??
+      extractTimeoutMs(error) ??
+      DEFAULT_REQUEST_TIMEOUT_MS;
     return createTimeoutError(timeoutMs, "request");
   }
 

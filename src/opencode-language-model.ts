@@ -130,6 +130,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
   private readonly clientManager: OpencodeClientManager;
   private sessionId: string | undefined;
   private sessionInitPromise: Promise<string> | null = null;
+  private repliedApprovalIdsBySession = new Map<string, Set<string>>();
   private parsedModelId: ParsedModelId;
 
   constructor(options: {
@@ -214,6 +215,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
       if (approvalResponses.length > 0) {
         const approvalWarnings = await this.replyToPendingApprovals(
           client,
+          sessionId,
           approvalResponses,
         );
         for (const warning of approvalWarnings) {
@@ -344,6 +346,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
           if (approvalResponses.length > 0) {
             const approvalWarnings = await this.replyToPendingApprovals(
               client,
+              sessionId,
               approvalResponses,
             );
             streamWarnings.push(...approvalWarnings);
@@ -437,7 +440,11 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
                 continue;
               }
 
-              const streamParts = convertEventToStreamParts(event, state, logger);
+              const streamParts = convertEventToStreamParts(
+                event,
+                state,
+                logger,
+              );
               for (const part of streamParts) {
                 controller.enqueue(part);
               }
@@ -552,6 +559,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
 
   private async replyToPendingApprovals(
     client: ApprovalClient,
+    sessionId: string,
     responses: ToolApprovalResponse[],
   ): Promise<string[]> {
     const permissionApi = client.permission;
@@ -564,8 +572,13 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
 
     const warnings: string[] = [];
     const directory = this.getRequestDirectory();
+    const repliedApprovalIds = this.getRepliedApprovalIdsForSession(sessionId);
+    const pendingResponses = this.getPendingApprovalResponses(
+      responses,
+      repliedApprovalIds,
+    );
 
-    for (const response of responses) {
+    for (const response of pendingResponses) {
       try {
         await permissionApi.reply({
           requestID: response.approvalId,
@@ -573,6 +586,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
           ...(response.reason ? { message: response.reason } : {}),
           ...(directory ? { directory } : {}),
         });
+        repliedApprovalIds.add(response.approvalId);
       } catch (error) {
         const warning =
           `Failed to apply tool approval response for ${response.approvalId}: ` +
@@ -583,6 +597,40 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
     }
 
     return warnings;
+  }
+
+  private getPendingApprovalResponses(
+    responses: ToolApprovalResponse[],
+    repliedApprovalIds: Set<string>,
+  ): ToolApprovalResponse[] {
+    const seenInRequest = new Set<string>();
+    const pending: ToolApprovalResponse[] = [];
+
+    for (const response of responses) {
+      if (seenInRequest.has(response.approvalId)) {
+        continue;
+      }
+      seenInRequest.add(response.approvalId);
+
+      if (repliedApprovalIds.has(response.approvalId)) {
+        continue;
+      }
+
+      pending.push(response);
+    }
+
+    return pending;
+  }
+
+  private getRepliedApprovalIdsForSession(sessionId: string): Set<string> {
+    const existing = this.repliedApprovalIdsBySession.get(sessionId);
+    if (existing) {
+      return existing;
+    }
+
+    const created = new Set<string>();
+    this.repliedApprovalIdsBySession.set(sessionId, created);
+    return created;
   }
 
   /**

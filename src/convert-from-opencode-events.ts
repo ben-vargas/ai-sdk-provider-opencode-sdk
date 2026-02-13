@@ -602,7 +602,9 @@ function handleToolPart(
 
       const inputStr = safeStringifyToolInput(toolState.input, (message) => {
         if (logger) {
-          logger.warn(`Failed to serialize tool input for ${callID}: ${message}`);
+          logger.warn(
+            `Failed to serialize tool input for ${callID}: ${message}`,
+          );
         }
       });
       if (!streamState.lastInput) {

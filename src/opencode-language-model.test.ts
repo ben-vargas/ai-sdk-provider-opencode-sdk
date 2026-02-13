@@ -210,7 +210,10 @@ describe("opencode-language-model", () => {
       mockClient.session.create.mockImplementationOnce(
         () =>
           new Promise((resolve) => {
-            setTimeout(() => resolve({ data: { id: "session-concurrent" } }), 20);
+            setTimeout(
+              () => resolve({ data: { id: "session-concurrent" } }),
+              20,
+            );
           }),
       );
 
@@ -356,6 +359,70 @@ describe("opencode-language-model", () => {
           message: "Looks safe",
         }),
       );
+    });
+
+    it("should not replay already-applied approval responses across turns", async () => {
+      const promptWithApproval: LanguageModelV3Prompt = [
+        {
+          role: "user",
+          content: [{ type: "text", text: "Continue after approval." }],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-approval-response",
+              approvalId: "approval-1",
+              approved: true,
+              reason: "Looks safe",
+            },
+          ],
+        },
+      ];
+
+      await model.doGenerate({
+        prompt: promptWithApproval,
+      });
+      await model.doGenerate({
+        prompt: promptWithApproval,
+      });
+
+      expect(mockClient.permission.reply).toHaveBeenCalledTimes(1);
+    });
+
+    it("should dedupe duplicate approval responses in a single prompt", async () => {
+      const promptWithDuplicateApprovals: LanguageModelV3Prompt = [
+        {
+          role: "user",
+          content: [{ type: "text", text: "Continue after approval." }],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-approval-response",
+              approvalId: "approval-1",
+              approved: true,
+            },
+          ],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-approval-response",
+              approvalId: "approval-1",
+              approved: true,
+            },
+          ],
+        },
+      ];
+
+      await model.doGenerate({
+        prompt: promptWithDuplicateApprovals,
+      });
+
+      expect(mockClient.permission.reply).toHaveBeenCalledTimes(1);
     });
 
     it("should not emit duplicate document sources for local files with source metadata", async () => {
@@ -530,12 +597,53 @@ describe("opencode-language-model", () => {
       await reader.read();
       reader.releaseLock();
 
-      const subscribeOrder = mockClient.event.subscribe.mock.invocationCallOrder[0];
-      const replyOrder = mockClient.permission.reply.mock.invocationCallOrder[0];
+      const subscribeOrder =
+        mockClient.event.subscribe.mock.invocationCallOrder[0];
+      const replyOrder =
+        mockClient.permission.reply.mock.invocationCallOrder[0];
       const promptOrder = mockClient.session.prompt.mock.invocationCallOrder[0];
 
       expect(subscribeOrder).toBeLessThan(replyOrder);
       expect(replyOrder).toBeLessThan(promptOrder);
+    });
+
+    it("should dedupe duplicate approval responses in stream requests", async () => {
+      const promptWithDuplicateApprovals: LanguageModelV3Prompt = [
+        {
+          role: "user",
+          content: [{ type: "text", text: "Continue after approval." }],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-approval-response",
+              approvalId: "approval-1",
+              approved: true,
+            },
+          ],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-approval-response",
+              approvalId: "approval-1",
+              approved: true,
+            },
+          ],
+        },
+      ];
+
+      const result = await model.doStream({
+        prompt: promptWithDuplicateApprovals,
+      });
+
+      const reader = result.stream.getReader();
+      await reader.read();
+      reader.releaseLock();
+
+      expect(mockClient.permission.reply).toHaveBeenCalledTimes(1);
     });
 
     it("should close event iterator on normal session completion", async () => {
