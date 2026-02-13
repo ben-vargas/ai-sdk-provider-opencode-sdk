@@ -23,6 +23,12 @@ const loggerSchema = z.object({
     .optional(),
 });
 
+const permissionRuleSchema = z.object({
+  permission: z.string(),
+  pattern: z.string(),
+  action: z.enum(["allow", "deny", "ask"]),
+});
+
 /**
  * Schema for OpencodeSettings.
  */
@@ -33,7 +39,11 @@ export const opcodeSettingsSchema = z.object({
   agent: z.string().optional(),
   systemPrompt: z.string().optional(),
   tools: z.record(z.string(), z.boolean()).optional(),
+  permission: z.array(permissionRuleSchema).optional(),
+  variant: z.string().optional(),
   cwd: z.string().optional(),
+  directory: z.string().optional(),
+  outputFormatRetryCount: z.number().int().nonnegative().optional(),
   logger: z.union([loggerSchema, z.literal(false)]).optional(),
   verbose: z.boolean().optional(),
 });
@@ -84,6 +94,15 @@ export function validateSettings(
   // Validate session ID format if provided
   if (settings.sessionId && !isValidSessionId(settings.sessionId)) {
     warnings.push(`Invalid session ID format: ${settings.sessionId}`);
+  }
+
+  if (
+    settings.outputFormatRetryCount !== undefined &&
+    settings.outputFormatRetryCount > 10
+  ) {
+    warnings.push(
+      `outputFormatRetryCount ${settings.outputFormatRetryCount} is high; consider a value between 0 and 5`,
+    );
   }
 
   // Log warnings if logger is provided
@@ -237,5 +256,6 @@ export function mergeSettings(
       defaults.tools || overrides.tools
         ? { ...defaults.tools, ...overrides.tools }
         : undefined,
+    permission: overrides.permission ?? defaults.permission,
   };
 }

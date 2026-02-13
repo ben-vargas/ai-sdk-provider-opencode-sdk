@@ -362,6 +362,24 @@ describe("convert-to-opencode-messages", () => {
 
         expect((result.parts[0] as { text: string }).text).toContain("Error:");
       });
+
+      it("should skip tool approval responses by default", () => {
+        const prompt: LanguageModelV3Prompt = [
+          {
+            role: "tool",
+            content: [
+              {
+                type: "tool-approval-response",
+                approvalId: "approval-1",
+                approved: true,
+              },
+            ],
+          },
+        ];
+
+        const result = convertToOpencodeMessages(prompt);
+        expect(result.parts).toHaveLength(0);
+      });
     });
 
     describe("JSON mode", () => {

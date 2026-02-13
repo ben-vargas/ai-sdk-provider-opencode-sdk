@@ -26,6 +26,9 @@ export type {
   ParsedModelId,
   OpencodeProviderMetadata,
   Logger,
+  OpencodePermissionAction,
+  OpencodePermissionRule,
+  OpencodePermissionRuleset,
   ToolStreamState,
   StreamingUsage,
 } from "./types.js";
@@ -90,6 +93,8 @@ export type {
   EventMessageUpdated,
   EventSessionStatus,
   EventSessionIdle,
+  EventPermissionAsked,
+  EventQuestionAsked,
   TextPart,
   ReasoningPart,
   ToolPart,

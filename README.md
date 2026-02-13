@@ -11,9 +11,9 @@
 
 > **Latest Release**: Version 1.x supports AI SDK v6. For AI SDK v5 support, use the `ai-sdk-v5` tag (0.x.x).
 
-A community provider for the [Vercel AI SDK](https://sdk.vercel.ai/docs) that enables using AI models through [OpenCode](https://opencode.ai) and the `@opencode-ai/sdk`. OpenCode is a terminal-based AI coding assistant that supports multiple providers (Anthropic, OpenAI, Google, and more).
+A community provider for the [Vercel AI SDK](https://sdk.vercel.ai/docs) that enables using AI models through [OpenCode](https://opencode.ai) and the `@opencode-ai/sdk/v2` APIs. OpenCode is a terminal-based AI coding assistant that supports multiple providers (Anthropic, OpenAI, Google, and more).
 
-This provider enables you to use OpenCode's AI capabilities through the familiar Vercel AI SDK interface, supporting `generateText()`, `streamText()`, `streamObject()`, and structured output via `generateText()` with `Output.object()`.
+This provider enables you to use OpenCode's AI capabilities through the familiar Vercel AI SDK interface, supporting `generateText()`, `streamText()`, `streamObject()`, native JSON-schema structured output, tool approval flows, and file/source streaming parts.
 
 ## Version Compatibility
 
@@ -205,22 +205,24 @@ for await (const part of result.fullStream) {
 
 ## Feature Support
 
-| Feature                  | Support    | Notes                                               |
-| ------------------------ | ---------- | --------------------------------------------------- |
-| Text generation          | ✅ Full    | `generateText()`, `streamText()`                    |
-| Streaming                | ✅ Full    | Real-time SSE streaming                             |
-| Multi-turn conversations | ✅ Full    | Session-based context                               |
-| Tool observation         | ✅ Full    | See tool execution                                  |
-| Reasoning/thinking       | ✅ Full    | ReasoningPart support                               |
-| Model selection          | ✅ Full    | Per-request model                                   |
-| Agent selection          | ✅ Full    | build, plan, general, explore                       |
-| Abort/cancellation       | ✅ Full    | AbortSignal support                                 |
-| Image input (base64)     | ⚠️ Partial | Data URLs only                                      |
-| Image input (URL)        | ❌ None    | Not supported                                       |
-| Structured output (JSON) | ⚠️ Partial | `Output.object()` / `streamObject()` (prompt-based) |
-| Custom tools             | ❌ None    | Server-side only                                    |
-| temperature/topP/topK    | ❌ None    | Provider defaults                                   |
-| maxTokens                | ❌ None    | Agent config                                        |
+| Feature                  | Support    | Notes                                              |
+| ------------------------ | ---------- | -------------------------------------------------- |
+| Text generation          | ✅ Full    | `generateText()`, `streamText()`                   |
+| Streaming                | ✅ Full    | Real-time SSE streaming                            |
+| Multi-turn conversations | ✅ Full    | Session-based context                              |
+| Tool observation         | ✅ Full    | See tool execution                                 |
+| Reasoning/thinking       | ✅ Full    | ReasoningPart support                              |
+| Model selection          | ✅ Full    | Per-request model                                  |
+| Agent selection          | ✅ Full    | build, plan, general, explore                      |
+| Abort/cancellation       | ✅ Full    | AbortSignal support                                |
+| Image input (base64)     | ⚠️ Partial | Data URLs only                                     |
+| Image input (URL)        | ❌ None    | Not supported                                      |
+| Structured output (JSON) | ✅ Full    | OpenCode native `json_schema` output mode          |
+| Custom tools             | ❌ None    | Server-side only                                   |
+| Tool approvals           | ✅ Full    | `tool-approval-request` / `tool-approval-response` |
+| File/source streaming    | ✅ Full    | Emits `file` and `source` stream parts             |
+| temperature/topP/topK    | ❌ None    | Provider defaults                                  |
+| maxTokens                | ❌ None    | Agent config                                       |
 
 ## Provider Settings
 
@@ -244,8 +246,16 @@ interface OpencodeSettings {
   sessionTitle?: string; // Title for new sessions
   agent?: string; // Agent name
   systemPrompt?: string; // Override system prompt
-  tools?: Record<string, boolean>; // Enable/disable tools
-  cwd?: string; // Working directory
+  tools?: Record<string, boolean>; // Enable/disable tools (deprecated in favor of permissions)
+  permission?: Array<{
+    permission: string;
+    pattern: string;
+    action: "allow" | "deny" | "ask";
+  }>; // Session ruleset
+  variant?: string; // OpenCode variant
+  directory?: string; // Per-request directory
+  cwd?: string; // Legacy working directory alias
+  outputFormatRetryCount?: number; // JSON schema retry count
   logger?: Logger | false; // Logging
   verbose?: boolean; // Debug logging
 }

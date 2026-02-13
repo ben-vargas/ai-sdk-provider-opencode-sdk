@@ -65,6 +65,11 @@ const mockClient = {
       })(),
     }),
   },
+  permission: {
+    reply: vi.fn().mockResolvedValue({
+      data: true,
+    }),
+  },
 };
 
 const mockClientManager = {
@@ -201,6 +206,28 @@ describe("opencode-language-model", () => {
       expect(mockClient.session.create).toHaveBeenCalledTimes(1);
     });
 
+    it("should only create one session for concurrent calls", async () => {
+      mockClient.session.create.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            setTimeout(() => resolve({ data: { id: "session-concurrent" } }), 20);
+          }),
+      );
+
+      const [result1, result2] = await Promise.all([
+        model.doGenerate({ prompt: basicPrompt }),
+        model.doGenerate({ prompt: basicPrompt }),
+      ]);
+
+      expect(mockClient.session.create).toHaveBeenCalledTimes(1);
+      expect(result1.providerMetadata?.opencode?.sessionId).toBe(
+        "session-concurrent",
+      );
+      expect(result2.providerMetadata?.opencode?.sessionId).toBe(
+        "session-concurrent",
+      );
+    });
+
     it("should warn about unsupported parameters", async () => {
       const result = await model.doGenerate({
         prompt: basicPrompt,
@@ -244,9 +271,7 @@ describe("opencode-language-model", () => {
 
       expect(mockClient.session.prompt).toHaveBeenCalledWith(
         expect.objectContaining({
-          body: expect.objectContaining({
-            system: "You are helpful.",
-          }),
+          system: "You are helpful.",
         }),
       );
     });
@@ -258,12 +283,10 @@ describe("opencode-language-model", () => {
 
       expect(mockClient.session.prompt).toHaveBeenCalledWith(
         expect.objectContaining({
-          body: expect.objectContaining({
-            model: {
-              providerID: "anthropic",
-              modelID: "claude-3-5-sonnet-20241022",
-            },
-          }),
+          model: {
+            providerID: "anthropic",
+            modelID: "claude-3-5-sonnet-20241022",
+          },
         }),
       );
     });
@@ -282,19 +305,94 @@ describe("opencode-language-model", () => {
         responseFormat: { type: "json" },
       });
 
-      // Should add JSON instruction to parts
       expect(mockClient.session.prompt).toHaveBeenCalledWith(
         expect.objectContaining({
-          body: expect.objectContaining({
-            parts: expect.arrayContaining([
-              expect.objectContaining({
-                type: "text",
-                text: expect.stringContaining("JSON"),
-              }),
-            ]),
+          format: expect.objectContaining({
+            type: "json_schema",
           }),
         }),
       );
+
+      const requestBody = mockClient.session.prompt.mock.calls[0]?.[0] as {
+        parts?: Array<{ type: string; text?: string }>;
+      };
+
+      const hasPromptJsonInstruction = requestBody.parts?.some(
+        (part) =>
+          part.type === "text" &&
+          typeof part.text === "string" &&
+          part.text.includes("You must respond with valid JSON only"),
+      );
+      expect(hasPromptJsonInstruction).toBe(false);
+    });
+
+    it("should apply tool approval responses before prompting", async () => {
+      const promptWithApproval: LanguageModelV3Prompt = [
+        {
+          role: "user",
+          content: [{ type: "text", text: "Continue after approval." }],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-approval-response",
+              approvalId: "approval-1",
+              approved: true,
+              reason: "Looks safe",
+            },
+          ],
+        },
+      ];
+
+      await model.doGenerate({
+        prompt: promptWithApproval,
+      });
+
+      expect(mockClient.permission.reply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestID: "approval-1",
+          reply: "once",
+          message: "Looks safe",
+        }),
+      );
+    });
+
+    it("should not emit duplicate document sources for local files with source metadata", async () => {
+      mockClient.session.prompt.mockResolvedValueOnce({
+        data: {
+          info: {
+            id: "msg-1",
+            sessionID: "session-123",
+            role: "assistant",
+            finish: "end_turn",
+          },
+          parts: [
+            {
+              id: "file-1",
+              type: "file",
+              mime: "text/plain",
+              filename: "README.md",
+              url: "/workspace/README.md",
+              source: {
+                type: "file",
+                path: "/workspace/README.md",
+              },
+            },
+          ],
+        },
+      });
+
+      const result = await model.doGenerate({
+        prompt: basicPrompt,
+      });
+
+      const documentSources = result.content.filter(
+        (part): part is { type: "source"; sourceType: "document" } =>
+          part.type === "source" && part.sourceType === "document",
+      );
+
+      expect(documentSources).toHaveLength(1);
     });
   });
 
@@ -336,6 +434,28 @@ describe("opencode-language-model", () => {
       });
 
       expect(result.request?.body).toBeDefined();
+    });
+
+    it("should use native JSON schema mode without adding prompt instructions", async () => {
+      const result = await model.doStream({
+        prompt: basicPrompt,
+        responseFormat: { type: "json" },
+      });
+
+      const requestBody = result.request?.body as {
+        format?: { type?: string };
+        parts?: Array<{ type: string; text?: string }>;
+      };
+
+      expect(requestBody.format?.type).toBe("json_schema");
+
+      const hasPromptJsonInstruction = requestBody.parts?.some(
+        (part) =>
+          part.type === "text" &&
+          typeof part.text === "string" &&
+          part.text.includes("You must respond with valid JSON only"),
+      );
+      expect(hasPromptJsonInstruction).toBe(false);
     });
 
     it("should emit finish part at end of stream", async () => {
@@ -381,6 +501,223 @@ describe("opencode-language-model", () => {
       const finishPart = parts.find((p: any) => p.type === "finish");
       expect(finishPart).toBeDefined();
       expect((finishPart as any).finishReason).toBeDefined();
+    });
+
+    it("should subscribe before applying tool approval responses", async () => {
+      const promptWithApproval: LanguageModelV3Prompt = [
+        {
+          role: "user",
+          content: [{ type: "text", text: "Continue after approval." }],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-approval-response",
+              approvalId: "approval-1",
+              approved: true,
+              reason: "Looks safe",
+            },
+          ],
+        },
+      ];
+
+      const result = await model.doStream({
+        prompt: promptWithApproval,
+      });
+
+      const reader = result.stream.getReader();
+      await reader.read();
+      reader.releaseLock();
+
+      const subscribeOrder = mockClient.event.subscribe.mock.invocationCallOrder[0];
+      const replyOrder = mockClient.permission.reply.mock.invocationCallOrder[0];
+      const promptOrder = mockClient.session.prompt.mock.invocationCallOrder[0];
+
+      expect(subscribeOrder).toBeLessThan(replyOrder);
+      expect(replyOrder).toBeLessThan(promptOrder);
+    });
+
+    it("should close event iterator on normal session completion", async () => {
+      const completionEvents = [
+        {
+          type: "message.part.updated",
+          properties: {
+            part: {
+              id: "part-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "text",
+              text: "Hello",
+            },
+            delta: "Hello",
+          },
+        },
+        {
+          type: "session.status",
+          properties: {
+            sessionID: "session-123",
+            status: { type: "idle" },
+          },
+        },
+      ] as const;
+
+      let index = 0;
+      const iteratorReturn = vi
+        .fn<(value?: unknown) => Promise<IteratorResult<unknown>>, [unknown?]>()
+        .mockResolvedValue({ done: true, value: undefined });
+
+      const customStream: AsyncIterable<unknown> = {
+        [Symbol.asyncIterator]() {
+          return {
+            next() {
+              if (index < completionEvents.length) {
+                return Promise.resolve({
+                  done: false,
+                  value: completionEvents[index++],
+                });
+              }
+              return new Promise<IteratorResult<unknown>>(() => {
+                // Keep pending; the model should close via iterator.return().
+              });
+            },
+            return: iteratorReturn,
+          };
+        },
+      };
+
+      mockClient.event.subscribe.mockResolvedValueOnce({
+        stream: customStream,
+      });
+
+      const result = await model.doStream({
+        prompt: basicPrompt,
+      });
+
+      const reader = result.stream.getReader();
+      while (true) {
+        const { done } = await reader.read();
+        if (done) break;
+      }
+
+      expect(iteratorReturn).toHaveBeenCalled();
+    });
+
+    it("should terminate stream if prompt fails before any events are emitted", async () => {
+      const iteratorReturn = vi
+        .fn<() => Promise<IteratorResult<unknown>>, []>()
+        .mockResolvedValue({ done: true, value: undefined });
+
+      const hangingStream: AsyncIterable<unknown> = {
+        [Symbol.asyncIterator]() {
+          return {
+            next() {
+              return new Promise<IteratorResult<unknown>>(() => {
+                // Intentionally never resolves to emulate server silence.
+              });
+            },
+            return: iteratorReturn,
+          };
+        },
+      };
+
+      mockClient.event.subscribe.mockResolvedValueOnce({
+        stream: hangingStream,
+      });
+      mockClient.session.prompt.mockRejectedValueOnce(
+        new Error("prompt failed"),
+      );
+
+      const result = await model.doStream({
+        prompt: basicPrompt,
+      });
+
+      const reader = result.stream.getReader();
+      const parts = await new Promise<unknown[]>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error("Timed out waiting for stream to close"));
+        }, 500);
+
+        (async () => {
+          const streamParts: unknown[] = [];
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            streamParts.push(value);
+          }
+          clearTimeout(timeout);
+          resolve(streamParts);
+        })().catch((error: unknown) => {
+          clearTimeout(timeout);
+          reject(error);
+        });
+      });
+
+      expect(parts[0]).toMatchObject({ type: "stream-start" });
+      expect(parts.some((part: any) => part.type === "error")).toBe(true);
+      expect(iteratorReturn).toHaveBeenCalled();
+    });
+
+    it("should terminate stream when abort signal fires without incoming events", async () => {
+      const iteratorReturn = vi
+        .fn<() => Promise<IteratorResult<unknown>>, []>()
+        .mockResolvedValue({ done: true, value: undefined });
+
+      const hangingStream: AsyncIterable<unknown> = {
+        [Symbol.asyncIterator]() {
+          return {
+            next() {
+              return new Promise<IteratorResult<unknown>>(() => {
+                // Intentionally never resolves to emulate an idle stream.
+              });
+            },
+            return: iteratorReturn,
+          };
+        },
+      };
+
+      mockClient.event.subscribe.mockResolvedValueOnce({
+        stream: hangingStream,
+      });
+      mockClient.session.prompt.mockImplementationOnce(
+        () => new Promise(() => {}),
+      );
+
+      const abortController = new AbortController();
+      const result = await model.doStream({
+        prompt: basicPrompt,
+        abortSignal: abortController.signal,
+      });
+
+      const reader = result.stream.getReader();
+      const partsPromise = new Promise<unknown[]>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error("Timed out waiting for stream abort"));
+        }, 500);
+
+        (async () => {
+          const streamParts: unknown[] = [];
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            streamParts.push(value);
+          }
+          clearTimeout(timeout);
+          resolve(streamParts);
+        })().catch((error: unknown) => {
+          clearTimeout(timeout);
+          reject(error);
+        });
+      });
+
+      setTimeout(() => abortController.abort(), 10);
+      const parts = await partsPromise;
+
+      expect(parts[0]).toMatchObject({ type: "stream-start" });
+      expect(mockClient.session.abort).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionID: "session-123" }),
+      );
+      expect(iteratorReturn).toHaveBeenCalled();
     });
   });
 
@@ -503,6 +840,43 @@ describe("opencode-language-model", () => {
       expect(toolResult).toMatchObject({
         isError: true,
         result: "Command not found",
+      });
+    });
+
+    it("should safely stringify undefined tool input", async () => {
+      mockClient.session.prompt.mockResolvedValueOnce({
+        data: {
+          info: {
+            id: "msg-1",
+            sessionID: "session-123",
+            role: "assistant",
+            finish: "tool_use",
+          },
+          parts: [
+            {
+              id: "part-1",
+              type: "tool",
+              callID: "call-1",
+              tool: "Bash",
+              state: {
+                status: "completed",
+                input: undefined,
+                output: "done",
+              },
+            },
+          ],
+        },
+      });
+
+      const result = await model.doGenerate({
+        prompt: [
+          { role: "user", content: [{ type: "text", text: "run tool" }] },
+        ],
+      });
+
+      const toolCall = result.content.find((c) => c.type === "tool-call");
+      expect(toolCall).toMatchObject({
+        input: "{}",
       });
     });
   });

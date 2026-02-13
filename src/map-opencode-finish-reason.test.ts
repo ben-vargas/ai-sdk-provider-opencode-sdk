@@ -85,6 +85,22 @@ describe("map-opencode-finish-reason", () => {
       ).toBe("length");
     });
 
+    it('should return "length" for ContextOverflowError', () => {
+      expect(
+        unified({
+          error: { name: "ContextOverflowError" },
+        }),
+      ).toBe("length");
+    });
+
+    it('should return "error" for StructuredOutputError', () => {
+      expect(
+        unified({
+          error: { name: "StructuredOutputError" },
+        }),
+      ).toBe("error");
+    });
+
     it('should return "error" for ProviderAuthError', () => {
       expect(
         unified({

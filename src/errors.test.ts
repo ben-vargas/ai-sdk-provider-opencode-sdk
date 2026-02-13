@@ -64,9 +64,14 @@ describe("errors", () => {
       expect(isTimeoutError(error)).toBe(true);
     });
 
-    it("should return true for AbortError name", () => {
+    it("should return false for AbortError name", () => {
       const error = { name: "AbortError", message: "Aborted" };
-      expect(isTimeoutError(error)).toBe(true);
+      expect(isTimeoutError(error)).toBe(false);
+    });
+
+    it("should return false for ABORT_ERR code", () => {
+      const error = { code: "ABORT_ERR", message: "Operation aborted" };
+      expect(isTimeoutError(error)).toBe(false);
     });
 
     it("should return true for ETIMEDOUT code", () => {
@@ -149,6 +154,11 @@ describe("errors", () => {
       expect(isOutputLengthError(error)).toBe(true);
     });
 
+    it("should return true for ContextOverflowError name", () => {
+      const error = { name: "ContextOverflowError", message: "Context limit" };
+      expect(isOutputLengthError(error)).toBe(true);
+    });
+
     it("should return false for null", () => {
       expect(isOutputLengthError(null)).toBe(false);
     });
@@ -220,6 +230,13 @@ describe("errors", () => {
       const result = createAPICallError(error);
 
       expect(result.isRetryable).toBe(true);
+    });
+
+    it("should mark abort errors as non-retryable", () => {
+      const error = { name: "AbortError", message: "Aborted" };
+      const result = createAPICallError(error);
+
+      expect(result.isRetryable).toBe(false);
     });
   });
 
@@ -294,6 +311,27 @@ describe("errors", () => {
 
       expect(result).toBeInstanceOf(APICallError);
       expect((result as APICallError).isRetryable).toBe(true);
+      expect(result.message).toContain("5000ms");
+    });
+
+    it("should use metadata timeout when wrapping timeout errors", () => {
+      const error = { name: "TimeoutError", message: "Timed out" };
+      const result = wrapError(error, { timeoutMs: 12000 });
+
+      expect(result).toBeInstanceOf(APICallError);
+      expect(result.message).toContain("12000ms");
+    });
+
+    it("should use timeout value from error when available", () => {
+      const error = {
+        name: "TimeoutError",
+        message: "Timed out",
+        timeoutMs: 7500,
+      };
+      const result = wrapError(error);
+
+      expect(result).toBeInstanceOf(APICallError);
+      expect(result.message).toContain("7500ms");
     });
 
     it("should wrap other errors as APICallError", () => {
