@@ -1,12 +1,13 @@
-import type { Logger, OpencodeProviderSettings } from "./types.js";
+import type {
+  Logger,
+  OpencodeClient,
+  OpencodeClientOptions,
+  OpencodeCreateClientOptions,
+  OpencodeProviderSettings,
+} from "./types.js";
 import { getLogger } from "./logger.js";
 import { createTimeoutError, extractErrorMessage } from "./errors.js";
 
-// Import types from the SDK
-// We'll use dynamic import to handle the async nature of the SDK
-type OpencodeClient = Awaited<
-  ReturnType<typeof import("@opencode-ai/sdk/v2").createOpencodeClient>
->;
 type OpencodeServer = Awaited<
   ReturnType<typeof import("@opencode-ai/sdk/v2").createOpencodeServer>
 >;
@@ -21,6 +22,8 @@ export interface ClientManagerOptions {
   autoStartServer?: boolean;
   serverTimeout?: number;
   cwd?: string;
+  clientOptions?: OpencodeClientOptions;
+  client?: OpencodeClient;
   logger?: Logger | false;
 }
 
@@ -104,7 +107,31 @@ export class OpencodeClientManager {
         ...filteredOptions,
       };
       this.logger = getLogger(options.logger ?? this.options.logger);
+      return;
     }
+
+    const filteredOptions = Object.fromEntries(
+      Object.entries(options).filter(([_, v]) => v !== undefined),
+    ) as ClientManagerOptions;
+
+    if (Object.keys(filteredOptions).length === 0) {
+      return;
+    }
+
+    if (
+      filteredOptions.client &&
+      this.client &&
+      filteredOptions.client !== this.client
+    ) {
+      this.logger.warn(
+        "Client manager already initialized; provided preconfigured client was ignored because a client is already active. New options from createOpencode() are ignored after initialization. Use separate client manager instances or call dispose() first.",
+      );
+      return;
+    }
+
+    this.logger.warn(
+      "Client manager already initialized; new options from createOpencode() were ignored. Use separate client manager instances or call dispose() first.",
+    );
   }
 
   /**
@@ -140,6 +167,16 @@ export class OpencodeClientManager {
    * Initialize the client and optionally the server.
    */
   private async initializeClient(): Promise<OpencodeClient> {
+    if (this.options.client) {
+      if (this.options.clientOptions) {
+        this.logger.warn(
+          "Both client and clientOptions were provided; clientOptions will be ignored because client takes precedence.",
+        );
+      }
+      this.logger.debug?.("Using preconfigured OpenCode client");
+      return this.options.client;
+    }
+
     const { createOpencodeClient, createOpencodeServer } =
       await import("@opencode-ai/sdk/v2");
 
@@ -148,10 +185,9 @@ export class OpencodeClientManager {
       this.logger.debug?.(
         `Connecting to external OpenCode server at ${this.options.baseUrl}`,
       );
-      return createOpencodeClient({
-        baseUrl: this.options.baseUrl,
-        directory: this.options.cwd,
-      });
+      return createOpencodeClient(
+        this.createManagedClientOptions(this.options.baseUrl),
+      );
     }
 
     const serverUrl = `http://${this.options.hostname}:${this.options.port}`;
@@ -161,10 +197,7 @@ export class OpencodeClientManager {
       this.logger.debug?.(
         `Connected to existing OpenCode server at ${serverUrl}`,
       );
-      return createOpencodeClient({
-        baseUrl: serverUrl,
-        directory: this.options.cwd,
-      });
+      return createOpencodeClient(this.createManagedClientOptions(serverUrl));
     }
 
     // Start server if autoStart is enabled
@@ -180,10 +213,9 @@ export class OpencodeClientManager {
 
         this.logger.debug?.(`OpenCode server started at ${this.server.url}`);
 
-        return createOpencodeClient({
-          baseUrl: this.server.url,
-          directory: this.options.cwd,
-        });
+        return createOpencodeClient(
+          this.createManagedClientOptions(this.server.url),
+        );
       } catch (error) {
         const message = extractErrorMessage(error);
 
@@ -225,6 +257,31 @@ export class OpencodeClientManager {
         return false;
       }
     }
+  }
+
+  /**
+   * Build client options with manager-owned baseUrl and directory.
+   */
+  private createManagedClientOptions(baseUrl: string): OpencodeCreateClientOptions {
+    const options = this.options.clientOptions ?? {};
+    const optionsRecord = options as Record<string, unknown>;
+
+    if (optionsRecord.baseUrl !== undefined) {
+      this.logger.warn(
+        "Ignoring clientOptions.baseUrl because provider baseUrl/hostname/port controls server routing.",
+      );
+    }
+    if (optionsRecord.directory !== undefined) {
+      this.logger.warn(
+        "Ignoring clientOptions.directory because directory is managed by model settings/defaultSettings.",
+      );
+    }
+
+    return {
+      ...options,
+      baseUrl,
+      directory: this.options.cwd,
+    };
   }
 
   /**
@@ -371,6 +428,8 @@ export function createClientManagerFromSettings(
     baseUrl: settings.baseUrl,
     autoStartServer: settings.autoStartServer,
     serverTimeout: settings.serverTimeout,
+    clientOptions: settings.clientOptions,
+    client: settings.client,
     // Prefer explicit v2 directory setting; fall back to legacy cwd.
     cwd: settings.defaultSettings?.directory ?? settings.defaultSettings?.cwd,
     logger,

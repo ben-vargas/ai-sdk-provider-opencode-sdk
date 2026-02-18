@@ -83,6 +83,13 @@ describe("validation", () => {
         port: 4096,
         autoStartServer: true,
         serverTimeout: 10000,
+        clientOptions: {
+          headers: {
+            Authorization: "Bearer token",
+          },
+          throwOnError: true,
+          credentials: "include",
+        },
       };
 
       const result = validateProviderSettings(settings);
@@ -108,6 +115,71 @@ describe("validation", () => {
 
       const result = validateProviderSettings(settings);
       expect(result.warnings.some((w) => w.includes("timeout"))).toBe(true);
+    });
+
+    it("should warn when both client and clientOptions are provided", () => {
+      const settings = {
+        client: {} as Awaited<
+          ReturnType<typeof import("@opencode-ai/sdk/v2").createOpencodeClient>
+        >,
+        clientOptions: {
+          headers: {
+            "x-test": "value",
+          },
+        },
+      };
+
+      const result = validateProviderSettings(settings);
+      expect(
+        result.warnings.some(
+          (w) => w.includes("client and clientOptions") || w.includes("clientOptions"),
+        ),
+      ).toBe(true);
+    });
+
+    it("should warn when clientOptions contains reserved baseUrl and directory", () => {
+      const settings = {
+        clientOptions: {
+          baseUrl: "http://ignored:9999",
+          directory: "/tmp/ignored",
+        } as unknown as Record<string, unknown>,
+      };
+
+      const result = validateProviderSettings(settings);
+      expect(
+        result.warnings.some(
+          (w) => w.includes("clientOptions.baseUrl") || w.includes("baseUrl"),
+        ),
+      ).toBe(true);
+      expect(
+        result.warnings.some(
+          (w) => w.includes("clientOptions.directory") || w.includes("directory"),
+        ),
+      ).toBe(true);
+    });
+
+    it("should not warn for undefined reserved keys in clientOptions", () => {
+      const settings = {
+        clientOptions: {
+          baseUrl: undefined,
+          directory: undefined,
+          headers: {
+            "x-test": "value",
+          },
+        } as unknown as Record<string, unknown>,
+      };
+
+      const result = validateProviderSettings(settings);
+      expect(
+        result.warnings.some(
+          (w) => w.includes("clientOptions.baseUrl") || w.includes("baseUrl"),
+        ),
+      ).toBe(false);
+      expect(
+        result.warnings.some(
+          (w) => w.includes("clientOptions.directory") || w.includes("directory"),
+        ),
+      ).toBe(false);
     });
   });
 

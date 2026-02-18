@@ -1,6 +1,6 @@
 {
   "name": "ai-sdk-provider-opencode-sdk",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "AI SDK v6 provider for OpenCode via @opencode-ai/sdk",
   "keywords": [
     "ai-sdk",
@@ -52,7 +52,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "example:basic": "npm run build && npx tsx examples/basic-usage.ts",
-    "example:streaming": "npm run build && npx tsx examples/streaming.ts"
+    "example:streaming": "npm run build && npx tsx examples/streaming.ts",
+    "example:client-options": "npm run build && npx tsx examples/client-options.ts"
   },
   "dependencies": {
     "@ai-sdk/provider": "^3.0.8",

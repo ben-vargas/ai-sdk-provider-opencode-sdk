@@ -57,6 +57,8 @@ export const opcodeProviderSettingsSchema = z.object({
   baseUrl: z.string().url().optional(),
   autoStartServer: z.boolean().optional(),
   serverTimeout: z.number().int().positive().optional(),
+  clientOptions: z.record(z.string(), z.unknown()).optional(),
+  client: z.object({}).passthrough().optional(),
   defaultSettings: opcodeSettingsSchema.optional(),
 });
 
@@ -153,6 +155,26 @@ export function validateProviderSettings(
     warnings.push(
       `Server timeout ${settings.serverTimeout}ms is very short, consider at least 5000ms`,
     );
+  }
+
+  if (settings.client && settings.clientOptions) {
+    warnings.push(
+      "Both client and clientOptions were provided; clientOptions will be ignored because client takes precedence",
+    );
+  }
+
+  if (settings.clientOptions) {
+    const options = settings.clientOptions as Record<string, unknown>;
+    if (options.baseUrl !== undefined) {
+      warnings.push(
+        "clientOptions.baseUrl is ignored; use provider baseUrl or hostname/port instead",
+      );
+    }
+    if (options.directory !== undefined) {
+      warnings.push(
+        "clientOptions.directory is ignored; use defaultSettings.directory or per-model directory instead",
+      );
+    }
   }
 
   // Log warnings if logger is provided

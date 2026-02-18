@@ -87,6 +87,52 @@ describe("opencode-provider", () => {
 
       expect(model).toBeDefined();
     });
+
+    it("should pass client settings to client manager", async () => {
+      const preconfiguredClient = {
+        session: {
+          create: vi.fn(),
+          prompt: vi.fn(),
+          abort: vi.fn(),
+        },
+        event: {
+          subscribe: vi.fn(),
+        },
+      };
+
+      createOpencode({
+        baseUrl: "http://custom:8080",
+        defaultSettings: {
+          logger: false,
+        },
+        clientOptions: {
+          headers: {
+            "x-provider": "test",
+          },
+          throwOnError: true,
+        },
+        client: preconfiguredClient as Awaited<
+          ReturnType<typeof import("@opencode-ai/sdk/v2").createOpencodeClient>
+        >,
+      });
+
+      const { createClientManagerFromSettings } = await import(
+        "./opencode-client-manager.js"
+      );
+      expect(createClientManagerFromSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          baseUrl: "http://custom:8080",
+          clientOptions: {
+            headers: {
+              "x-provider": "test",
+            },
+            throwOnError: true,
+          },
+          client: preconfiguredClient,
+        }),
+        expect.anything(),
+      );
+    });
   });
 
   describe("provider methods", () => {
@@ -243,6 +289,25 @@ describe("opencode-provider", () => {
       expect(consoleWarnSpy).toHaveBeenCalled();
 
       consoleWarnSpy.mockRestore();
+    });
+
+    it("should not duplicate provider validation warnings", () => {
+      const warn = vi.fn();
+
+      createOpencode({
+        port: 70000, // Invalid port
+        defaultSettings: {
+          logger: {
+            warn,
+            error: vi.fn(),
+          },
+        },
+      });
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("outside valid range"),
+      );
     });
   });
 });
