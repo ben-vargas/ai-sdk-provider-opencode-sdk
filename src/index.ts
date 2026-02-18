@@ -20,6 +20,9 @@ export type { ClientManagerOptions } from "./opencode-client-manager.js";
 // Type exports
 export type {
   OpencodeModelId,
+  OpencodeClient,
+  OpencodeCreateClientOptions,
+  OpencodeClientOptions,
   OpencodeSettings,
   OpencodeProviderSettings,
   OpencodeProvider,

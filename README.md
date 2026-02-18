@@ -265,6 +265,7 @@ for await (const part of result.fullStream) {
 - `examples/abort-signal.ts` - Cancellation patterns for generate and stream calls.
 - `examples/image-input.ts` - File/image input using base64 or data URLs.
 - `examples/custom-config.ts` - Provider/model configuration and reliability controls.
+- `examples/client-options.ts` - `clientOptions` passthrough and preconfigured `client` patterns.
 - `examples/limitations.ts` - Practical limitations and expected behaviors.
 - `examples/long-running-tasks.ts` - Patterns for longer tasks and retries.
 
@@ -277,8 +278,41 @@ interface OpencodeProviderSettings {
   baseUrl?: string; // Override full URL
   autoStartServer?: boolean; // Default: true
   serverTimeout?: number; // Default: 10000
+  clientOptions?: OpencodeClientOptions; // Pass-through to createOpencodeClient()
+  client?: OpencodeClient; // Preconfigured SDK client (bypasses server management)
   defaultSettings?: OpencodeSettings;
 }
+```
+
+`clientOptions` forwards OpenCode SDK client configuration such as:
+
+- `headers` (custom HTTP headers)
+- `fetch` (custom fetch implementation)
+- `auth` (token or auth function)
+- `bodySerializer` / `querySerializer`
+- `requestValidator` / `responseValidator` / `responseTransformer`
+- `throwOnError`
+- standard `RequestInit` fields (`credentials`, `mode`, `cache`, `signal`, etc.)
+
+Notes:
+
+- `baseUrl` and `directory` remain provider/model managed (`baseUrl` at provider level, `directory` via `defaultSettings` or per-model settings).
+- If both `client` and `clientOptions` are provided, `client` takes precedence.
+- If `client` is provided, its lifecycle remains caller-managed; `dispose()` only cleans up provider-managed server processes.
+
+Example:
+
+```typescript
+const opencode = createOpencode({
+  baseUrl: "http://127.0.0.1:4096",
+  clientOptions: {
+    headers: {
+      "x-api-key": process.env.OPENCODE_API_KEY ?? "",
+    },
+    credentials: "include",
+    throwOnError: true,
+  },
+});
 ```
 
 ## Model Settings

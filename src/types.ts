@@ -9,6 +9,29 @@ import type { LanguageModelV3, ProviderV3 } from "@ai-sdk/provider";
 export type OpencodeModelId = string;
 
 /**
+ * OpenCode SDK client instance.
+ */
+export type OpencodeClient = Awaited<
+  ReturnType<typeof import("@opencode-ai/sdk/v2").createOpencodeClient>
+>;
+
+/**
+ * Full createOpencodeClient() options from OpenCode SDK.
+ */
+export type OpencodeCreateClientOptions = NonNullable<
+  Parameters<typeof import("@opencode-ai/sdk/v2").createOpencodeClient>[0]
+>;
+
+/**
+ * Provider passthrough options for createOpencodeClient().
+ * baseUrl and directory are managed by provider settings and model settings.
+ */
+export type OpencodeClientOptions = Omit<
+  OpencodeCreateClientOptions,
+  "baseUrl" | "directory"
+>;
+
+/**
  * Logger interface for the OpenCode provider.
  */
 export interface Logger {
@@ -152,6 +175,22 @@ export interface OpencodeProviderSettings {
    * @default 10000
    */
   serverTimeout?: number;
+
+  /**
+   * Additional createOpencodeClient() options to pass through to the SDK.
+   * Use this for custom headers, auth, fetch, serializers, validators,
+   * transformers, throwOnError, and RequestInit-compatible options.
+   *
+   * `baseUrl` and `directory` are managed by provider/model settings.
+   */
+  clientOptions?: OpencodeClientOptions;
+
+  /**
+   * Preconfigured OpenCode SDK client instance.
+   * When provided, this client is used directly and server management is
+   * bypassed.
+   */
+  client?: OpencodeClient;
 
   /**
    * Default settings applied to all model instances.

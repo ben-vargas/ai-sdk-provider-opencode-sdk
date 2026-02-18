@@ -59,7 +59,14 @@ describe("opencode-client-manager", () => {
     });
 
     it("should not update options after client initialized", async () => {
-      const instance = OpencodeClientManager.getInstance({ port: 4096 });
+      const warn = vi.fn();
+      const instance = OpencodeClientManager.getInstance({
+        port: 4096,
+        logger: {
+          warn,
+          error: vi.fn(),
+        },
+      });
       await instance.getClient();
 
       // Try to update options after initialization
@@ -67,6 +74,60 @@ describe("opencode-client-manager", () => {
 
       // Should still use original port
       expect(instance.getServerUrl()).toContain("4096");
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("already initialized"),
+      );
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("options from createOpencode() were ignored"),
+      );
+    });
+
+    it("should warn explicitly when a different preconfigured client is provided after initialization", async () => {
+      const warn = vi.fn();
+
+      const initialClient = {
+        session: {
+          create: vi.fn(),
+          prompt: vi.fn(),
+          abort: vi.fn(),
+        },
+        event: {
+          subscribe: vi.fn(),
+        },
+      };
+
+      const nextClient = {
+        session: {
+          create: vi.fn(),
+          prompt: vi.fn(),
+          abort: vi.fn(),
+        },
+        event: {
+          subscribe: vi.fn(),
+        },
+      };
+
+      const instance = OpencodeClientManager.getInstance({
+        client: initialClient as Awaited<
+          ReturnType<typeof import("@opencode-ai/sdk/v2").createOpencodeClient>
+        >,
+        logger: {
+          warn,
+          error: vi.fn(),
+        },
+      });
+
+      await instance.getClient();
+
+      OpencodeClientManager.getInstance({
+        client: nextClient as Awaited<
+          ReturnType<typeof import("@opencode-ai/sdk/v2").createOpencodeClient>
+        >,
+      });
+
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("provided preconfigured client was ignored"),
+      );
     });
   });
 
@@ -158,6 +219,191 @@ describe("opencode-client-manager", () => {
         expect.objectContaining({
           baseUrl: "http://custom-server:8080",
         }),
+      );
+    });
+
+    it("should forward clientOptions when baseUrl is provided", async () => {
+      const instance = OpencodeClientManager.getInstance({
+        baseUrl: "http://custom-server:8080",
+        clientOptions: {
+          headers: {
+            "x-api-key": "test-key",
+          },
+          throwOnError: true,
+          credentials: "include",
+        },
+      });
+
+      await instance.getClient();
+
+      const { createOpencodeClient } = await import("@opencode-ai/sdk/v2");
+      expect(createOpencodeClient).toHaveBeenCalledWith(
+        expect.objectContaining({
+          baseUrl: "http://custom-server:8080",
+          headers: {
+            "x-api-key": "test-key",
+          },
+          throwOnError: true,
+          credentials: "include",
+        }),
+      );
+    });
+
+    it("should forward clientOptions when connecting to existing server", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true });
+
+      const instance = OpencodeClientManager.getInstance({
+        autoStartServer: false,
+        clientOptions: {
+          headers: {
+            Authorization: "Bearer test-token",
+          },
+          credentials: "omit",
+        },
+      });
+
+      await instance.getClient();
+
+      const { createOpencodeClient, createOpencodeServer } = await import(
+        "@opencode-ai/sdk/v2"
+      );
+      expect(createOpencodeClient).toHaveBeenCalledWith(
+        expect.objectContaining({
+          baseUrl: "http://127.0.0.1:4096",
+          headers: {
+            Authorization: "Bearer test-token",
+          },
+          credentials: "omit",
+        }),
+      );
+      expect(createOpencodeServer).not.toHaveBeenCalled();
+    });
+
+    it("should forward clientOptions when starting managed server", async () => {
+      const instance = OpencodeClientManager.getInstance({
+        autoStartServer: true,
+        clientOptions: {
+          headers: {
+            "x-trace-id": "trace-123",
+          },
+          keepalive: true,
+        },
+      });
+
+      await instance.getClient();
+
+      const { createOpencodeClient } = await import("@opencode-ai/sdk/v2");
+      expect(createOpencodeClient).toHaveBeenCalledWith(
+        expect.objectContaining({
+          baseUrl: "http://127.0.0.1:4096",
+          headers: {
+            "x-trace-id": "trace-123",
+          },
+          keepalive: true,
+        }),
+      );
+    });
+
+    it("should ignore clientOptions.baseUrl and clientOptions.directory", async () => {
+      const warn = vi.fn();
+
+      const instance = OpencodeClientManager.getInstance({
+        baseUrl: "http://custom-server:8080",
+        clientOptions: {
+          baseUrl: "http://ignored:9999",
+          directory: "/tmp/ignored",
+          headers: { "x-test": "value" },
+        } as unknown as NonNullable<
+          Parameters<typeof import("@opencode-ai/sdk/v2").createOpencodeClient>[0]
+        >,
+        logger: {
+          warn,
+          error: vi.fn(),
+        },
+      });
+
+      await instance.getClient();
+
+      const { createOpencodeClient } = await import("@opencode-ai/sdk/v2");
+      expect(createOpencodeClient).toHaveBeenCalledWith(
+        expect.objectContaining({
+          baseUrl: "http://custom-server:8080",
+          headers: { "x-test": "value" },
+        }),
+      );
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("Ignoring clientOptions.baseUrl"),
+      );
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("Ignoring clientOptions.directory"),
+      );
+    });
+
+    it("should not warn for undefined reserved keys in clientOptions", async () => {
+      const warn = vi.fn();
+
+      const instance = OpencodeClientManager.getInstance({
+        baseUrl: "http://custom-server:8080",
+        clientOptions: {
+          baseUrl: undefined,
+          directory: undefined,
+          headers: { "x-test": "value" },
+        } as unknown as NonNullable<
+          Parameters<typeof import("@opencode-ai/sdk/v2").createOpencodeClient>[0]
+        >,
+        logger: {
+          warn,
+          error: vi.fn(),
+        },
+      });
+
+      await instance.getClient();
+
+      expect(warn).not.toHaveBeenCalledWith(
+        expect.stringContaining("Ignoring clientOptions.baseUrl"),
+      );
+      expect(warn).not.toHaveBeenCalledWith(
+        expect.stringContaining("Ignoring clientOptions.directory"),
+      );
+    });
+
+    it("should use preconfigured client when provided", async () => {
+      const warn = vi.fn();
+      const preconfiguredClient = {
+        session: {
+          create: vi.fn(),
+          prompt: vi.fn(),
+          abort: vi.fn(),
+        },
+        event: {
+          subscribe: vi.fn(),
+        },
+      };
+
+      const instance = OpencodeClientManager.getInstance({
+        client: preconfiguredClient as Awaited<
+          ReturnType<typeof import("@opencode-ai/sdk/v2").createOpencodeClient>
+        >,
+        clientOptions: {
+          headers: { "x-ignored": "value" },
+        },
+        logger: {
+          warn,
+          error: vi.fn(),
+        },
+      });
+
+      const client = await instance.getClient();
+
+      const { createOpencodeClient, createOpencodeServer } = await import(
+        "@opencode-ai/sdk/v2"
+      );
+      expect(client).toBe(preconfiguredClient);
+      expect(createOpencodeClient).not.toHaveBeenCalled();
+      expect(createOpencodeServer).not.toHaveBeenCalled();
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("clientOptions will be ignored"),
       );
     });
 
@@ -308,6 +554,53 @@ describe("opencode-client-manager", () => {
       });
 
       expect(manager).toBeDefined();
+    });
+
+    it("should forward clientOptions from provider settings", async () => {
+      const manager = createClientManagerFromSettings({
+        baseUrl: "http://custom:8080",
+        clientOptions: {
+          headers: {
+            "x-provider": "settings",
+          },
+          throwOnError: true,
+        },
+      });
+
+      await manager.getClient();
+
+      const { createOpencodeClient } = await import("@opencode-ai/sdk/v2");
+      expect(createOpencodeClient).toHaveBeenCalledWith(
+        expect.objectContaining({
+          baseUrl: "http://custom:8080",
+          headers: {
+            "x-provider": "settings",
+          },
+          throwOnError: true,
+        }),
+      );
+    });
+
+    it("should use preconfigured client from provider settings", async () => {
+      const preconfiguredClient = {
+        session: {
+          create: vi.fn(),
+          prompt: vi.fn(),
+          abort: vi.fn(),
+        },
+        event: {
+          subscribe: vi.fn(),
+        },
+      };
+
+      const manager = createClientManagerFromSettings({
+        client: preconfiguredClient as Awaited<
+          ReturnType<typeof import("@opencode-ai/sdk/v2").createOpencodeClient>
+        >,
+      });
+
+      const client = await manager.getClient();
+      expect(client).toBe(preconfiguredClient);
     });
   });
 });

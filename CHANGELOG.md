@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - No changes yet.
 
+## [2.1.0] - 2026-02-18
+
+### Added
+
+- **SDK client passthrough options** - Added `clientOptions` on `OpencodeProviderSettings` to forward OpenCode `createOpencodeClient()` configuration (headers, auth, fetch, serializers, validators, transformers, throwOnError, and RequestInit-compatible options).
+- **Preconfigured client support** - Added `client` on `OpencodeProviderSettings` to use a prebuilt OpenCode SDK client directly.
+- **Client configuration example** - Added `examples/client-options.ts` showing `clientOptions` passthrough and preconfigured `client` usage patterns.
+
+### Changed
+
+- **Client initialization behavior** - `clientOptions` are now applied consistently across external `baseUrl`, existing-server, and auto-started-server client creation paths.
+- **Conflict handling** - Reserved `baseUrl` and `directory` values in `clientOptions` are ignored with warnings; `client` takes precedence over `clientOptions`.
+
 ## [2.0.0] - 2026-02-13
 
 - **Breaking release** - OpenCode SDK v2 migration and AI SDK v6 hardening.

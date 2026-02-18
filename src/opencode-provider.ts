@@ -41,12 +41,7 @@ export function createOpencode(
   const logger = getLogger(options?.defaultSettings?.logger);
 
   // Validate provider settings
-  const { warnings } = validateProviderSettings(options, logger);
-
-  // Log any validation warnings
-  for (const warning of warnings) {
-    logger.warn(warning);
-  }
+  validateProviderSettings(options, logger);
 
   // Create client manager
   const clientManager = createClientManagerFromSettings(options ?? {}, logger);
