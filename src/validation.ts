@@ -59,6 +59,7 @@ export const opcodeProviderSettingsSchema = z.object({
   serverTimeout: z.number().int().positive().optional(),
   clientOptions: z.record(z.string(), z.unknown()).optional(),
   client: z.object({}).passthrough().optional(),
+  clientManager: z.object({}).passthrough().optional(),
   defaultSettings: opcodeSettingsSchema.optional(),
 });
 
@@ -154,6 +155,12 @@ export function validateProviderSettings(
   if (settings.serverTimeout !== undefined && settings.serverTimeout < 1000) {
     warnings.push(
       `Server timeout ${settings.serverTimeout}ms is very short, consider at least 5000ms`,
+    );
+  }
+
+  if (settings.clientManager && settings.client) {
+    warnings.push(
+      "Both clientManager and client were provided; clientManager will be used and client will be ignored.",
     );
   }
 

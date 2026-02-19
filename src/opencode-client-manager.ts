@@ -81,6 +81,15 @@ export class OpencodeClientManager {
   }
 
   /**
+   * Create a standalone (non-singleton) client manager instance.
+   * Use this when you need isolated client managers, e.g. for concurrent
+   * sessions pointing at different servers.
+   */
+  static createInstance(options: ClientManagerOptions): OpencodeClientManager {
+    return new OpencodeClientManager(options);
+  }
+
+  /**
    * Reset the singleton instance.
    * Used primarily for testing.
    */
