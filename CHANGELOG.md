@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - No changes yet.
 
+## [2.1.1] - 2026-02-19
+
+### Added
+
+- **Isolated client manager instances** - Added `OpencodeClientManager.createInstance()` for creating standalone (non-singleton) client managers, enabling concurrent sessions pointing at different servers.
+- **Client manager injection** - Added `clientManager` option on `OpencodeProviderSettings` to use a custom client manager instead of the shared singleton.
+- **Validation for conflicting options** - Added warning when both `clientManager` and `client` are provided.
+
+### Changed
+
+- **OpencodeClient type** - Aligned `OpencodeClient` type alias to the SDK-exported `OpencodeClient` type directly instead of inferring from `createOpencodeClient` return type.
+
 ## [2.1.0] - 2026-02-18
 
 ### Added
