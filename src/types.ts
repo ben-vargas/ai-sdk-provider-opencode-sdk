@@ -11,9 +11,7 @@ export type OpencodeModelId = string;
 /**
  * OpenCode SDK client instance.
  */
-export type OpencodeClient = Awaited<
-  ReturnType<typeof import("@opencode-ai/sdk/v2").createOpencodeClient>
->;
+export type OpencodeClient = import("@opencode-ai/sdk/v2").OpencodeClient;
 
 /**
  * Full createOpencodeClient() options from OpenCode SDK.
@@ -191,6 +189,14 @@ export interface OpencodeProviderSettings {
    * bypassed.
    */
   client?: OpencodeClient;
+
+  /**
+   * Custom client manager instance.
+   * When provided, this manager is used instead of the shared singleton.
+   * Use OpencodeClientManager.createInstance() to create isolated managers
+   * for concurrent multi-session usage.
+   */
+  clientManager?: import("./opencode-client-manager").OpencodeClientManager;
 
   /**
    * Default settings applied to all model instances.

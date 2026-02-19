@@ -4,6 +4,7 @@ import {
   createClientManager,
   createClientManagerFromSettings,
 } from "./opencode-client-manager.js";
+import type { OpencodeClient } from "./types.js";
 
 // Mock the @opencode-ai/sdk/v2 module
 vi.mock("@opencode-ai/sdk/v2", () => ({
@@ -601,6 +602,56 @@ describe("opencode-client-manager", () => {
 
       const client = await manager.getClient();
       expect(client).toBe(preconfiguredClient);
+    });
+  });
+
+  describe("createInstance", () => {
+    it("should return a new instance each time (not the singleton)", () => {
+      const a = OpencodeClientManager.createInstance({});
+      const b = OpencodeClientManager.createInstance({});
+      const singleton = OpencodeClientManager.getInstance();
+
+      expect(a).not.toBe(b);
+      expect(a).not.toBe(singleton);
+      expect(b).not.toBe(singleton);
+    });
+
+    it("should use its own client independently of the singleton", async () => {
+      const clientA = {
+        session: { create: vi.fn(), prompt: vi.fn(), abort: vi.fn() },
+        event: { subscribe: vi.fn() },
+      } as unknown as OpencodeClient;
+
+      const clientB = {
+        session: { create: vi.fn(), prompt: vi.fn(), abort: vi.fn() },
+        event: { subscribe: vi.fn() },
+      } as unknown as OpencodeClient;
+
+      const a = OpencodeClientManager.createInstance({ client: clientA });
+      const b = OpencodeClientManager.createInstance({ client: clientB });
+
+      expect(await a.getClient()).toBe(clientA);
+      expect(await b.getClient()).toBe(clientB);
+    });
+
+    it("should not affect each other when disposed", async () => {
+      const clientA = {
+        session: { create: vi.fn(), prompt: vi.fn(), abort: vi.fn() },
+        event: { subscribe: vi.fn() },
+      } as unknown as OpencodeClient;
+
+      const clientB = {
+        session: { create: vi.fn(), prompt: vi.fn(), abort: vi.fn() },
+        event: { subscribe: vi.fn() },
+      } as unknown as OpencodeClient;
+
+      const a = OpencodeClientManager.createInstance({ client: clientA });
+      const b = OpencodeClientManager.createInstance({ client: clientB });
+
+      await a.dispose();
+
+      await expect(a.getClient()).rejects.toThrow("disposed");
+      expect(await b.getClient()).toBe(clientB);
     });
   });
 });
