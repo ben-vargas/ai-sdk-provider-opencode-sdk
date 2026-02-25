@@ -85,9 +85,21 @@ export interface EventQuestionAsked {
   };
 }
 
+export interface EventMessagePartDelta {
+  type: "message.part.delta";
+  properties: {
+    sessionID: string;
+    messageID: string;
+    partID: string;
+    field: string;
+    delta: string;
+  };
+}
+
 export type OpencodeEvent =
   | EventMessagePartUpdated
   | EventMessageUpdated
+  | EventMessagePartDelta
   | EventSessionStatus
   | EventSessionIdle
   | EventPermissionAsked
@@ -339,6 +351,13 @@ export function convertEventToStreamParts(
       break;
     }
 
+    case "message.part.delta": {
+      const deltaEvent = event as EventMessagePartDelta;
+      const deltaParts = handlePartDelta(deltaEvent, state);
+      parts.push(...deltaParts);
+      break;
+    }
+
     case "message.updated": {
       const messageEvent = event as EventMessageUpdated;
       const info = messageEvent.properties.info;
@@ -478,6 +497,52 @@ function handlePartUpdated(
       if (logger && logger.debug) {
         logger.debug(`Unknown part type: ${(part as { type: string }).type}`);
       }
+  }
+
+  return parts;
+}
+
+function handlePartDelta(
+  event: EventMessagePartDelta,
+  state: StreamState,
+): LanguageModelV3StreamPart[] {
+  const parts: LanguageModelV3StreamPart[] = [];
+  const { partID, field, delta } = event.properties;
+
+  if (!delta) return parts;
+
+  // OpenCode sends both text and reasoning parts with field set as "text". 
+  // So we use the part ID tracked by prior message.part.updated events to differentiate.
+  const isReasoning = field === "reasoning" || state.reasoningPartId === partID;
+
+  if (isReasoning) {
+    if (!state.reasoningStarted || state.reasoningPartId !== partID) {
+      if (
+        state.reasoningStarted &&
+        state.reasoningPartId &&
+        state.reasoningPartId !== partID
+      ) {
+        parts.push({ type: "reasoning-end", id: state.reasoningPartId });
+      }
+      parts.push({ type: "reasoning-start", id: partID });
+      state.reasoningStarted = true;
+      state.reasoningPartId = partID;
+      state.lastReasoningContent = "";
+    }
+    parts.push({ type: "reasoning-delta", id: partID, delta });
+    state.lastReasoningContent += delta;
+  } else {
+    if (!state.textStarted || state.textPartId !== partID) {
+      if (state.textStarted && state.textPartId && state.textPartId !== partID) {
+        parts.push({ type: "text-end", id: state.textPartId });
+      }
+      parts.push({ type: "text-start", id: partID });
+      state.textStarted = true;
+      state.textPartId = partID;
+      state.lastTextContent = "";
+    }
+    parts.push({ type: "text-delta", id: partID, delta });
+    state.lastTextContent += delta;
   }
 
   return parts;
