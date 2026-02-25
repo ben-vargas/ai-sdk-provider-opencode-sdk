@@ -16,6 +16,7 @@ import {
   type FilePart,
   type ToolPart,
   type StepFinishPart,
+  type EventMessagePartDelta,
 } from "./convert-from-opencode-events.js";
 import type { Logger } from "./types.js";
 
@@ -341,6 +342,205 @@ describe("convert-from-opencode-events", () => {
           id: "part-1",
           delta: "Thinking...",
         });
+      });
+    });
+
+    describe("message.part.delta events", () => {
+      const makeDelta = (
+        partID: string,
+        field: string,
+        delta: string,
+      ): EventMessagePartDelta => ({
+        type: "message.part.delta",
+        properties: {
+          sessionID: "session-123",
+          messageID: "msg-1",
+          partID,
+          field,
+          delta,
+        },
+      });
+
+      it("should emit text-start and text-delta for a new text delta", () => {
+        const state = createStreamState();
+        const parts = convertEventToStreamParts(
+          makeDelta("part-1", "text", "Hello"),
+          state,
+        );
+
+        expect(parts).toHaveLength(2);
+        expect(parts[0]).toEqual({ type: "text-start", id: "part-1" });
+        expect(parts[1]).toEqual({
+          type: "text-delta",
+          id: "part-1",
+          delta: "Hello",
+        });
+        expect(state.textStarted).toBe(true);
+        expect(state.textPartId).toBe("part-1");
+        expect(state.lastTextContent).toBe("Hello");
+      });
+
+      it("should emit reasoning-start and reasoning-delta for field=reasoning", () => {
+        const state = createStreamState();
+        const parts = convertEventToStreamParts(
+          makeDelta("part-1", "reasoning", "Let me think"),
+          state,
+        );
+
+        expect(parts).toHaveLength(2);
+        expect(parts[0]).toEqual({ type: "reasoning-start", id: "part-1" });
+        expect(parts[1]).toEqual({
+          type: "reasoning-delta",
+          id: "part-1",
+          delta: "Let me think",
+        });
+        expect(state.reasoningStarted).toBe(true);
+        expect(state.reasoningPartId).toBe("part-1");
+        expect(state.lastReasoningContent).toBe("Let me think");
+      });
+
+      it("should treat field=text as reasoning when part ID matches reasoningPartId", () => {
+        const state = createStreamState();
+        // Simulate a prior message.part.updated that set reasoningPartId
+        state.reasoningStarted = true;
+        state.reasoningPartId = "reason-1";
+        state.lastReasoningContent = "prior";
+
+        const parts = convertEventToStreamParts(
+          makeDelta("reason-1", "text", " more reasoning"),
+          state,
+        );
+
+        expect(parts).toHaveLength(1);
+        expect(parts[0]).toEqual({
+          type: "reasoning-delta",
+          id: "reason-1",
+          delta: " more reasoning",
+        });
+        expect(state.lastReasoningContent).toBe("prior more reasoning");
+      });
+
+      it("should not emit duplicate text-start for same part ID", () => {
+        const state = createStreamState();
+
+        const parts1 = convertEventToStreamParts(
+          makeDelta("part-1", "text", "Hello"),
+          state,
+        );
+        expect(parts1).toHaveLength(2);
+        expect(parts1[0]).toEqual({ type: "text-start", id: "part-1" });
+
+        const parts2 = convertEventToStreamParts(
+          makeDelta("part-1", "text", " World"),
+          state,
+        );
+        expect(parts2).toHaveLength(1);
+        expect(parts2[0]).toEqual({
+          type: "text-delta",
+          id: "part-1",
+          delta: " World",
+        });
+        expect(state.lastTextContent).toBe("Hello World");
+      });
+
+      it("should emit text-end then text-start when text part ID changes", () => {
+        const state = createStreamState();
+
+        convertEventToStreamParts(makeDelta("part-1", "text", "First"), state);
+
+        const parts = convertEventToStreamParts(
+          makeDelta("part-2", "text", "Second"),
+          state,
+        );
+
+        expect(parts).toHaveLength(3);
+        expect(parts[0]).toEqual({ type: "text-end", id: "part-1" });
+        expect(parts[1]).toEqual({ type: "text-start", id: "part-2" });
+        expect(parts[2]).toEqual({
+          type: "text-delta",
+          id: "part-2",
+          delta: "Second",
+        });
+        expect(state.textPartId).toBe("part-2");
+        expect(state.lastTextContent).toBe("Second");
+      });
+
+      it("should return empty array for empty delta", () => {
+        const state = createStreamState();
+        const parts = convertEventToStreamParts(
+          makeDelta("part-1", "text", ""),
+          state,
+        );
+
+        expect(parts).toHaveLength(0);
+        expect(state.textStarted).toBe(false);
+      });
+
+      it("should handle reasoning-end then reasoning-start when reasoning part ID changes", () => {
+        const state = createStreamState();
+
+        convertEventToStreamParts(
+          makeDelta("reason-1", "reasoning", "thinking A"),
+          state,
+        );
+
+        const parts = convertEventToStreamParts(
+          makeDelta("reason-2", "reasoning", "thinking B"),
+          state,
+        );
+
+        expect(parts).toHaveLength(3);
+        expect(parts[0]).toEqual({ type: "reasoning-end", id: "reason-1" });
+        expect(parts[1]).toEqual({ type: "reasoning-start", id: "reason-2" });
+        expect(parts[2]).toEqual({
+          type: "reasoning-delta",
+          id: "reason-2",
+          delta: "thinking B",
+        });
+        expect(state.reasoningPartId).toBe("reason-2");
+        expect(state.lastReasoningContent).toBe("thinking B");
+      });
+
+      it("should correctly disambiguate reasoning from text in a real event sequence", () => {
+        const state = createStreamState();
+
+        // 1. message.part.updated sets reasoningPartId via a reasoning part
+        const reasoningUpdated: EventMessagePartUpdated = {
+          type: "message.part.updated",
+          properties: {
+            part: {
+              id: "reason-part",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "reasoning",
+              text: "",
+            } as ReasoningPart,
+            delta: "",
+          },
+        };
+        convertEventToStreamParts(reasoningUpdated, state);
+        expect(state.reasoningPartId).toBe("reason-part");
+
+        // 2. Delta arrives with field="text" for the reasoning part ID
+        const reasoningDelta = makeDelta("reason-part", "text", "deep thought");
+        const reasoningParts = convertEventToStreamParts(
+          reasoningDelta,
+          state,
+        );
+
+        // Should be reasoning-delta, not text-delta
+        const deltaTypes = reasoningParts.map((p) => p.type);
+        expect(deltaTypes).toContain("reasoning-delta");
+        expect(deltaTypes).not.toContain("text-delta");
+
+        // 3. Delta arrives with field="text" for a different (text) part ID
+        const textDelta = makeDelta("text-part", "text", "actual text");
+        const textParts = convertEventToStreamParts(textDelta, state);
+
+        const textDeltaTypes = textParts.map((p) => p.type);
+        expect(textDeltaTypes).toContain("text-start");
+        expect(textDeltaTypes).toContain("text-delta");
+        expect(textDeltaTypes).not.toContain("reasoning-delta");
       });
     });
 
