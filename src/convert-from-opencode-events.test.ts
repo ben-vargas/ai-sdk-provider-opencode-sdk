@@ -476,6 +476,27 @@ describe("convert-from-opencode-events", () => {
         expect(state.textStarted).toBe(false);
       });
 
+      it("should filter out deltas from user messages", () => {
+        const state = createStreamState();
+        state.messageRoles.set("user-msg-1", "user");
+
+        const event: EventMessagePartDelta = {
+          type: "message.part.delta",
+          properties: {
+            sessionID: "session-123",
+            messageID: "user-msg-1",
+            partID: "part-1",
+            field: "text",
+            delta: "User prompt that should be filtered",
+          },
+        };
+
+        const parts = convertEventToStreamParts(event, state);
+
+        expect(parts).toHaveLength(0);
+        expect(state.textStarted).toBe(false);
+      });
+
       it("should handle reasoning-end then reasoning-start when reasoning part ID changes", () => {
         const state = createStreamState();
 

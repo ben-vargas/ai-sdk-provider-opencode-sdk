@@ -507,11 +507,16 @@ function handlePartDelta(
   state: StreamState,
 ): LanguageModelV3StreamPart[] {
   const parts: LanguageModelV3StreamPart[] = [];
-  const { partID, field, delta } = event.properties;
+  const { partID, messageID, field, delta } = event.properties;
 
   if (!delta) return parts;
 
-  // OpenCode sends both text and reasoning parts with field set as "text". 
+  const messageRole = state.messageRoles.get(messageID);
+  if (messageRole === "user") {
+    return parts;
+  }
+
+  // OpenCode sends both text and reasoning parts with field set as "text".
   // So we use the part ID tracked by prior message.part.updated events to differentiate.
   const isReasoning = field === "reasoning" || state.reasoningPartId === partID;
 
