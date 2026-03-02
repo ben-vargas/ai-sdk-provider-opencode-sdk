@@ -1,6 +1,6 @@
 {
   "name": "ai-sdk-provider-opencode-sdk",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "AI SDK v6 provider for OpenCode via @opencode-ai/sdk",
   "keywords": [
     "ai-sdk",
@@ -58,7 +58,7 @@
   "dependencies": {
     "@ai-sdk/provider": "^3.0.8",
     "@ai-sdk/provider-utils": "^4.0.15",
-    "@opencode-ai/sdk": "^1.1.65"
+    "@opencode-ai/sdk": "^1.2.15"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

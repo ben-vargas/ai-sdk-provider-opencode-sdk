@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - No changes yet.
 
+## [2.1.2] - 2026-03-02
+
+### Fixed
+
+- **Streaming delta handling** - Added support for `message.part.delta` events to enable true incremental text and reasoning streaming instead of batch delivery via `message.part.updated` only. (PR [#9](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/pull/9) by [@abhijit-hota](https://github.com/abhijit-hota))
+- **User-message filtering for deltas** - Applied user-role guard to `handlePartDelta` to prevent user prompt text from leaking into assistant stream output, matching existing filtering in `handlePartUpdated`.
+
+### Changed
+
+- **Dependencies** - Bumped `@opencode-ai/sdk` from `^1.1.65` to `^1.2.15`.
+
 ## [2.1.1] - 2026-02-19
 
 ### Added
