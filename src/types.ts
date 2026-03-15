@@ -80,6 +80,14 @@ export interface OpencodeSettings {
   sessionTitle?: string;
 
   /**
+   * Enable session lookup by title on the server.
+   * When true and sessionTitle is provided, the provider will check for existing
+   * sessions with the same title before creating a new one.
+   * @default false
+   */
+  enableSessionByTitle?: boolean;
+
+  /**
    * Agent to use for requests.
    * Options: "build", "plan", "general", "explore", or custom agent name.
    */

@@ -131,6 +131,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
   private sessionId: string | undefined;
   private sessionInitPromise: Promise<string> | null = null;
   private repliedApprovalIdsBySession = new Map<string, Set<string>>();
+  private sessionIdByTitle = new Map<string, string>();
   private parsedModelId: ParsedModelId;
 
   constructor(options: {
@@ -634,11 +635,70 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
   }
 
   /**
+   * Find an existing session by title on the server.
+   */
+  private async getServerSessionByTitle(
+    title: string,
+  ): Promise<string | undefined> {
+    const client = await this.clientManager.getClient();
+    const directory = this.getRequestDirectory();
+
+    try {
+      const result = await client.session.list({
+        ...(directory ? { directory } : {}),
+      });
+
+      const data = result.data as
+        | Array<{ id: string; title: string }>
+        | undefined;
+      if (!data) {
+        return undefined;
+      }
+
+      // Find session with matching title
+      const matchingSession = data.find((s) => s.title === title);
+      return matchingSession?.id;
+    } catch (error) {
+      this.logger.debug?.(`Failed to list sessions: ${error}`);
+      return undefined;
+    }
+  }
+
+  /**
    * Get or create a session for this model instance.
    */
   private async getOrCreateSession(): Promise<string> {
     if (this.sessionId && !this.settings.createNewSession) {
       return this.sessionId;
+    }
+
+    // If sessionTitle is provided and enableSessionByTitle is true, check in-memory cache first
+    const enableSessionByTitle = this.settings.enableSessionByTitle === true; // default to false
+    if (
+      this.settings.sessionTitle &&
+      !this.settings.createNewSession &&
+      enableSessionByTitle
+    ) {
+      const cachedSessionId = this.sessionIdByTitle.get(
+        this.settings.sessionTitle,
+      );
+      if (cachedSessionId) {
+        this.sessionId = cachedSessionId;
+        return this.sessionId;
+      }
+
+      // Check server for existing session with this title
+      const serverSessionId = await this.getServerSessionByTitle(
+        this.settings.sessionTitle,
+      );
+      if (serverSessionId) {
+        this.sessionId = serverSessionId;
+        this.sessionIdByTitle.set(this.settings.sessionTitle, serverSessionId);
+        this.logger.debug?.(
+          `Found existing session by title "${this.settings.sessionTitle}": ${serverSessionId}`,
+        );
+        return serverSessionId;
+      }
     }
 
     if (!this.settings.createNewSession && this.sessionInitPromise) {
@@ -663,6 +723,11 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
 
       this.sessionId = data.id;
       this.logger.debug?.(`Created session: ${this.sessionId}`);
+
+      // Store session by title for in-memory caching within this model instance
+      if (this.settings.sessionTitle) {
+        this.sessionIdByTitle.set(this.settings.sessionTitle, this.sessionId);
+      }
 
       return this.sessionId;
     };

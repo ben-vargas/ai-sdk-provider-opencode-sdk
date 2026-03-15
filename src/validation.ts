@@ -36,6 +36,7 @@ export const opcodeSettingsSchema = z.object({
   sessionId: z.string().optional(),
   createNewSession: z.boolean().optional(),
   sessionTitle: z.string().optional(),
+  enableSessionByTitle: z.boolean().optional(),
   agent: z.string().optional(),
   systemPrompt: z.string().optional(),
   tools: z.record(z.string(), z.boolean()).optional(),

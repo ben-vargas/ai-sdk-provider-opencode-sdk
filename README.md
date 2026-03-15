@@ -322,6 +322,7 @@ interface OpencodeSettings {
   sessionId?: string; // Resume session
   createNewSession?: boolean; // Force new session
   sessionTitle?: string; // Title for new sessions
+  enableSessionByTitle?: boolean; // Enable session lookup by title (default: false)
   agent?: string; // Agent name
   systemPrompt?: string; // Override system prompt
   tools?: Record<string, boolean>; // Enable/disable tools (deprecated in favor of permissions)
