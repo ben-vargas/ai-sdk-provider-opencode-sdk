@@ -222,14 +222,14 @@ export function validateModelId(
     }
     if (logger) {
       logger.warn(
-        `Model ID "${modelId}" contains multiple slashes, using last segment as model`,
+        `Model ID "${modelId}" contains multiple slashes, using first segment as provider`,
       );
     }
-    const lastPart = parts[parts.length - 1];
-    const providerParts = parts.slice(0, -1).join("/");
+    const firstPart = parts[0];
+    const restParts = parts.slice(1).join("/");
     return {
-      providerID: providerParts || "default",
-      modelID: lastPart || trimmedId,
+      providerID: firstPart || "default",
+      modelID: restParts || trimmedId,
     };
   }
 
