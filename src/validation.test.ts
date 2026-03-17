@@ -210,10 +210,18 @@ describe("validation", () => {
       expect(result).toBeNull();
     });
 
-    it("should handle multiple slashes", () => {
+    it("should handle multiple slashes by using first segment as provider", () => {
       const result = validateModelId("org/provider/model");
       expect(result).not.toBeNull();
-      expect(result?.modelID).toBe("model");
+      expect(result?.providerID).toBe("org");
+      expect(result?.modelID).toBe("provider/model");
+    });
+
+    it("should correctly parse litellm proxy model IDs", () => {
+      const result = validateModelId("litellm/anthropic/claude-sonnet-4-6");
+      expect(result).not.toBeNull();
+      expect(result?.providerID).toBe("litellm");
+      expect(result?.modelID).toBe("anthropic/claude-sonnet-4-6");
     });
 
     it("should trim whitespace", () => {
