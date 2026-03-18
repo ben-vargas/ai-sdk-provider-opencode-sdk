@@ -9,7 +9,7 @@
 
 # AI SDK Provider for OpenCode
 
-> **Latest Release**: Version 2.x supports AI SDK v6. For AI SDK v5 support, use the `ai-sdk-v5` tag (0.x.x).
+> **Latest Release**: Version 3.x supports AI SDK v6. Version 2.x is the previous AI SDK v6 line. For AI SDK v5 support, use the `ai-sdk-v5` tag (0.x.x).
 
 A community provider for the [Vercel AI SDK](https://sdk.vercel.ai/docs) that enables using AI models through [OpenCode](https://opencode.ai) and the `@opencode-ai/sdk/v2` APIs. OpenCode is a terminal-based AI coding assistant that supports multiple providers (Anthropic, OpenAI, Google, and more).
 
@@ -19,7 +19,8 @@ This provider enables you to use OpenCode's AI capabilities through the familiar
 
 | Provider Version | AI SDK Version | NPM Tag     | Status      | Branch                                                                                   |
 | ---------------- | -------------- | ----------- | ----------- | ---------------------------------------------------------------------------------------- |
-| 2.x.x            | v6             | `latest`    | Stable      | `main`                                                                                   |
+| 3.x.x            | v6             | `latest`    | Stable      | `main`                                                                                   |
+| 2.x.x            | v6             | N/A         | Legacy      | historical                                                                               |
 | 1.x.x            | v6             | N/A         | Legacy      | historical                                                                               |
 | 0.x.x            | v5             | `ai-sdk-v5` | Maintenance | [`ai-sdk-v5`](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/tree/ai-sdk-v5) |
 
