@@ -9,11 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - No changes yet.
 
-## [2.2.0] - 2026-03-17
+## [3.0.0] - 2026-03-17
 
 ### Changed
 
-- **Breaking: multi-slash model ID parsing now matches OpenCode upstream** - Model IDs containing multiple `/` separators now use the first segment as `providerID` and preserve the remaining path as `modelID` (for example, `litellm/anthropic/claude-sonnet-4-6` now resolves to `providerID: "litellm"` and `modelID: "anthropic/claude-sonnet-4-6"`). This changes behavior for integrations that relied on the previous last-segment parsing.
+- **Breaking: multi-slash model ID parsing now matches OpenCode upstream** - Model IDs containing multiple `/` separators now use the first segment as `providerID` and preserve the remaining path as `modelID` (for example, `litellm/anthropic/claude-sonnet-4-6` now resolves to `providerID: "litellm"` and `modelID: "anthropic/claude-sonnet-4-6"`). This changes behavior for integrations that relied on the previous last-segment parsing, so the release is being published as `3.0.0` to avoid silently breaking consumers pinned to `^2.x`.
 
 ## [2.1.2] - 2026-03-02
 
