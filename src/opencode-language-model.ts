@@ -553,6 +553,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
         ? { system: systemPrompt ?? this.settings.systemPrompt }
         : {}),
       ...(this.settings.variant ? { variant: this.settings.variant } : {}),
+      ...(this.settings.messageID ? { messageID: this.settings.messageID } : {}),
       parts,
     };
   }
@@ -658,7 +659,9 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
 
       const data = result.data as { id: string } | undefined;
       if (!data?.id) {
-        throw new Error("Failed to create session");
+        throw new Error(
+          `Failed to create session: ${JSON.stringify(result.error ?? result.data)}`,
+        );
       }
 
       this.sessionId = data.id;
