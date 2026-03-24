@@ -23,6 +23,7 @@ export type {
   OpencodeClient,
   OpencodeCreateClientOptions,
   OpencodeClientOptions,
+  OpencodeProviderOptions,
   OpencodeSettings,
   OpencodeProviderSettings,
   OpencodeProvider,

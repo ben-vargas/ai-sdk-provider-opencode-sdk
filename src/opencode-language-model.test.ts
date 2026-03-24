@@ -294,6 +294,41 @@ describe("opencode-language-model", () => {
       );
     });
 
+    it("should pass providerOptions messageID to OpenCode", async () => {
+      await model.doGenerate({
+        prompt: basicPrompt,
+        providerOptions: {
+          opencode: {
+            messageID: "msg_user-123",
+          },
+        },
+      });
+
+      expect(mockClient.session.prompt).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messageID: "msg_user-123",
+        }),
+      );
+    });
+
+    it("should reject providerOptions messageID without msg_ prefix", async () => {
+      await expect(
+        model.doGenerate({
+          prompt: basicPrompt,
+          providerOptions: {
+            opencode: {
+              messageID: "user-123",
+            },
+          },
+        }),
+      ).rejects.toThrow(
+        "providerOptions.opencode.messageID must start with 'msg_'",
+      );
+
+      expect(mockClient.session.create).not.toHaveBeenCalled();
+      expect(mockClient.session.prompt).not.toHaveBeenCalled();
+    });
+
     it("should include request body in response", async () => {
       const result = await model.doGenerate({
         prompt: basicPrompt,

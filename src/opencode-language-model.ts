@@ -9,6 +9,7 @@ import type {
   LanguageModelV3Usage,
   SharedV3Warning,
 } from "@ai-sdk/provider";
+import { InvalidArgumentError } from "@ai-sdk/provider";
 import type {
   Logger,
   OpencodeSettings,
@@ -81,6 +82,32 @@ function convertUsage(usage: StreamingUsage): LanguageModelV3Usage {
       total_cost: usage.totalCost,
     },
   };
+}
+
+function getMessageIDFromProviderOptions(
+  options: LanguageModelV3CallOptions,
+): string | undefined {
+  const messageID = options.providerOptions?.opencode?.messageID;
+
+  if (messageID == null) {
+    return undefined;
+  }
+
+  if (typeof messageID !== "string") {
+    throw new InvalidArgumentError({
+      argument: "providerOptions.opencode.messageID",
+      message: "providerOptions.opencode.messageID must be a string",
+    });
+  }
+
+  if (!messageID.startsWith("msg_")) {
+    throw new InvalidArgumentError({
+      argument: "providerOptions.opencode.messageID",
+      message: "providerOptions.opencode.messageID must start with 'msg_'",
+    });
+  }
+
+  return messageID;
 }
 
 function extractToolApprovalResponses(
@@ -202,6 +229,8 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
       warnings.push({ type: "other", message: warning });
     }
 
+    const messageID = getMessageIDFromProviderOptions(options);
+
     try {
       if (options.abortSignal?.aborted) {
         const error = new Error("Request aborted");
@@ -228,6 +257,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
         parts,
         systemPrompt,
         options,
+        messageID,
       );
 
       const result = await client.session.prompt(requestBody);
@@ -315,6 +345,8 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
     });
     warnings.push(...conversionWarnings);
 
+    const messageID = getMessageIDFromProviderOptions(options);
+
     const sessionId = await this.getOrCreateSession();
     const client = await this.clientManager.getClient();
 
@@ -323,6 +355,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
       parts,
       systemPrompt,
       options,
+      messageID,
     );
 
     const directory = this.getRequestDirectory();
@@ -531,6 +564,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
     >,
     systemPrompt: string | undefined,
     options: LanguageModelV3CallOptions,
+    messageID: string | undefined,
   ) {
     const format = this.getResponseFormat(options);
     const directory = this.getRequestDirectory();
@@ -553,6 +587,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
         ? { system: systemPrompt ?? this.settings.systemPrompt }
         : {}),
       ...(this.settings.variant ? { variant: this.settings.variant } : {}),
+      ...(messageID ? { messageID } : {}),
       parts,
     };
   }
@@ -658,7 +693,9 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
 
       const data = result.data as { id: string } | undefined;
       if (!data?.id) {
-        throw new Error("Failed to create session");
+        throw new Error(
+          `Failed to create session: ${JSON.stringify(result.error ?? result.data)}`,
+        );
       }
 
       this.sessionId = data.id;
