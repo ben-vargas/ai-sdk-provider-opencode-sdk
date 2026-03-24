@@ -68,13 +68,6 @@ export interface OpencodeSettings {
   sessionId?: string;
 
   /**
-   * Message ID to use for the user message in OpenCode.
-   * If provided, OpenCode will use this instead of generating one.
-   * Must start with "msg_".
-   */
-  messageID?: string;
-
-  /**
    * Force creation of a new session, even if one already exists.
    * @default false
    */

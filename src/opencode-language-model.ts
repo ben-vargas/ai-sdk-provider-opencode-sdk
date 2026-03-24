@@ -535,6 +535,9 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
     const format = this.getResponseFormat(options);
     const directory = this.getRequestDirectory();
 
+    // If provided, OpenCode will use this as the user message ID instead of generating one. Must start with "msg_".
+    const messageID = options.providerOptions?.opencode?.messageID as string | undefined;
+
     return {
       sessionID: sessionId,
       ...(directory ? { directory } : {}),
@@ -553,7 +556,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
         ? { system: systemPrompt ?? this.settings.systemPrompt }
         : {}),
       ...(this.settings.variant ? { variant: this.settings.variant } : {}),
-      ...(this.settings.messageID ? { messageID: this.settings.messageID } : {}),
+      ...(messageID ? { messageID } : {}),
       parts,
     };
   }
