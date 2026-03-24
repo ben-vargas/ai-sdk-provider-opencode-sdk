@@ -248,6 +248,17 @@ export interface ParsedModelId {
 }
 
 /**
+ * Per-request provider options for `providerOptions.opencode`.
+ */
+export interface OpencodeProviderOptions {
+  /**
+   * User message ID to send to OpenCode for this request.
+   * Must start with "msg_".
+   */
+  messageID?: string;
+}
+
+/**
  * Metadata returned in provider responses.
  */
 export interface OpencodeProviderMetadata {
