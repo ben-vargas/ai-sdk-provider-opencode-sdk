@@ -1152,6 +1152,43 @@ describe("opencode-language-model", () => {
       expect(JSON.parse((textParts[0] as { text: string }).text)).toEqual({ result: "done" });
     });
 
+    it("should not emit tool-call/tool-result for error-status StructuredOutput", async () => {
+      mockClient.session.prompt.mockResolvedValueOnce({
+        data: {
+          info: {
+            id: "msg-1",
+            sessionID: "session-123",
+            role: "assistant",
+            error: { name: "StructuredOutputError" },
+          },
+          parts: [
+            {
+              id: "part-1",
+              type: "tool",
+              callID: "call-so-1",
+              tool: "StructuredOutput",
+              state: {
+                status: "error",
+                input: {},
+                error: "Model did not produce structured output",
+              },
+            },
+          ],
+        },
+      });
+
+      const result = await model.doGenerate({
+        prompt: [
+          { role: "user", content: [{ type: "text", text: "give me output" }] },
+        ],
+      });
+
+      const toolCalls = result.content.filter((c) => c.type === "tool-call");
+      const toolResults = result.content.filter((c) => c.type === "tool-result");
+      expect(toolCalls).toHaveLength(0);
+      expect(toolResults).toHaveLength(0);
+    });
+
     it("should safely stringify undefined tool input", async () => {
       mockClient.session.prompt.mockResolvedValueOnce({
         data: {

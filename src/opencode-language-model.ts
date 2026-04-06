@@ -25,6 +25,7 @@ import {
   createStreamStartPart,
   isEventForSession,
   isSessionComplete,
+  STRUCTURED_OUTPUT_TOOL,
   type Message,
   type Part,
 } from "./convert-from-opencode-events.js";
@@ -792,7 +793,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
       // input. The AI SDK expects structured output as text content so that
       // `Output.object()` / `Output.array()` can parse it via `step.text`.
       // Emit the tool input as a text part instead of tool-call/tool-result.
-      if (toolPart.tool === "StructuredOutput") {
+      if (toolPart.tool === STRUCTURED_OUTPUT_TOOL) {
         const serialized = safeStringifyToolInput(toolPart.state.input, (message) => {
           this.logger.warn(
             `Failed to serialize StructuredOutput input for ${toolPart.callID}: ${message}`,
@@ -833,6 +834,12 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
         }
       }
     } else if (toolPart.state.status === "error") {
+      // Don't emit tool-call/tool-result for StructuredOutput errors —
+      // the StructuredOutputError finish reason handles this.
+      if (toolPart.tool === STRUCTURED_OUTPUT_TOOL) {
+        return toolParts;
+      }
+
       toolParts.push({
         type: "tool-call",
         toolCallId: toolPart.callID,

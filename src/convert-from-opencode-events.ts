@@ -12,6 +12,11 @@ import {
 } from "./opencode-part-utils.js";
 
 /**
+ * Tool name used by OpenCode to return structured output.
+ */
+export const STRUCTURED_OUTPUT_TOOL = "StructuredOutput" as const;
+
+/**
  * OpenCode event types (from SDK types.gen.ts).
  */
 export interface EventMessagePartUpdated {
@@ -633,7 +638,7 @@ function handleToolPart(
   // input. The AI SDK expects structured output as text content so that
   // `Output.object()` / `Output.array()` can parse it via `step.text`.
   // Emit the tool input as text stream parts instead of tool stream parts.
-  if (tool === "StructuredOutput") {
+  if (tool === STRUCTURED_OUTPUT_TOOL) {
     return handleStructuredOutputToolPart(callID, toolState, state, logger);
   }
 
@@ -850,7 +855,7 @@ function handleStructuredOutputToolPart(
   if (!streamState) {
     streamState = {
       callId: callID,
-      toolName: "StructuredOutput",
+      toolName: STRUCTURED_OUTPUT_TOOL,
       inputStarted: false,
       inputClosed: false,
       callEmitted: false,
@@ -878,7 +883,8 @@ function handleStructuredOutputToolPart(
     // OpenCode sends an empty {} input during early pending/running states
     // before the actual structured data is populated. Skip it — emitting it
     // would prepend a stray '{}' that breaks JSON parsing downstream.
-    if (inputStr === "{}") {
+    // Only skip for non-completed statuses; a completed {} is a valid output.
+    if (inputStr === "{}" && status !== "completed") {
       return;
     }
 
@@ -931,7 +937,13 @@ function handleStructuredOutputToolPart(
       }
       break;
 
-    // error: the StructuredOutputError finish reason will handle this
+    case "error":
+      if (state.textStarted && state.textPartId === textId) {
+        parts.push({ type: "text-end", id: textId });
+        state.textStarted = false;
+        state.textPartId = undefined;
+      }
+      break;
   }
 
   return parts;
