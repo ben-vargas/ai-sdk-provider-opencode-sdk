@@ -538,6 +538,67 @@ describe("opencode-language-model", () => {
       expect(result.request?.body).toBeDefined();
     });
 
+    it("should emit StructuredOutput tool as text stream parts", async () => {
+      const structuredInput = { output: "# Hello", outputType: "markdown" };
+      mockClient.event.subscribe.mockResolvedValueOnce({
+        stream: (async function* () {
+          yield {
+            type: "message.part.updated",
+            properties: {
+              part: {
+                id: "part-1",
+                sessionID: "session-123",
+                messageID: "msg-1",
+                type: "tool",
+                callID: "call-so-1",
+                tool: "StructuredOutput",
+                state: {
+                  status: "completed",
+                  input: structuredInput,
+                  output: "Structured output captured successfully.",
+                  title: "Structured Output",
+                  time: { start: 1000, end: 2000 },
+                },
+              },
+            },
+          };
+          yield {
+            type: "session.status",
+            properties: {
+              sessionID: "session-123",
+              status: { type: "idle" },
+            },
+          };
+        })(),
+      });
+
+      const result = await model.doStream({
+        prompt: [
+          { role: "user", content: [{ type: "text", text: "give me output" }] },
+        ],
+      });
+
+      const parts: unknown[] = [];
+      const reader = result.stream.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        parts.push(value);
+      }
+
+      const textStart = parts.find((p: any) => p.type === "text-start");
+      const textDelta = parts.find((p: any) => p.type === "text-delta");
+      const textEnd = parts.find((p: any) => p.type === "text-end");
+      expect(textStart).toBeDefined();
+      expect(textDelta).toBeDefined();
+      expect(textEnd).toBeDefined();
+      expect(JSON.parse((textDelta as any).delta)).toEqual(structuredInput);
+
+      // No tool parts emitted
+      expect(parts.some((p: any) => p.type === "tool-call")).toBe(false);
+      expect(parts.some((p: any) => p.type === "tool-result")).toBe(false);
+    });
+
     it("should use native JSON schema mode without adding prompt instructions", async () => {
       const result = await model.doStream({
         prompt: basicPrompt,
@@ -984,6 +1045,148 @@ describe("opencode-language-model", () => {
         isError: true,
         result: "Command not found",
       });
+    });
+
+    it("should emit StructuredOutput tool input as text content", async () => {
+      const structuredInput = { output: "# Hello World", outputType: "markdown" };
+      mockClient.session.prompt.mockResolvedValueOnce({
+        data: {
+          info: {
+            id: "msg-1",
+            sessionID: "session-123",
+            role: "assistant",
+            finish: "end_turn",
+          },
+          parts: [
+            {
+              id: "part-1",
+              type: "tool",
+              callID: "call-so-1",
+              tool: "StructuredOutput",
+              state: {
+                status: "completed",
+                input: structuredInput,
+                output: "Structured output captured successfully.",
+              },
+            },
+            {
+              id: "part-2",
+              type: "step-finish",
+              reason: "end_turn",
+              cost: 0.001,
+              tokens: {
+                input: 10,
+                output: 5,
+                reasoning: 0,
+                cache: { read: 0, write: 0 },
+              },
+            },
+          ],
+        },
+      });
+
+      const result = await model.doGenerate({
+        prompt: [
+          { role: "user", content: [{ type: "text", text: "give me output" }] },
+        ],
+      });
+
+      const textParts = result.content.filter((c) => c.type === "text");
+      expect(textParts).toHaveLength(1);
+      expect(JSON.parse((textParts[0] as { text: string }).text)).toEqual(structuredInput);
+
+      const toolCalls = result.content.filter((c) => c.type === "tool-call");
+      const toolResults = result.content.filter((c) => c.type === "tool-result");
+      expect(toolCalls).toHaveLength(0);
+      expect(toolResults).toHaveLength(0);
+    });
+
+    it("should not affect non-StructuredOutput tool parts", async () => {
+      mockClient.session.prompt.mockResolvedValueOnce({
+        data: {
+          info: {
+            id: "msg-1",
+            sessionID: "session-123",
+            role: "assistant",
+            finish: "tool_use",
+          },
+          parts: [
+            {
+              id: "part-1",
+              type: "tool",
+              callID: "call-1",
+              tool: "Bash",
+              state: {
+                status: "completed",
+                input: { command: "ls" },
+                output: "file.txt",
+              },
+            },
+            {
+              id: "part-2",
+              type: "tool",
+              callID: "call-so-1",
+              tool: "StructuredOutput",
+              state: {
+                status: "completed",
+                input: { result: "done" },
+                output: "Structured output captured successfully.",
+              },
+            },
+          ],
+        },
+      });
+
+      const result = await model.doGenerate({
+        prompt: [
+          { role: "user", content: [{ type: "text", text: "do stuff" }] },
+        ],
+      });
+
+      const toolCalls = result.content.filter((c) => c.type === "tool-call");
+      expect(toolCalls).toHaveLength(1);
+      expect(toolCalls[0]).toMatchObject({ toolName: "Bash" });
+
+      const textParts = result.content.filter((c) => c.type === "text");
+      expect(textParts).toHaveLength(1);
+      expect(JSON.parse((textParts[0] as { text: string }).text)).toEqual({ result: "done" });
+    });
+
+    it("should not emit tool-call/tool-result for error-status StructuredOutput", async () => {
+      mockClient.session.prompt.mockResolvedValueOnce({
+        data: {
+          info: {
+            id: "msg-1",
+            sessionID: "session-123",
+            role: "assistant",
+            error: { name: "StructuredOutputError" },
+          },
+          parts: [
+            {
+              id: "part-1",
+              type: "tool",
+              callID: "call-so-1",
+              tool: "StructuredOutput",
+              state: {
+                status: "error",
+                input: {},
+                error: "Model did not produce structured output",
+              },
+            },
+          ],
+        },
+      });
+
+      const result = await model.doGenerate({
+        prompt: [
+          { role: "user", content: [{ type: "text", text: "give me output" }] },
+        ],
+      });
+
+      const toolCalls = result.content.filter((c) => c.type === "tool-call");
+      const toolResults = result.content.filter((c) => c.type === "tool-result");
+      expect(toolCalls).toHaveLength(0);
+      expect(toolResults).toHaveLength(0);
     });
 
     it("should safely stringify undefined tool input", async () => {

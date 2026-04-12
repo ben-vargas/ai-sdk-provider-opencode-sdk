@@ -90,6 +90,7 @@ export {
   createStreamStartPart,
   isEventForSession,
   isSessionComplete,
+  STRUCTURED_OUTPUT_TOOL,
 } from "./convert-from-opencode-events.js";
 export type {
   OpencodeEvent,

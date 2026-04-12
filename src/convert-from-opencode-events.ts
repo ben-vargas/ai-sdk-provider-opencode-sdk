@@ -12,6 +12,11 @@ import {
 } from "./opencode-part-utils.js";
 
 /**
+ * Tool name used by OpenCode to return structured output.
+ */
+export const STRUCTURED_OUTPUT_TOOL = "StructuredOutput" as const;
+
+/**
  * OpenCode event types (from SDK types.gen.ts).
  */
 export interface EventMessagePartUpdated {
@@ -629,6 +634,14 @@ function handleToolPart(
   const parts: LanguageModelV3StreamPart[] = [];
   const { callID, tool, state: toolState } = part;
 
+  // OpenCode's StructuredOutput tool carries the structured JSON in its
+  // input. The AI SDK expects structured output as text content so that
+  // `Output.object()` / `Output.array()` can parse it via `step.text`.
+  // Emit the tool input as text stream parts instead of tool stream parts.
+  if (tool === STRUCTURED_OUTPUT_TOOL) {
+    return handleStructuredOutputToolPart(callID, toolState, state, logger);
+  }
+
   let streamState = state.toolStates.get(callID);
   if (!streamState) {
     streamState = {
@@ -815,6 +828,120 @@ function handleToolPart(
         if (logger) {
           logger.warn(`Tool ${tool} failed: ${toolState.error}`);
         }
+      }
+      break;
+  }
+
+  return parts;
+}
+
+/**
+ * Handle a StructuredOutput tool part by converting it to text stream parts.
+ * The tool's input (the structured JSON) is streamed as text deltas so the
+ * AI SDK can parse partial output and build `step.text` for `Output.object()`.
+ */
+function handleStructuredOutputToolPart(
+  callID: string,
+  toolState: ToolState,
+  state: StreamState,
+  logger?: Logger | false,
+): LanguageModelV3StreamPart[] {
+  const parts: LanguageModelV3StreamPart[] = [];
+  const textId = `structured-output-${callID}`;
+
+  // We reuse the tool stream state map to track what we've already emitted,
+  // but only care about the text-related fields via the main StreamState.
+  let streamState = state.toolStates.get(callID);
+  if (!streamState) {
+    streamState = {
+      callId: callID,
+      toolName: STRUCTURED_OUTPUT_TOOL,
+      inputStarted: false,
+      inputClosed: false,
+      callEmitted: false,
+      resultEmitted: false,
+      emittedAttachmentIds: new Set(),
+    };
+    state.toolStates.set(callID, streamState);
+  }
+
+  const emitTextDelta = (status: string, input: Record<string, unknown>) => {
+    const inputStr = safeStringifyToolInput(input, (message) => {
+      if (logger) {
+        logger.warn(
+          `Failed to serialize StructuredOutput input for ${callID}: ${message}`,
+        );
+      }
+    });
+
+    if (logger) {
+      logger.debug?.(
+        `[StructuredOutput stream] callID=${callID} status=${status} raw input=${JSON.stringify(input)} serialized=${inputStr} lastInput=${streamState!.lastInput ?? "(none)"}`,
+      );
+    }
+
+    // OpenCode sends an empty {} input during early pending/running states
+    // before the actual structured data is populated. Skip it — emitting it
+    // would prepend a stray '{}' that breaks JSON parsing downstream.
+    // Only skip for non-completed statuses; a completed {} is a valid output.
+    if (inputStr === "{}" && status !== "completed") {
+      return;
+    }
+
+    if (!state.textStarted || state.textPartId !== textId) {
+      if (state.textStarted && state.textPartId && state.textPartId !== textId) {
+        parts.push({ type: "text-end", id: state.textPartId });
+      }
+      parts.push({ type: "text-start", id: textId });
+      state.textStarted = true;
+      state.textPartId = textId;
+      state.lastTextContent = "";
+    }
+
+    if (!streamState!.lastInput) {
+      if (inputStr) {
+        parts.push({ type: "text-delta", id: textId, delta: inputStr });
+      }
+    } else if (inputStr.startsWith(streamState!.lastInput)) {
+      const delta = inputStr.slice(streamState!.lastInput.length);
+      if (delta) {
+        parts.push({ type: "text-delta", id: textId, delta });
+      }
+    } else if (inputStr) {
+      if (logger) {
+        logger.debug?.(
+          `[StructuredOutput stream] callID=${callID} non-prefix change detected, emitting full input. prev=${streamState!.lastInput} new=${inputStr}`,
+        );
+      }
+      parts.push({ type: "text-delta", id: textId, delta: inputStr });
+    }
+    streamState!.lastInput = inputStr;
+    state.lastTextContent = inputStr;
+  };
+
+  switch (toolState.status) {
+    case "pending":
+      emitTextDelta("pending", toolState.input);
+      break;
+
+    case "running":
+      emitTextDelta("running", toolState.input);
+      break;
+
+    case "completed":
+      emitTextDelta("completed", toolState.input);
+      if (state.textStarted && state.textPartId === textId) {
+        parts.push({ type: "text-end", id: textId });
+        state.textStarted = false;
+        state.textPartId = undefined;
+      }
+      break;
+
+    case "error":
+      if (state.textStarted && state.textPartId === textId) {
+        parts.push({ type: "text-end", id: textId });
+        state.textStarted = false;
+        state.textPartId = undefined;
       }
       break;
   }

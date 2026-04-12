@@ -879,6 +879,339 @@ describe("convert-from-opencode-events", () => {
       });
     });
 
+    describe("StructuredOutput tool parts", () => {
+      it("should skip empty input during pending StructuredOutput", () => {
+        const state = createStreamState();
+        const event: EventMessagePartUpdated = {
+          type: "message.part.updated",
+          properties: {
+            part: {
+              id: "part-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "tool",
+              callID: "call-so-1",
+              tool: "StructuredOutput",
+              state: {
+                status: "pending",
+                input: {},
+                raw: '{}',
+              },
+            } as ToolPart,
+          },
+        };
+
+        const parts = convertEventToStreamParts(event, state);
+
+        expect(parts).toHaveLength(0);
+        expect(state.textStarted).toBe(false);
+      });
+
+      it("should emit text-start and text-delta for pending StructuredOutput with data", () => {
+        const state = createStreamState();
+        const event: EventMessagePartUpdated = {
+          type: "message.part.updated",
+          properties: {
+            part: {
+              id: "part-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "tool",
+              callID: "call-so-1",
+              tool: "StructuredOutput",
+              state: {
+                status: "pending",
+                input: { output: "partial", outputType: "markdown" },
+                raw: '{"output":"partial","outputType":"markdown"}',
+              },
+            } as ToolPart,
+          },
+        };
+
+        const parts = convertEventToStreamParts(event, state);
+
+        expect(parts[0]).toMatchObject({ type: "text-start", id: "structured-output-call-so-1" });
+        expect(parts[1]).toMatchObject({
+          type: "text-delta",
+          id: "structured-output-call-so-1",
+          delta: JSON.stringify({ output: "partial", outputType: "markdown" }),
+        });
+        expect(parts.some((p) => p.type === "tool-input-start")).toBe(false);
+      });
+
+      it("should emit incremental text-delta for running StructuredOutput", () => {
+        const state = createStreamState();
+
+        const makeEvent = (input: Record<string, unknown>): EventMessagePartUpdated => ({
+          type: "message.part.updated",
+          properties: {
+            part: {
+              id: "part-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "tool",
+              callID: "call-so-1",
+              tool: "StructuredOutput",
+              state: {
+                status: "running",
+                input,
+                time: { start: 1000 },
+              },
+            } as ToolPart,
+          },
+        });
+
+        // First running event
+        const parts1 = convertEventToStreamParts(
+          makeEvent({ output: "hel" }),
+          state,
+        );
+        const deltas1 = parts1.filter((p) => p.type === "text-delta");
+        expect(deltas1).toHaveLength(1);
+        expect((deltas1[0] as any).delta).toBe(JSON.stringify({ output: "hel" }));
+
+        // Same input — no delta
+        const parts2 = convertEventToStreamParts(
+          makeEvent({ output: "hel" }),
+          state,
+        );
+        const deltas2 = parts2.filter((p) => p.type === "text-delta");
+        expect(deltas2).toHaveLength(0);
+
+        // Extended input — only the diff
+        const parts3 = convertEventToStreamParts(
+          makeEvent({ output: "hello world" }),
+          state,
+        );
+        const deltas3 = parts3.filter((p) => p.type === "text-delta");
+        expect(deltas3).toHaveLength(1);
+      });
+
+      it("should emit text-end on completed StructuredOutput", () => {
+        const state = createStreamState();
+        const structuredInput = { output: "# Result", outputType: "markdown" };
+
+        const event: EventMessagePartUpdated = {
+          type: "message.part.updated",
+          properties: {
+            part: {
+              id: "part-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "tool",
+              callID: "call-so-1",
+              tool: "StructuredOutput",
+              state: {
+                status: "completed",
+                input: structuredInput,
+                output: "Structured output captured successfully.",
+                title: "Structured Output",
+                time: { start: 1000, end: 2000 },
+              },
+            } as ToolPart,
+          },
+        };
+
+        const parts = convertEventToStreamParts(event, state);
+
+        expect(parts.some((p) => p.type === "text-start")).toBe(true);
+        expect(parts.some((p) => p.type === "text-delta")).toBe(true);
+        expect(parts.some((p) => p.type === "text-end")).toBe(true);
+
+        const delta = parts.find((p) => p.type === "text-delta") as { delta?: string } | undefined;
+        expect(JSON.parse(delta!.delta!)).toEqual(structuredInput);
+
+        // No tool-call or tool-result parts
+        expect(parts.some((p) => p.type === "tool-call")).toBe(false);
+        expect(parts.some((p) => p.type === "tool-result")).toBe(false);
+        expect(parts.some((p) => p.type === "tool-input-start")).toBe(false);
+      });
+
+      it("should stream text across pending → running → completed lifecycle", () => {
+        const state = createStreamState();
+        const callID = "call-so-lifecycle";
+
+        const makeEvent = (
+          status: string,
+          input: Record<string, unknown>,
+        ): EventMessagePartUpdated => ({
+          type: "message.part.updated",
+          properties: {
+            part: {
+              id: "part-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "tool",
+              callID,
+              tool: "StructuredOutput",
+              state: {
+                status,
+                input,
+                ...(status === "pending" ? { raw: JSON.stringify(input) } : {}),
+                ...(status === "running" ? { time: { start: 1000 } } : {}),
+                ...(status === "completed"
+                  ? {
+                      output: "Structured output captured successfully.",
+                      title: "Structured Output",
+                      time: { start: 1000, end: 2000 },
+                    }
+                  : {}),
+              },
+            } as ToolPart,
+          },
+        });
+
+        // pending with empty input (real OpenCode behavior)
+        const parts0 = convertEventToStreamParts(
+          makeEvent("pending", {}),
+          state,
+        );
+        expect(parts0).toHaveLength(0);
+
+        // running with real input — text starts here
+        const parts1 = convertEventToStreamParts(
+          makeEvent("running", { output: "hello" }),
+          state,
+        );
+        expect(parts1[0]).toMatchObject({ type: "text-start" });
+        const deltas1 = parts1.filter((p) => p.type === "text-delta");
+        expect(deltas1).toHaveLength(1);
+        expect(JSON.parse((deltas1[0] as any).delta)).toEqual({ output: "hello" });
+
+        // completed with final input
+        const parts2 = convertEventToStreamParts(
+          makeEvent("completed", { output: "hello world", outputType: "markdown" }),
+          state,
+        );
+        expect(parts2.some((p) => p.type === "text-delta")).toBe(true);
+        expect(parts2.some((p) => p.type === "text-end")).toBe(true);
+
+        // State should be closed
+        expect(state.textStarted).toBe(false);
+        expect(state.textPartId).toBeUndefined();
+      });
+
+      it("should emit {} for completed StructuredOutput with empty object output", () => {
+        const state = createStreamState();
+        const event: EventMessagePartUpdated = {
+          type: "message.part.updated",
+          properties: {
+            part: {
+              id: "part-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "tool",
+              callID: "call-so-1",
+              tool: "StructuredOutput",
+              state: {
+                status: "completed",
+                input: {},
+                output: "Structured output captured successfully.",
+                title: "Structured Output",
+                time: { start: 1000, end: 2000 },
+              },
+            } as ToolPart,
+          },
+        };
+
+        const parts = convertEventToStreamParts(event, state);
+
+        const delta = parts.find((p) => p.type === "text-delta") as { delta?: string } | undefined;
+        expect(delta).toBeDefined();
+        expect(delta!.delta).toBe("{}");
+      });
+
+      it("should close text part on StructuredOutput error", () => {
+        const state = createStreamState();
+
+        // First, get a text-start via a running event with real input
+        const runningEvent: EventMessagePartUpdated = {
+          type: "message.part.updated",
+          properties: {
+            part: {
+              id: "part-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "tool",
+              callID: "call-so-1",
+              tool: "StructuredOutput",
+              state: {
+                status: "running",
+                input: { output: "partial" },
+                time: { start: 1000 },
+              },
+            } as ToolPart,
+          },
+        };
+        convertEventToStreamParts(runningEvent, state);
+        expect(state.textStarted).toBe(true);
+
+        // Now error
+        const errorEvent: EventMessagePartUpdated = {
+          type: "message.part.updated",
+          properties: {
+            part: {
+              id: "part-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "tool",
+              callID: "call-so-1",
+              tool: "StructuredOutput",
+              state: {
+                status: "error",
+                input: { output: "partial" },
+                error: "Model did not produce structured output",
+                time: { start: 1000, end: 2000 },
+              },
+            } as ToolPart,
+          },
+        };
+
+        const parts = convertEventToStreamParts(errorEvent, state);
+
+        expect(parts).toEqual([
+          { type: "text-end", id: "structured-output-call-so-1" },
+        ]);
+        expect(state.textStarted).toBe(false);
+        expect(state.textPartId).toBeUndefined();
+      });
+
+      it("should close prior text part when StructuredOutput starts", () => {
+        const state = createStreamState();
+        // Simulate an existing text part being open
+        state.textStarted = true;
+        state.textPartId = "existing-text-1";
+        state.lastTextContent = "some text";
+
+        const event: EventMessagePartUpdated = {
+          type: "message.part.updated",
+          properties: {
+            part: {
+              id: "part-1",
+              sessionID: "session-123",
+              messageID: "msg-1",
+              type: "tool",
+              callID: "call-so-1",
+              tool: "StructuredOutput",
+              state: {
+                status: "completed",
+                input: { result: "done" },
+                output: "ok",
+                title: "Structured Output",
+                time: { start: 1000, end: 2000 },
+              },
+            } as ToolPart,
+          },
+        };
+
+        const parts = convertEventToStreamParts(event, state);
+
+        // Should close the previous text part first
+        expect(parts[0]).toMatchObject({ type: "text-end", id: "existing-text-1" });
+        expect(parts[1]).toMatchObject({ type: "text-start", id: "structured-output-call-so-1" });
+      });
+    });
+
     describe("step-finish parts", () => {
       it("should accumulate usage from step-finish", () => {
         const state = createStreamState();

@@ -25,6 +25,7 @@ import {
   createStreamStartPart,
   isEventForSession,
   isSessionComplete,
+  STRUCTURED_OUTPUT_TOOL,
   type Message,
   type Part,
 } from "./convert-from-opencode-events.js";
@@ -272,7 +273,13 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
         parts?: Part[];
       };
 
+      this.logger.debug?.(
+        `[doGenerate] raw parts from OpenCode: ${JSON.stringify(responseData.parts?.map(p => ({ type: p.type, ...(p.type === 'text' ? { text: (p as any).text?.slice(0, 200) } : {}), ...(p.type === 'tool' ? { tool: (p as any).tool, callID: (p as any).callID, status: (p as any).state?.status, input: (p as any).state?.input } : {}) })))}`,
+      );
       const content = this.extractContentFromParts(responseData.parts ?? []);
+      this.logger.debug?.(
+        `[doGenerate] extracted content: ${JSON.stringify(content.map(c => ({ type: c.type, ...(c.type === 'text' ? { text: (c as any).text?.slice(0, 200) } : {}), ...(c.type === 'tool-call' ? { toolName: (c as any).toolName } : {}) })))}`,
+      );
       const usage = this.extractUsageFromParts(responseData.parts ?? []);
       const finishReason = mapOpencodeFinishReason(responseData.info);
 
@@ -782,6 +789,23 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
     };
 
     if (toolPart.state.status === "completed") {
+      // OpenCode's StructuredOutput tool carries the structured JSON in its
+      // input. The AI SDK expects structured output as text content so that
+      // `Output.object()` / `Output.array()` can parse it via `step.text`.
+      // Emit the tool input as a text part instead of tool-call/tool-result.
+      if (toolPart.tool === STRUCTURED_OUTPUT_TOOL) {
+        const serialized = safeStringifyToolInput(toolPart.state.input, (message) => {
+          this.logger.warn(
+            `Failed to serialize StructuredOutput input for ${toolPart.callID}: ${message}`,
+          );
+        });
+        this.logger.debug?.(
+          `[StructuredOutput doGenerate] callID=${toolPart.callID} status=${toolPart.state.status} raw input=${JSON.stringify(toolPart.state.input)} serialized=${serialized}`,
+        );
+        toolParts.push({ type: "text", text: serialized });
+        return toolParts;
+      }
+
       toolParts.push({
         type: "tool-call",
         toolCallId: toolPart.callID,
@@ -810,6 +834,12 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
         }
       }
     } else if (toolPart.state.status === "error") {
+      // Don't emit tool-call/tool-result for StructuredOutput errors —
+      // the StructuredOutputError finish reason handles this.
+      if (toolPart.tool === STRUCTURED_OUTPUT_TOOL) {
+        return toolParts;
+      }
+
       toolParts.push({
         type: "tool-call",
         toolCallId: toolPart.callID,
