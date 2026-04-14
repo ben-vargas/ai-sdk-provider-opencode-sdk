@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-04-14
+
+### Fixed
+
+- **Zod 4 compatibility** - Replaced logger validation that depended on the removed `z.function().args().returns()` API so the package works across the declared `zod` v3/v4 peer range
+
 ## [0.0.2] - 2025-12-10
 
 ### Changed
