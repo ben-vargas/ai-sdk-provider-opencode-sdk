@@ -56,6 +56,89 @@ describe('validation', () => {
       validateSettings(settings, logger);
       expect(logger.warn).toHaveBeenCalled();
     });
+
+    describe('logger schema (zod 3/4 compatibility)', () => {
+      // Regression tests for https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/issues/17
+      // The loggerSchema was previously built with `z.function().args().returns()`
+      // which was removed in zod 4. These tests exercise the settings.logger
+      // validation path to ensure it works across both major zod versions.
+
+      it('should accept a valid logger with warn and error functions', () => {
+        const settings = {
+          logger: {
+            warn: vi.fn(),
+            error: vi.fn(),
+          },
+        };
+
+        const result = validateSettings(settings);
+        expect(result.warnings).toHaveLength(0);
+      });
+
+      it('should accept a valid logger with optional debug function', () => {
+        const settings = {
+          logger: {
+            warn: vi.fn(),
+            error: vi.fn(),
+            debug: vi.fn(),
+          },
+        };
+
+        const result = validateSettings(settings);
+        expect(result.warnings).toHaveLength(0);
+      });
+
+      it('should accept logger === false (disables logging)', () => {
+        const settings = {
+          logger: false as const,
+        };
+
+        const result = validateSettings(settings);
+        expect(result.warnings).toHaveLength(0);
+      });
+
+      it('should reject logger where warn is not a function', () => {
+        const settings = {
+          logger: {
+            warn: 'not a function',
+            error: vi.fn(),
+          },
+        } as unknown as Parameters<typeof validateSettings>[0];
+
+        const result = validateSettings(settings);
+        expect(
+          result.warnings.some((w) => w.includes('Settings validation'))
+        ).toBe(true);
+      });
+
+      it('should reject logger where error is missing', () => {
+        const settings = {
+          logger: {
+            warn: vi.fn(),
+          },
+        } as unknown as Parameters<typeof validateSettings>[0];
+
+        const result = validateSettings(settings);
+        expect(
+          result.warnings.some((w) => w.includes('Settings validation'))
+        ).toBe(true);
+      });
+
+      it('should validate nested logger under defaultSettings in provider schema', () => {
+        const providerSettings = {
+          hostname: 'localhost',
+          defaultSettings: {
+            logger: {
+              warn: vi.fn(),
+              error: vi.fn(),
+            },
+          },
+        };
+
+        const result = validateProviderSettings(providerSettings);
+        expect(result.warnings).toHaveLength(0);
+      });
+    });
   });
 
   describe('validateProviderSettings', () => {
