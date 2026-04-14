@@ -3,11 +3,23 @@ import type { OpencodeSettings, OpencodeProviderSettings, Logger } from './types
 
 /**
  * Schema for Logger interface.
+ *
+ * We use `z.custom<Fn>` with a runtime function check rather than
+ * `z.function()`. The signature for `z.function()` changed between zod 3 and
+ * zod 4 (`.args()`/`.returns()` were removed in favour of
+ * `z.function({ input, output })`), so using the plain function typeguard keeps
+ * the schema identical across both major versions — which matches this
+ * package's `"zod": "^3.0.0 || ^4.0.0"` peer range.
  */
+const loggerFn = z.custom<(message: string) => void>(
+  (val) => typeof val === 'function',
+  { message: 'Expected a function' }
+);
+
 const loggerSchema = z.object({
-  warn: z.function().args(z.string()).returns(z.void()),
-  error: z.function().args(z.string()).returns(z.void()),
-  debug: z.function().args(z.string()).returns(z.void()).optional(),
+  warn: loggerFn,
+  error: loggerFn,
+  debug: loggerFn.optional(),
 });
 
 /**
