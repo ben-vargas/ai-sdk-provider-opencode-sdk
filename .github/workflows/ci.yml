@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main, ai-sdk-v5]
+  pull_request:
+    branches: [main, ai-sdk-v5]
+
+jobs:
+  test:
+    name: Test (zod ${{ matrix.zod }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Exercise the full declared peer range to catch zod 3 / zod 4
+        # regressions early - see #17 for history.
+        zod: ['^3.24.0', '^4.1.0']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install zod ${{ matrix.zod }}
+        run: npm install --no-save zod@${{ matrix.zod }}
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npx eslint . --max-warnings=0
+        continue-on-error: true
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Module loads under zod ${{ matrix.zod }}
+        run: node -e "require('./dist/index.cjs').createOpencode({})"
