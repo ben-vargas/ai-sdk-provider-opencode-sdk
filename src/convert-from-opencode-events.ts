@@ -233,6 +233,21 @@ export interface Message {
 }
 
 /**
+ * A buffered tool-approval-request, held until its tool call has been
+ * registered in the stream (see issue #22). Correlates an OpenCode
+ * `permission.asked` event to the tool call it gates.
+ */
+export interface PendingApproval {
+  approvalId: string;
+  toolCallId: string;
+  toolName: string;
+  providerExecuted: boolean;
+  permission: string;
+  patterns: string[];
+  sessionId: string;
+}
+
+/**
  * State for tracking streaming progress.
  */
 export interface StreamState {
@@ -247,6 +262,12 @@ export interface StreamState {
   messageRoles: Map<string, "user" | "assistant">;
   permissionRequests: Set<string>;
   questionRequests: Set<string>;
+  /**
+   * Tool-approval-requests buffered (keyed by tool callID) until the
+   * correlated tool call has been registered. Flushed the instant the
+   * tool call reaches `tool-input-available`.
+   */
+  pendingApprovals: Map<string, PendingApproval>;
 }
 
 /**
@@ -272,7 +293,88 @@ export function createStreamState(): StreamState {
     messageRoles: new Map(),
     permissionRequests: new Set(),
     questionRequests: new Set(),
+    pendingApprovals: new Map(),
   };
+}
+
+/**
+ * Emit the stream parts that register a tool call (`tool-input-start` →
+ * `tool-input-end` → `tool-call`), bringing it to `tool-input-available`.
+ * Idempotent: each part is emitted at most once per call, driven by the
+ * flags on `streamState`. Used both by the terminal (completed/error) paths
+ * and to register a call early when an approval is pending for it.
+ */
+function registerToolCall(
+  callID: string,
+  toolName: string,
+  inputStr: string,
+  streamState: ToolStreamState,
+  parts: LanguageModelV3StreamPart[],
+): void {
+  if (!streamState.inputStarted) {
+    parts.push({
+      type: "tool-input-start",
+      id: callID,
+      toolName,
+      providerExecuted: true,
+      dynamic: true,
+    });
+    streamState.inputStarted = true;
+  }
+
+  if (!streamState.inputClosed) {
+    parts.push({ type: "tool-input-end", id: callID });
+    streamState.inputClosed = true;
+  }
+
+  if (!streamState.callEmitted) {
+    parts.push({
+      type: "tool-call",
+      toolCallId: callID,
+      toolName,
+      input: inputStr,
+      providerExecuted: true,
+      dynamic: true,
+    });
+    streamState.callEmitted = true;
+  }
+}
+
+/**
+ * Emit a buffered `tool-approval-request` for the given tool call, if one is
+ * pending and has not already been emitted. The approval must only be flushed
+ * after the tool call has been registered (issue #22), so callers are
+ * responsible for ensuring `tool-input-available` precedes this.
+ */
+function flushPendingApproval(
+  callID: string,
+  state: StreamState,
+  parts: LanguageModelV3StreamPart[],
+): void {
+  const pending = state.pendingApprovals.get(callID);
+  if (!pending) {
+    return;
+  }
+
+  state.pendingApprovals.delete(callID);
+
+  if (state.permissionRequests.has(pending.approvalId)) {
+    return;
+  }
+  state.permissionRequests.add(pending.approvalId);
+
+  parts.push({
+    type: "tool-approval-request",
+    approvalId: pending.approvalId,
+    toolCallId: pending.toolCallId,
+    providerMetadata: {
+      opencode: {
+        sessionId: pending.sessionId,
+        permission: pending.permission,
+        patterns: pending.patterns,
+      },
+    },
+  });
 }
 
 /**
@@ -373,22 +475,51 @@ export function convertEventToStreamParts(
     case "permission.asked": {
       const permissionEvent = event as EventPermissionAsked;
       const requestId = permissionEvent.properties.id;
+      const callID = permissionEvent.properties.tool?.callID;
 
-      if (!state.permissionRequests.has(requestId)) {
-        state.permissionRequests.add(requestId);
-        parts.push({
-          type: "tool-approval-request",
-          approvalId: requestId,
-          toolCallId: permissionEvent.properties.tool?.callID ?? requestId,
-          providerMetadata: {
-            opencode: {
-              sessionId: permissionEvent.properties.sessionID,
-              permission: permissionEvent.properties.permission,
-              patterns: permissionEvent.properties.patterns,
-            },
-          },
-        });
+      // Already emitted (e.g. a duplicate event) — ignore.
+      if (state.permissionRequests.has(requestId)) {
+        break;
       }
+
+      const toolState = callID ? state.toolStates.get(callID) : undefined;
+      const bufferKey = callID ?? requestId;
+      const record: PendingApproval = {
+        approvalId: requestId,
+        toolCallId: callID ?? requestId,
+        toolName: toolState?.toolName ?? "",
+        providerExecuted: true,
+        permission: permissionEvent.properties.permission,
+        patterns: permissionEvent.properties.patterns,
+        sessionId: permissionEvent.properties.sessionID,
+      };
+      state.pendingApprovals.set(bufferKey, record);
+
+      if (!callID) {
+        // No tool correlation available — preserve the legacy behavior and
+        // emit immediately (nothing to register against).
+        flushPendingApproval(bufferKey, state, parts);
+        break;
+      }
+
+      if (toolState?.callEmitted) {
+        // The tool call is already registered — safe to emit now.
+        flushPendingApproval(callID, state, parts);
+      } else if (toolState && toolState.lastInput !== undefined) {
+        // Input has streamed (a `running` event was seen) but the tool call
+        // hasn't been finalized yet. Register it early, then flush so the
+        // approval lands after `tool-input-available` (issue #22).
+        registerToolCall(
+          callID,
+          toolState.toolName,
+          toolState.lastInput,
+          toolState,
+          parts,
+        );
+        flushPendingApproval(callID, state, parts);
+      }
+      // Otherwise the tool call isn't ready: keep the approval buffered and
+      // flush it from handleToolPart once the call is registered.
       break;
     }
 
@@ -543,7 +674,11 @@ function handlePartDelta(
     state.lastReasoningContent += delta;
   } else {
     if (!state.textStarted || state.textPartId !== partID) {
-      if (state.textStarted && state.textPartId && state.textPartId !== partID) {
+      if (
+        state.textStarted &&
+        state.textPartId &&
+        state.textPartId !== partID
+      ) {
         parts.push({ type: "text-end", id: state.textPartId });
       }
       parts.push({ type: "text-start", id: partID });
@@ -716,42 +851,30 @@ function handleToolPart(
         });
       }
       streamState.lastInput = inputStr;
+
+      // If an approval is buffered for this call, the input is now available:
+      // register the tool call and flush the approval so it lands after
+      // `tool-input-available`, before the tool executes (issue #22).
+      if (state.pendingApprovals.has(callID) && !streamState.callEmitted) {
+        registerToolCall(callID, tool, inputStr, streamState, parts);
+        flushPendingApproval(callID, state, parts);
+      }
       break;
     }
 
-    case "completed":
-      if (!streamState.inputClosed) {
-        if (!streamState.inputStarted) {
-          parts.push({
-            type: "tool-input-start",
-            id: callID,
-            toolName: tool,
-            providerExecuted: true,
-            dynamic: true,
-          });
-          streamState.inputStarted = true;
+    case "completed": {
+      const inputStr = safeStringifyToolInput(toolState.input, (message) => {
+        if (logger) {
+          logger.warn(
+            `Failed to serialize tool input for ${callID}: ${message}`,
+          );
         }
-        parts.push({ type: "tool-input-end", id: callID });
-        streamState.inputClosed = true;
-      }
+      });
+      registerToolCall(callID, tool, inputStr, streamState, parts);
 
-      if (!streamState.callEmitted) {
-        parts.push({
-          type: "tool-call",
-          toolCallId: callID,
-          toolName: tool,
-          input: safeStringifyToolInput(toolState.input, (message) => {
-            if (logger) {
-              logger.warn(
-                `Failed to serialize tool input for ${callID}: ${message}`,
-              );
-            }
-          }),
-          providerExecuted: true,
-          dynamic: true,
-        });
-        streamState.callEmitted = true;
-      }
+      // Flush any approval still buffered for this call before the terminal
+      // result, so it never trails `tool-output-available`.
+      flushPendingApproval(callID, state, parts);
 
       if (!streamState.resultEmitted) {
         parts.push({
@@ -778,40 +901,22 @@ function handleToolPart(
         }
       }
       break;
+    }
 
-    case "error":
-      if (!streamState.inputClosed) {
-        if (!streamState.inputStarted) {
-          parts.push({
-            type: "tool-input-start",
-            id: callID,
-            toolName: tool,
-            providerExecuted: true,
-            dynamic: true,
-          });
-          streamState.inputStarted = true;
+    case "error": {
+      const inputStr = safeStringifyToolInput(toolState.input, (message) => {
+        if (logger) {
+          logger.warn(
+            `Failed to serialize tool input for ${callID}: ${message}`,
+          );
         }
-        parts.push({ type: "tool-input-end", id: callID });
-        streamState.inputClosed = true;
-      }
+      });
+      registerToolCall(callID, tool, inputStr, streamState, parts);
 
-      if (!streamState.callEmitted) {
-        parts.push({
-          type: "tool-call",
-          toolCallId: callID,
-          toolName: tool,
-          input: safeStringifyToolInput(toolState.input, (message) => {
-            if (logger) {
-              logger.warn(
-                `Failed to serialize tool input for ${callID}: ${message}`,
-              );
-            }
-          }),
-          providerExecuted: true,
-          dynamic: true,
-        });
-        streamState.callEmitted = true;
-      }
+      // The tool failed (e.g. a rejected permission): drop any buffered
+      // approval so it never dangles. The terminal error result below is the
+      // final word for this call (issue #22, criterion 4).
+      state.pendingApprovals.delete(callID);
 
       if (!streamState.resultEmitted) {
         parts.push({
@@ -830,6 +935,7 @@ function handleToolPart(
         }
       }
       break;
+    }
   }
 
   return parts;
@@ -889,7 +995,11 @@ function handleStructuredOutputToolPart(
     }
 
     if (!state.textStarted || state.textPartId !== textId) {
-      if (state.textStarted && state.textPartId && state.textPartId !== textId) {
+      if (
+        state.textStarted &&
+        state.textPartId &&
+        state.textPartId !== textId
+      ) {
         parts.push({ type: "text-end", id: state.textPartId });
       }
       parts.push({ type: "text-start", id: textId });

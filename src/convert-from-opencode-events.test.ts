@@ -15,6 +15,7 @@ import {
   type ReasoningPart,
   type FilePart,
   type ToolPart,
+  type ToolState,
   type StepFinishPart,
   type EventMessagePartDelta,
 } from "./convert-from-opencode-events.js";
@@ -44,6 +45,7 @@ describe("convert-from-opencode-events", () => {
         messageRoles: expect.any(Map),
         permissionRequests: expect.any(Set),
         questionRequests: expect.any(Set),
+        pendingApprovals: expect.any(Map),
       });
     });
   });
@@ -544,10 +546,7 @@ describe("convert-from-opencode-events", () => {
 
         // 2. Delta arrives with field="text" for the reasoning part ID
         const reasoningDelta = makeDelta("reason-part", "text", "deep thought");
-        const reasoningParts = convertEventToStreamParts(
-          reasoningDelta,
-          state,
-        );
+        const reasoningParts = convertEventToStreamParts(reasoningDelta, state);
 
         // Should be reasoning-delta, not text-delta
         const deltaTypes = reasoningParts.map((p) => p.type);
@@ -895,7 +894,7 @@ describe("convert-from-opencode-events", () => {
               state: {
                 status: "pending",
                 input: {},
-                raw: '{}',
+                raw: "{}",
               },
             } as ToolPart,
           },
@@ -930,7 +929,10 @@ describe("convert-from-opencode-events", () => {
 
         const parts = convertEventToStreamParts(event, state);
 
-        expect(parts[0]).toMatchObject({ type: "text-start", id: "structured-output-call-so-1" });
+        expect(parts[0]).toMatchObject({
+          type: "text-start",
+          id: "structured-output-call-so-1",
+        });
         expect(parts[1]).toMatchObject({
           type: "text-delta",
           id: "structured-output-call-so-1",
@@ -942,7 +944,9 @@ describe("convert-from-opencode-events", () => {
       it("should emit incremental text-delta for running StructuredOutput", () => {
         const state = createStreamState();
 
-        const makeEvent = (input: Record<string, unknown>): EventMessagePartUpdated => ({
+        const makeEvent = (
+          input: Record<string, unknown>,
+        ): EventMessagePartUpdated => ({
           type: "message.part.updated",
           properties: {
             part: {
@@ -968,7 +972,9 @@ describe("convert-from-opencode-events", () => {
         );
         const deltas1 = parts1.filter((p) => p.type === "text-delta");
         expect(deltas1).toHaveLength(1);
-        expect((deltas1[0] as any).delta).toBe(JSON.stringify({ output: "hel" }));
+        expect((deltas1[0] as any).delta).toBe(
+          JSON.stringify({ output: "hel" }),
+        );
 
         // Same input — no delta
         const parts2 = convertEventToStreamParts(
@@ -1018,7 +1024,9 @@ describe("convert-from-opencode-events", () => {
         expect(parts.some((p) => p.type === "text-delta")).toBe(true);
         expect(parts.some((p) => p.type === "text-end")).toBe(true);
 
-        const delta = parts.find((p) => p.type === "text-delta") as { delta?: string } | undefined;
+        const delta = parts.find((p) => p.type === "text-delta") as
+          | { delta?: string }
+          | undefined;
         expect(JSON.parse(delta!.delta!)).toEqual(structuredInput);
 
         // No tool-call or tool-result parts
@@ -1076,11 +1084,16 @@ describe("convert-from-opencode-events", () => {
         expect(parts1[0]).toMatchObject({ type: "text-start" });
         const deltas1 = parts1.filter((p) => p.type === "text-delta");
         expect(deltas1).toHaveLength(1);
-        expect(JSON.parse((deltas1[0] as any).delta)).toEqual({ output: "hello" });
+        expect(JSON.parse((deltas1[0] as any).delta)).toEqual({
+          output: "hello",
+        });
 
         // completed with final input
         const parts2 = convertEventToStreamParts(
-          makeEvent("completed", { output: "hello world", outputType: "markdown" }),
+          makeEvent("completed", {
+            output: "hello world",
+            outputType: "markdown",
+          }),
           state,
         );
         expect(parts2.some((p) => p.type === "text-delta")).toBe(true);
@@ -1116,7 +1129,9 @@ describe("convert-from-opencode-events", () => {
 
         const parts = convertEventToStreamParts(event, state);
 
-        const delta = parts.find((p) => p.type === "text-delta") as { delta?: string } | undefined;
+        const delta = parts.find((p) => p.type === "text-delta") as
+          | { delta?: string }
+          | undefined;
         expect(delta).toBeDefined();
         expect(delta!.delta).toBe("{}");
       });
@@ -1207,8 +1222,14 @@ describe("convert-from-opencode-events", () => {
         const parts = convertEventToStreamParts(event, state);
 
         // Should close the previous text part first
-        expect(parts[0]).toMatchObject({ type: "text-end", id: "existing-text-1" });
-        expect(parts[1]).toMatchObject({ type: "text-start", id: "structured-output-call-so-1" });
+        expect(parts[0]).toMatchObject({
+          type: "text-end",
+          id: "existing-text-1",
+        });
+        expect(parts[1]).toMatchObject({
+          type: "text-start",
+          id: "structured-output-call-so-1",
+        });
       });
     });
 
@@ -1345,28 +1366,161 @@ describe("convert-from-opencode-events", () => {
     });
 
     describe("permission events", () => {
-      it("should emit tool-approval-request for permission.asked", () => {
-        const state = createStreamState();
-        const event: EventPermissionAsked = {
-          type: "permission.asked",
-          properties: {
-            id: "approval-1",
+      const permissionAsked = (
+        overrides: Partial<EventPermissionAsked["properties"]> = {},
+      ): EventPermissionAsked => ({
+        type: "permission.asked",
+        properties: {
+          id: "approval-1",
+          sessionID: "session-123",
+          permission: "bash",
+          patterns: ["npm test"],
+          tool: { messageID: "msg-1", callID: "call-1" },
+          ...overrides,
+        },
+      });
+
+      const toolEvent = (
+        status: ToolState["status"],
+        extra: Record<string, unknown> = {},
+      ): EventMessagePartUpdated => ({
+        type: "message.part.updated",
+        properties: {
+          part: {
+            id: "part-1",
             sessionID: "session-123",
+            messageID: "msg-1",
+            type: "tool",
+            callID: "call-1",
+            tool: "bash",
+            state: {
+              status,
+              input: { command: "ls" },
+              ...extra,
+            },
+          } as ToolPart,
+        },
+      });
+
+      const expectedApproval = {
+        type: "tool-approval-request",
+        approvalId: "approval-1",
+        toolCallId: "call-1",
+        providerMetadata: {
+          opencode: {
+            sessionId: "session-123",
             permission: "bash",
             patterns: ["npm test"],
-            tool: {
-              messageID: "msg-1",
-              callID: "call-1",
-            },
           },
-        };
+        },
+      };
 
-        const parts = convertEventToStreamParts(event, state);
+      // Case A (the bug, issue #22): permission.asked arrives before the tool
+      // call has been registered. It must be buffered, not emitted early, and
+      // flushed only after the tool call reaches tool-input-available.
+      it("buffers permission.asked until the tool call is registered, then flushes after tool-call", () => {
+        const state = createStreamState();
+
+        // Tool starts (pending) -> tool-input-start only.
+        const startParts = convertEventToStreamParts(
+          toolEvent("pending"),
+          state,
+        );
+        expect(startParts.map((p) => p.type)).toEqual(["tool-input-start"]);
+
+        // permission.asked arrives next -> buffered, nothing emitted, no error.
+        const askedParts = convertEventToStreamParts(permissionAsked(), state);
+        expect(askedParts).toEqual([]);
+        expect(state.pendingApprovals.has("call-1")).toBe(true);
+
+        // Input becomes available (running) -> tool-call is registered and the
+        // approval is flushed immediately after it.
+        const runningParts = convertEventToStreamParts(
+          toolEvent("running", { time: { start: 1000 } }),
+          state,
+        );
+        const types = runningParts.map((p) => p.type);
+        const callIdx = types.indexOf("tool-call");
+        const approvalIdx = types.indexOf("tool-approval-request");
+        expect(callIdx).toBeGreaterThanOrEqual(0);
+        expect(approvalIdx).toBeGreaterThan(callIdx);
+        expect(runningParts[approvalIdx]).toEqual(expectedApproval);
+        expect(state.pendingApprovals.has("call-1")).toBe(false);
+      });
+
+      it("never emits the approval before the tool call is registered", () => {
+        const state = createStreamState();
+        convertEventToStreamParts(toolEvent("pending"), state);
+        const askedParts = convertEventToStreamParts(permissionAsked(), state);
+        expect(askedParts.some((p) => p.type === "tool-approval-request")).toBe(
+          false,
+        );
+        expect(askedParts.some((p) => p.type === "error")).toBe(false);
+      });
+
+      // Case B (no regression): permission.asked arrives after the tool call is
+      // already registered -> emitted immediately.
+      it("emits the approval immediately when the tool call is already registered", () => {
+        const state = createStreamState();
+        convertEventToStreamParts(
+          toolEvent("completed", {
+            output: "file1\nfile2",
+            title: "List files",
+            time: { start: 1000, end: 2000 },
+          }),
+          state,
+        );
+        const tool = state.toolStates.get("call-1");
+        expect(tool?.callEmitted).toBe(true);
+
+        const askedParts = convertEventToStreamParts(permissionAsked(), state);
+        expect(askedParts).toEqual([expectedApproval]);
+      });
+
+      // Case C (criterion 4): a tool that errors with an approval still buffered
+      // yields a terminal denied result and leaves no dangling approval.
+      it("drops a buffered approval and emits a terminal error result on tool error", () => {
+        const state = createStreamState();
+        const logger: Logger = { warn: vi.fn(), error: vi.fn() };
+
+        convertEventToStreamParts(toolEvent("pending"), state);
+        convertEventToStreamParts(permissionAsked(), state);
+        expect(state.pendingApprovals.has("call-1")).toBe(true);
+
+        const errorParts = convertEventToStreamParts(
+          toolEvent("error", {
+            error: "Permission denied",
+            time: { start: 1000, end: 2000 },
+          }),
+          state,
+          logger,
+        );
+
+        expect(errorParts.some((p) => p.type === "tool-approval-request")).toBe(
+          false,
+        );
+        const result = errorParts.find((p) => p.type === "tool-result");
+        expect(result).toMatchObject({
+          toolCallId: "call-1",
+          result: "Permission denied",
+          isError: true,
+        });
+        expect(state.pendingApprovals.has("call-1")).toBe(false);
+      });
+
+      // Fallback: permission.asked with no tool.callID can't be correlated, so
+      // it is emitted immediately (legacy behavior).
+      it("emits immediately when permission.asked has no tool callID", () => {
+        const state = createStreamState();
+        const parts = convertEventToStreamParts(
+          permissionAsked({ tool: undefined }),
+          state,
+        );
         expect(parts).toEqual([
           {
             type: "tool-approval-request",
             approvalId: "approval-1",
-            toolCallId: "call-1",
+            toolCallId: "approval-1",
             providerMetadata: {
               opencode: {
                 sessionId: "session-123",
@@ -1376,6 +1530,29 @@ describe("convert-from-opencode-events", () => {
             },
           },
         ]);
+      });
+
+      it("emits a buffered approval only once (dedupe)", () => {
+        const state = createStreamState();
+        convertEventToStreamParts(toolEvent("pending"), state);
+        convertEventToStreamParts(permissionAsked(), state);
+        // Duplicate permission.asked while still buffered.
+        convertEventToStreamParts(permissionAsked(), state);
+
+        const runningParts = convertEventToStreamParts(
+          toolEvent("running", { time: { start: 1000 } }),
+          state,
+        );
+        const approvals = runningParts.filter(
+          (p) => p.type === "tool-approval-request",
+        );
+        expect(approvals).toHaveLength(1);
+
+        // A late duplicate after registration must not re-emit.
+        const lateParts = convertEventToStreamParts(permissionAsked(), state);
+        expect(lateParts.some((p) => p.type === "tool-approval-request")).toBe(
+          false,
+        );
       });
     });
 
