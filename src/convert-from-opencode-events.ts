@@ -825,6 +825,23 @@ function handleToolPart(
           );
         }
       });
+
+      // Once the tool call has been registered (e.g. an approval closed the
+      // input envelope early, issue #22), the exposed input is immutable. Never
+      // emit a late `tool-input-delta` after `tool-input-available` — that would
+      // leave the UI tool part stuck in `input-streaming` while carrying an
+      // approval. A later `running` event with the same input is ignored; a
+      // changed input is surfaced as a warning rather than silently mutated.
+      if (streamState.callEmitted) {
+        if (inputStr !== streamState.lastInput && logger) {
+          logger.warn(
+            `Ignoring tool input change for ${callID} after the tool call ` +
+              `was registered; the input exposed for approval is immutable.`,
+          );
+        }
+        break;
+      }
+
       if (!streamState.lastInput) {
         if (inputStr) {
           parts.push({

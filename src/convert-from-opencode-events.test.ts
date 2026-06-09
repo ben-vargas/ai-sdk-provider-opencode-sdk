@@ -1508,6 +1508,76 @@ describe("convert-from-opencode-events", () => {
         expect(state.pendingApprovals.has("call-1")).toBe(false);
       });
 
+      // Once the tool call is registered for approval, its input envelope is
+      // closed: a later `running` event must not emit a stale tool-input-delta
+      // (which would strand the UI tool part in `input-streaming`).
+      it("does not emit a tool-input-delta after the tool call is registered early", () => {
+        const state = createStreamState();
+        const logger: Logger = { warn: vi.fn(), error: vi.fn() };
+
+        // running input A -> input-start + delta.
+        convertEventToStreamParts(
+          toolEvent("running", {
+            input: { command: "ls" },
+            time: { start: 1000 },
+          }),
+          state,
+          logger,
+        );
+
+        // permission.asked closes the envelope: input-end + tool-call + approval.
+        const askedParts = convertEventToStreamParts(
+          permissionAsked(),
+          state,
+          logger,
+        );
+        expect(askedParts.map((p) => p.type)).toEqual([
+          "tool-input-end",
+          "tool-call",
+          "tool-approval-request",
+        ]);
+
+        // running input B (changed) -> no late delta; the change is warned, not applied.
+        const run2 = convertEventToStreamParts(
+          toolEvent("running", {
+            input: { command: "ls -la" },
+            time: { start: 1000 },
+          }),
+          state,
+          logger,
+        );
+        expect(run2.some((p) => p.type === "tool-input-delta")).toBe(false);
+        expect(run2).toEqual([]);
+        expect(logger.warn).toHaveBeenCalledWith(
+          expect.stringContaining("after the tool call"),
+        );
+        // The exposed input stays bound to what the approval was requested for.
+        expect(state.toolStates.get("call-1")?.lastInput).toBe(
+          '{"command":"ls"}',
+        );
+      });
+
+      it("ignores a repeated running event with unchanged input after registration", () => {
+        const state = createStreamState();
+        const logger: Logger = { warn: vi.fn(), error: vi.fn() };
+
+        convertEventToStreamParts(
+          toolEvent("running", { time: { start: 1000 } }),
+          state,
+          logger,
+        );
+        convertEventToStreamParts(permissionAsked(), state, logger);
+
+        // Same input again -> nothing emitted, no warning.
+        const run2 = convertEventToStreamParts(
+          toolEvent("running", { time: { start: 1000 } }),
+          state,
+          logger,
+        );
+        expect(run2).toEqual([]);
+        expect(logger.warn).not.toHaveBeenCalled();
+      });
+
       // Fallback: permission.asked with no tool.callID can't be correlated, so
       // it is emitted immediately (legacy behavior).
       it("emits immediately when permission.asked has no tool callID", () => {
