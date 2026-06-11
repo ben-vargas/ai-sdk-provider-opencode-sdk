@@ -274,11 +274,11 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
       };
 
       this.logger.debug?.(
-        `[doGenerate] raw parts from OpenCode: ${JSON.stringify(responseData.parts?.map(p => ({ type: p.type, ...(p.type === 'text' ? { text: (p as any).text?.slice(0, 200) } : {}), ...(p.type === 'tool' ? { tool: (p as any).tool, callID: (p as any).callID, status: (p as any).state?.status, input: (p as any).state?.input } : {}) })))}`,
+        `[doGenerate] raw parts from OpenCode: ${JSON.stringify(responseData.parts?.map((p) => ({ type: p.type, ...(p.type === "text" ? { text: (p as any).text?.slice(0, 200) } : {}), ...(p.type === "tool" ? { tool: (p as any).tool, callID: (p as any).callID, status: (p as any).state?.status, input: (p as any).state?.input } : {}) })))}`,
       );
       const content = this.extractContentFromParts(responseData.parts ?? []);
       this.logger.debug?.(
-        `[doGenerate] extracted content: ${JSON.stringify(content.map(c => ({ type: c.type, ...(c.type === 'text' ? { text: (c as any).text?.slice(0, 200) } : {}), ...(c.type === 'tool-call' ? { toolName: (c as any).toolName } : {}) })))}`,
+        `[doGenerate] extracted content: ${JSON.stringify(content.map((c) => ({ type: c.type, ...(c.type === "text" ? { text: (c as any).text?.slice(0, 200) } : {}), ...(c.type === "tool-call" ? { toolName: (c as any).toolName } : {}) })))}`,
       );
       const usage = this.extractUsageFromParts(responseData.parts ?? []);
       const finishReason = mapOpencodeFinishReason(responseData.info);
@@ -304,6 +304,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
 
       throw wrapError(error, {
         sessionId: this.sessionId,
+        modelId: this.modelId,
       });
     }
   }
@@ -418,8 +419,12 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
           }
 
           client.session.prompt(requestBody).catch((error: unknown) => {
-            logger.error(`Prompt error: ${extractErrorMessage(error)}`);
-            controller.enqueue({ type: "error", error });
+            const wrappedError = wrapError(error, {
+              sessionId,
+              modelId: this.modelId,
+            });
+            logger.error(`Prompt error: ${extractErrorMessage(wrappedError)}`);
+            controller.enqueue({ type: "error", error: wrappedError });
             resolvePromptFailed?.();
           });
 
@@ -521,8 +526,12 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
             controller.enqueue(createStreamStartPart(streamWarnings));
           }
           if (!isAbortError(error)) {
-            logger.error(`Stream error: ${extractErrorMessage(error)}`);
-            controller.enqueue({ type: "error", error: wrapError(error) });
+            const wrappedError = wrapError(error, {
+              sessionId,
+              modelId: this.modelId,
+            });
+            logger.error(`Stream error: ${extractErrorMessage(wrappedError)}`);
+            controller.enqueue({ type: "error", error: wrappedError });
           }
         } finally {
           controller.close();
@@ -794,11 +803,14 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
       // `Output.object()` / `Output.array()` can parse it via `step.text`.
       // Emit the tool input as a text part instead of tool-call/tool-result.
       if (toolPart.tool === STRUCTURED_OUTPUT_TOOL) {
-        const serialized = safeStringifyToolInput(toolPart.state.input, (message) => {
-          this.logger.warn(
-            `Failed to serialize StructuredOutput input for ${toolPart.callID}: ${message}`,
-          );
-        });
+        const serialized = safeStringifyToolInput(
+          toolPart.state.input,
+          (message) => {
+            this.logger.warn(
+              `Failed to serialize StructuredOutput input for ${toolPart.callID}: ${message}`,
+            );
+          },
+        );
         this.logger.debug?.(
           `[StructuredOutput doGenerate] callID=${toolPart.callID} status=${toolPart.state.status} raw input=${JSON.stringify(toolPart.state.input)} serialized=${serialized}`,
         );

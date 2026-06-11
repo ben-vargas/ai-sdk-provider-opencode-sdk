@@ -341,6 +341,27 @@ describe("errors", () => {
       expect(result).toBeInstanceOf(APICallError);
     });
 
+    it("should wrap empty JSON responses with model guidance", () => {
+      const error = new SyntaxError("Unexpected end of JSON input");
+      const result = wrapError(error, {
+        sessionId: "session-123",
+        modelId: "github-copilot/gpt-5",
+      });
+
+      expect(result).toBeInstanceOf(APICallError);
+      expect(result.message).toContain(
+        "OpenCode returned an empty JSON response",
+      );
+      expect(result.message).toContain('for model "github-copilot/gpt-5"');
+      expect(result.message).toContain("provider/model");
+      expect((result as APICallError).isRetryable).toBe(false);
+      expect((result as APICallError).data).toMatchObject({
+        errorType: "EmptyJSONResponse",
+        sessionId: "session-123",
+        modelId: "github-copilot/gpt-5",
+      });
+    });
+
     it("should pass metadata through", () => {
       const error = { message: "Error" };
       const result = wrapError(error, { sessionId: "session-123" });
