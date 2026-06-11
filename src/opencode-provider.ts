@@ -44,7 +44,9 @@ export function createOpencode(
   validateProviderSettings(options, logger);
 
   // Use explicit client manager if provided, otherwise use singleton
-  const clientManager = options?.clientManager ?? createClientManagerFromSettings(options ?? {}, logger);
+  const clientManager =
+    options?.clientManager ??
+    createClientManagerFromSettings(options ?? {}, logger);
 
   /**
    * Create a language model instance.

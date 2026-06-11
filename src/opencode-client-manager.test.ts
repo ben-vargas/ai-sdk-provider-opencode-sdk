@@ -265,9 +265,8 @@ describe("opencode-client-manager", () => {
 
       await instance.getClient();
 
-      const { createOpencodeClient, createOpencodeServer } = await import(
-        "@opencode-ai/sdk/v2"
-      );
+      const { createOpencodeClient, createOpencodeServer } =
+        await import("@opencode-ai/sdk/v2");
       expect(createOpencodeClient).toHaveBeenCalledWith(
         expect.objectContaining({
           baseUrl: "http://127.0.0.1:4096",
@@ -315,7 +314,9 @@ describe("opencode-client-manager", () => {
           directory: "/tmp/ignored",
           headers: { "x-test": "value" },
         } as unknown as NonNullable<
-          Parameters<typeof import("@opencode-ai/sdk/v2").createOpencodeClient>[0]
+          Parameters<
+            typeof import("@opencode-ai/sdk/v2").createOpencodeClient
+          >[0]
         >,
         logger: {
           warn,
@@ -350,7 +351,9 @@ describe("opencode-client-manager", () => {
           directory: undefined,
           headers: { "x-test": "value" },
         } as unknown as NonNullable<
-          Parameters<typeof import("@opencode-ai/sdk/v2").createOpencodeClient>[0]
+          Parameters<
+            typeof import("@opencode-ai/sdk/v2").createOpencodeClient
+          >[0]
         >,
         logger: {
           warn,
@@ -396,9 +399,8 @@ describe("opencode-client-manager", () => {
 
       const client = await instance.getClient();
 
-      const { createOpencodeClient, createOpencodeServer } = await import(
-        "@opencode-ai/sdk/v2"
-      );
+      const { createOpencodeClient, createOpencodeServer } =
+        await import("@opencode-ai/sdk/v2");
       expect(client).toBe(preconfiguredClient);
       expect(createOpencodeClient).not.toHaveBeenCalled();
       expect(createOpencodeServer).not.toHaveBeenCalled();
