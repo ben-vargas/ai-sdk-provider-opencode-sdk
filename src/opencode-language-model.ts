@@ -750,12 +750,26 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
 
     for (const response of pendingResponses) {
       try {
-        await permissionApi.reply({
+        const result = await permissionApi.reply({
           requestID: response.approvalId,
           reply: response.approved ? "once" : "reject",
           ...(response.reason ? { message: response.reason } : {}),
           ...(directory ? { directory } : {}),
         });
+
+        // Fields-style clients report API failures via the result rather
+        // than throwing, so a missing check would record the approval as
+        // replied while OpenCode keeps waiting on the permission request.
+        const { error: resultError } = extractSdkResult(result);
+        if (resultError) {
+          const warning =
+            `Failed to apply tool approval response for ${response.approvalId}: ` +
+            `${extractErrorMessage(resultError)}`;
+          this.logger.warn(warning);
+          warnings.push(warning);
+          continue;
+        }
+
         repliedApprovalIds.add(response.approvalId);
       } catch (error) {
         const warning =
