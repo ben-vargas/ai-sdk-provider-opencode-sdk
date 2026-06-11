@@ -287,10 +287,43 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
         messageID,
       );
 
-      const result = await client.session.prompt(requestBody);
+      const abortSignal = options.abortSignal;
+      const abortServerSession = async () => {
+        const directory = this.getRequestDirectory();
+        try {
+          await client.session.abort({
+            sessionID: sessionId,
+            ...(directory ? { directory } : {}),
+          });
+        } catch {
+          // ignore abort errors
+        }
+      };
+
+      let result: unknown;
+      try {
+        result = abortSignal
+          ? await client.session.prompt(requestBody, { signal: abortSignal })
+          : await client.session.prompt(requestBody);
+      } catch (error) {
+        // Clients configured with throwOnError reject on fetch abort instead
+        // of resolving { error }; still stop server-side generation.
+        if (isAbortError(error) || abortSignal?.aborted) {
+          await abortServerSession();
+        }
+        throw error;
+      }
 
       const { data, error: responseError } = extractSdkResult(result);
       if (!data) {
+        // The SDK surfaces fetch aborts as { error } instead of rejecting, so
+        // map a caller-initiated abort to AbortError and stop server-side work.
+        if (abortSignal?.aborted) {
+          await abortServerSession();
+          const abortError = new Error("Request aborted");
+          abortError.name = "AbortError";
+          throw abortError;
+        }
         throw createEmptyResponseDataError(responseError, {
           sessionId,
           modelId: this.modelId,
@@ -402,18 +435,19 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
       start: async (controller) => {
         const streamWarnings = [...warnings];
         let streamStartEmitted = false;
-
-        // The SDK's SSE generator only cancels its fetch reader from an
+        // Cancels the stream's in-flight HTTP requests (SSE event
+        // subscription, prompt, session abort) when the stream closes. The
+        // SDK's SSE generator only cancels its fetch reader from an
         // abort-signal handler; closing the iterator alone leaves the socket
         // open and keeps the Node event loop alive.
-        const eventAbortController = new AbortController();
+        const requestAbortController = new AbortController();
         const unregisterEventSubscription =
-          this.clientManager.registerEventSubscription(eventAbortController);
+          this.clientManager.registerEventSubscription(requestAbortController);
 
         try {
           const eventsResult = await client.event.subscribe(
             directory ? { directory } : undefined,
-            { signal: eventAbortController.signal },
+            { signal: requestAbortController.signal },
           );
 
           const eventStream = eventsResult.stream;
@@ -471,17 +505,31 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
             resolvePromptFailed?.();
           };
 
-          client.session.prompt(requestBody).then((result) => {
-            const { data, error: responseError } = extractSdkResult(result);
-            if (!data) {
-              handlePromptFailure(
-                createEmptyResponseDataError(responseError, {
-                  sessionId,
-                  modelId: this.modelId,
-                }),
-              );
-            }
-          }, handlePromptFailure);
+          client.session
+            .prompt(requestBody, { signal: requestAbortController.signal })
+            .then(
+              (result) => {
+                if (requestAbortController.signal.aborted) {
+                  // The stream already closed; the prompt outcome is irrelevant.
+                  return;
+                }
+                const { data, error: responseError } = extractSdkResult(result);
+                if (!data) {
+                  handlePromptFailure(
+                    createEmptyResponseDataError(responseError, {
+                      sessionId,
+                      modelId: this.modelId,
+                    }),
+                  );
+                }
+              },
+              (error) => {
+                if (requestAbortController.signal.aborted) {
+                  return;
+                }
+                handlePromptFailure(error);
+              },
+            );
 
           const state = createStreamState();
           let lastMessageInfo: Message | undefined;
@@ -495,7 +543,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
             // Abort before iterator.return(): the abort handler cancels the
             // SSE reader, which also unblocks a pending iterator.next() the
             // return() call would otherwise wait on.
-            eventAbortController.abort();
+            requestAbortController.abort();
             if (typeof iterator.return === "function") {
               try {
                 await iterator.return(undefined);
@@ -523,10 +571,13 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
 
               if (result.type === "aborted") {
                 try {
-                  await client.session.abort({
-                    sessionID: sessionId,
-                    ...(directory ? { directory } : {}),
-                  });
+                  await client.session.abort(
+                    {
+                      sessionID: sessionId,
+                      ...(directory ? { directory } : {}),
+                    },
+                    { signal: requestAbortController.signal },
+                  );
                 } catch {
                   // ignore abort errors
                 }
@@ -593,7 +644,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
             controller.enqueue({ type: "error", error: wrappedError });
           }
         } finally {
-          eventAbortController.abort();
+          requestAbortController.abort();
           unregisterEventSubscription();
           controller.close();
         }

@@ -372,6 +372,70 @@ describe("opencode-language-model", () => {
       });
     });
 
+    it("should cancel the prompt request and throw AbortError when aborted mid-flight", async () => {
+      mockClient.session.prompt.mockImplementationOnce(
+        (_body: unknown, options?: { signal?: AbortSignal }) =>
+          new Promise((resolve) => {
+            // Emulate fetch abort semantics: the SDK resolves with { error }
+            // instead of rejecting when the request signal is aborted.
+            options?.signal?.addEventListener("abort", () => {
+              resolve({
+                error: Object.assign(new Error("aborted"), {
+                  name: "AbortError",
+                }),
+              });
+            });
+          }),
+      );
+
+      const abortController = new AbortController();
+      const resultPromise = model.doGenerate({
+        prompt: basicPrompt,
+        abortSignal: abortController.signal,
+      });
+
+      setTimeout(() => abortController.abort(), 10);
+
+      await expect(resultPromise).rejects.toMatchObject({
+        name: "AbortError",
+      });
+      expect(mockClient.session.abort).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionID: "session-123" }),
+      );
+    });
+
+    it("should abort the server session when a throwOnError client rejects on abort", async () => {
+      mockClient.session.prompt.mockImplementationOnce(
+        (_body: unknown, options?: { signal?: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            // Emulate a client configured with throwOnError: an aborted
+            // fetch rejects instead of resolving with { error }.
+            options?.signal?.addEventListener("abort", () => {
+              reject(
+                Object.assign(new Error("This operation was aborted"), {
+                  name: "AbortError",
+                }),
+              );
+            });
+          }),
+      );
+
+      const abortController = new AbortController();
+      const resultPromise = model.doGenerate({
+        prompt: basicPrompt,
+        abortSignal: abortController.signal,
+      });
+
+      setTimeout(() => abortController.abort(), 10);
+
+      await expect(resultPromise).rejects.toMatchObject({
+        name: "AbortError",
+      });
+      expect(mockClient.session.abort).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionID: "session-123" }),
+      );
+    });
+
     it("should include response error details when response data is missing", async () => {
       mockClient.session.prompt.mockResolvedValueOnce({
         data: undefined,
@@ -1143,8 +1207,125 @@ describe("opencode-language-model", () => {
       expect(parts[0]).toMatchObject({ type: "stream-start" });
       expect(mockClient.session.abort).toHaveBeenCalledWith(
         expect.objectContaining({ sessionID: "session-123" }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
       expect(iteratorReturn).toHaveBeenCalled();
+    });
+
+    it("should cancel the in-flight prompt request when the stream is aborted", async () => {
+      const hangingStream: AsyncIterable<unknown> = {
+        [Symbol.asyncIterator]() {
+          return {
+            next() {
+              return new Promise<IteratorResult<unknown>>(() => {
+                // Intentionally never resolves to emulate an idle stream.
+              });
+            },
+            return: () =>
+              Promise.resolve({ done: true as const, value: undefined }),
+          };
+        },
+      };
+
+      mockClient.event.subscribe.mockResolvedValueOnce({
+        stream: hangingStream,
+      });
+
+      let promptOptions: { signal?: AbortSignal } | undefined;
+      mockClient.session.prompt.mockImplementationOnce(
+        (_body: unknown, options?: { signal?: AbortSignal }) => {
+          promptOptions = options;
+          // Emulate a prompt request the server never completes.
+          return new Promise(() => {});
+        },
+      );
+
+      const abortController = new AbortController();
+      const result = await model.doStream({
+        prompt: basicPrompt,
+        abortSignal: abortController.signal,
+      });
+
+      const reader = result.stream.getReader();
+      setTimeout(() => abortController.abort(), 10);
+      while (true) {
+        const { done } = await reader.read();
+        if (done) break;
+      }
+
+      expect(promptOptions?.signal).toBeInstanceOf(AbortSignal);
+      expect(promptOptions?.signal?.aborted).toBe(true);
+    });
+
+    it("should cancel the SSE event subscription when the stream closes", async () => {
+      let subscribeOptions: { signal?: AbortSignal } | undefined;
+      let signalAbortedAtReturn: boolean | undefined;
+
+      mockClient.event.subscribe.mockImplementationOnce(
+        (_params: unknown, options?: { signal?: AbortSignal }) => {
+          subscribeOptions = options;
+          return Promise.resolve({
+            stream: {
+              [Symbol.asyncIterator]() {
+                return {
+                  next: () =>
+                    new Promise<IteratorResult<unknown>>(() => {
+                      // Never resolves: no events arrive for this session.
+                    }),
+                  return: () => {
+                    signalAbortedAtReturn = subscribeOptions?.signal?.aborted;
+                    return Promise.resolve({
+                      done: true as const,
+                      value: undefined,
+                    });
+                  },
+                };
+              },
+            },
+          });
+        },
+      );
+      mockClient.session.prompt.mockImplementationOnce(
+        () => new Promise(() => {}),
+      );
+
+      const abortController = new AbortController();
+      const result = await model.doStream({
+        prompt: basicPrompt,
+        abortSignal: abortController.signal,
+      });
+
+      const reader = result.stream.getReader();
+      setTimeout(() => abortController.abort(), 10);
+      while (true) {
+        const { done } = await reader.read();
+        if (done) break;
+      }
+
+      expect(subscribeOptions?.signal).toBeInstanceOf(AbortSignal);
+      expect(subscribeOptions?.signal?.aborted).toBe(true);
+      // The signal must abort before iterator.return(): the SDK's SSE
+      // generator cancels its underlying fetch only through the signal, and
+      // return() can block until the next event while a read is pending.
+      expect(signalAbortedAtReturn).toBe(true);
+    });
+
+    it("should abort the prompt request signal after the stream completes normally", async () => {
+      const result = await model.doStream({
+        prompt: basicPrompt,
+      });
+
+      const reader = result.stream.getReader();
+      while (true) {
+        const { done } = await reader.read();
+        if (done) break;
+      }
+
+      const promptOptions = mockClient.session.prompt.mock.calls[0]?.[1] as
+        | { signal?: AbortSignal }
+        | undefined;
+      expect(promptOptions?.signal).toBeInstanceOf(AbortSignal);
+      expect(promptOptions?.signal?.aborted).toBe(true);
     });
   });
 

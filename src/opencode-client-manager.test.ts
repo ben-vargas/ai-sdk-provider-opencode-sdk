@@ -528,6 +528,22 @@ describe("opencode-client-manager", () => {
       // Should not throw
     });
 
+    it("should abort registered event subscription controllers", async () => {
+      const instance = OpencodeClientManager.getInstance();
+
+      const tracked = new AbortController();
+      instance.registerEventSubscription(tracked);
+
+      const unregistered = new AbortController();
+      const unregister = instance.registerEventSubscription(unregistered);
+      unregister();
+
+      await instance.dispose();
+
+      expect(tracked.signal.aborted).toBe(true);
+      expect(unregistered.signal.aborted).toBe(false);
+    });
+
     it("should clear client reference", async () => {
       const instance = OpencodeClientManager.getInstance();
       await instance.getClient();

@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Process hang from leaked `/event` SSE connection** ([#30](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/pull/30)) - `doStream` passes a per-stream `AbortController` signal to `client.event.subscribe` and aborts it when the stream closes (before `iterator.return()`, which could otherwise block until the next server event). Previously the SSE iterator's `return()` only released its reader lock without cancelling the underlying fetch, so the `GET /event` connection stayed open and kept the Node event loop alive after streaming finished — `examples/abort-signal.ts` intermittently never exited after printing "Done.". The client manager tracks these controllers (`registerEventSubscription`) and aborts any still open during `dispose()`.
+- **Streaming `session.prompt` and `session.abort` requests cancelled on stream close** - The per-stream abort signal from [#30](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/pull/30) is now also passed to the `session.prompt` and `session.abort` requests, so a prompt the server never completes (e.g. after an abort race) cannot pin the event loop, and `dispose()` tears these requests down too. Prompt results that arrive after an intentional close are ignored instead of being mis-reported as empty-response errors.
+- **`doGenerate` abort signal** - The non-streaming path now forwards `options.abortSignal` to the prompt request, so aborting `generateText` cancels the underlying HTTP request instead of leaving it pending. A caller-initiated abort now surfaces as an `AbortError` (previously a generic empty-response error) and best-effort aborts the server-side session to stop generation.
+
 ## [3.0.5] - 2026-06-11
 
 ### Added
