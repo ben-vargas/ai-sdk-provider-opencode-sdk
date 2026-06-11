@@ -341,6 +341,33 @@ describe("opencode-client-manager", () => {
       );
     });
 
+    it('should force fields responseStyle and warn when clientOptions requests "data"', async () => {
+      const warn = vi.fn();
+
+      const instance = OpencodeClientManager.getInstance({
+        baseUrl: "http://custom-server:8080",
+        clientOptions: {
+          responseStyle: "data",
+        },
+        logger: {
+          warn,
+          error: vi.fn(),
+        },
+      });
+
+      await instance.getClient();
+
+      const { createOpencodeClient } = await import("@opencode-ai/sdk/v2");
+      expect(createOpencodeClient).toHaveBeenCalledWith(
+        expect.objectContaining({
+          responseStyle: "fields",
+        }),
+      );
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("Ignoring clientOptions.responseStyle"),
+      );
+    });
+
     it("should not warn for undefined reserved keys in clientOptions", async () => {
       const warn = vi.fn();
 

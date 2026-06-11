@@ -90,6 +90,27 @@ function convertUsage(usage: StreamingUsage): LanguageModelV3Usage {
   };
 }
 
+/**
+ * Normalize a session.prompt result. Managed clients resolve to a
+ * fields-style result ({ data, error }), but a caller-supplied client may be
+ * configured with responseStyle: "data", which resolves to the payload
+ * itself (or undefined on failure).
+ */
+function extractPromptResult(result: unknown): {
+  data?: unknown;
+  error?: unknown;
+} {
+  if (
+    result &&
+    typeof result === "object" &&
+    ("data" in result || "error" in result)
+  ) {
+    return result as { data?: unknown; error?: unknown };
+  }
+
+  return { data: result };
+}
+
 function getMessageIDFromProviderOptions(
   options: LanguageModelV3CallOptions,
 ): string | undefined {
@@ -268,9 +289,9 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
 
       const result = await client.session.prompt(requestBody);
 
-      const data = result.data;
+      const { data, error: responseError } = extractPromptResult(result);
       if (!data) {
-        throw createEmptyResponseDataError(result.error, {
+        throw createEmptyResponseDataError(responseError, {
           sessionId,
           modelId: this.modelId,
         });
@@ -443,9 +464,10 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
           };
 
           client.session.prompt(requestBody).then((result) => {
-            if (!result.data) {
+            const { data, error: responseError } = extractPromptResult(result);
+            if (!data) {
               handlePromptFailure(
-                createEmptyResponseDataError(result.error, {
+                createEmptyResponseDataError(responseError, {
                   sessionId,
                   modelId: this.modelId,
                 }),

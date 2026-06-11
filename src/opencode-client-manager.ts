@@ -287,11 +287,17 @@ export class OpencodeClientManager {
         "Ignoring clientOptions.directory because directory is managed by model settings/defaultSettings.",
       );
     }
+    if (optionsRecord.responseStyle === "data") {
+      this.logger.warn(
+        'Ignoring clientOptions.responseStyle "data" because the provider requires fields-style SDK results.',
+      );
+    }
 
     return {
       ...options,
       baseUrl,
       directory: this.options.cwd,
+      responseStyle: "fields",
     };
   }
 

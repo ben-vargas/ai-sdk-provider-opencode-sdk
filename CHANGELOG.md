@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Clearer stale-options warnings** - The client manager's "already initialized" warnings now point at the escape hatches that actually work (`OpencodeClientManager.createInstance()` with the `clientManager` provider setting, or `OpencodeClientManager.resetInstance()`) instead of the previous generic advice.
+- **`clientOptions.responseStyle` normalization** - Managed clients are now always created with fields-style SDK results; `clientOptions.responseStyle: "data"` is ignored with a warning since the provider's response handling requires `{ data, error }` results. Prompt-result handling also tolerates data-style results from caller-supplied (preconfigured) clients.
 
 ## [3.0.4] - 2026-06-11
 

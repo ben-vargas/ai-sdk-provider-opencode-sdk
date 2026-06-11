@@ -384,6 +384,47 @@ describe("opencode-language-model", () => {
       ).rejects.toThrow("Original error: model not found");
     });
 
+    it("should handle data-style prompt results from custom clients", async () => {
+      // A caller-supplied client configured with responseStyle: "data"
+      // resolves session.prompt to the payload itself.
+      mockClient.session.prompt.mockResolvedValueOnce({
+        info: {
+          id: "msg-1",
+          sessionID: "session-123",
+          role: "assistant",
+          finish: "end_turn",
+        },
+        parts: [{ id: "part-1", type: "text", text: "Hello, world!" }],
+      });
+
+      const result = await model.doGenerate({
+        prompt: basicPrompt,
+      });
+
+      expect(result.content[0]).toMatchObject({
+        type: "text",
+        text: "Hello, world!",
+      });
+    });
+
+    it("should wrap undefined data-style prompt results with model context", async () => {
+      // A responseStyle: "data" client resolves to undefined on failure.
+      mockClient.session.prompt.mockResolvedValueOnce(undefined);
+
+      await expect(
+        model.doGenerate({
+          prompt: basicPrompt,
+        }),
+      ).rejects.toMatchObject({
+        message: expect.stringContaining(
+          'OpenCode returned no response data for model "anthropic/claude-3-5-sonnet-20241022"',
+        ),
+        data: expect.objectContaining({
+          errorType: "EmptyResponseData",
+        }),
+      });
+    });
+
     it("should handle JSON mode", async () => {
       await model.doGenerate({
         prompt: basicPrompt,
@@ -968,6 +1009,58 @@ describe("opencode-language-model", () => {
         errorType: "EmptyResponseData",
       });
       expect(iteratorReturn).toHaveBeenCalled();
+    });
+
+    it("should not flag data-style prompt results as missing data", async () => {
+      mockClient.event.subscribe.mockResolvedValueOnce({
+        stream: (async function* () {
+          yield {
+            type: "message.part.updated",
+            properties: {
+              part: {
+                id: "part-1",
+                sessionID: "session-123",
+                messageID: "msg-1",
+                type: "text",
+                text: "Hello",
+              },
+              delta: "Hello",
+            },
+          };
+          yield {
+            type: "session.idle",
+            properties: {
+              sessionID: "session-123",
+            },
+          };
+        })(),
+      });
+      // A caller-supplied client configured with responseStyle: "data"
+      // resolves session.prompt to the payload itself.
+      mockClient.session.prompt.mockResolvedValueOnce({
+        info: {
+          id: "msg-1",
+          sessionID: "session-123",
+          role: "assistant",
+          finish: "end_turn",
+        },
+        parts: [{ id: "part-1", type: "text", text: "Hello" }],
+      });
+
+      const result = await model.doStream({
+        prompt: basicPrompt,
+      });
+
+      const parts: unknown[] = [];
+      const reader = result.stream.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        parts.push(value);
+      }
+
+      expect(parts.some((part: any) => part.type === "error")).toBe(false);
+      expect(parts.some((part: any) => part.type === "finish")).toBe(true);
     });
 
     it("should terminate stream when abort signal fires without incoming events", async () => {
