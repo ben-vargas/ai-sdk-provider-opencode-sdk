@@ -133,13 +133,13 @@ export class OpencodeClientManager {
       filteredOptions.client !== this.client
     ) {
       this.logger.warn(
-        "Client manager already initialized; provided preconfigured client was ignored because a client is already active. New options from createOpencode() are ignored after initialization. Use separate client manager instances or call dispose() first.",
+        "Client manager already initialized; provided preconfigured client was ignored because a client is already active — requests will keep flowing through the existing client. To use this client, pass an isolated manager via createOpencode({ clientManager: OpencodeClientManager.createInstance({ client }) }), or call OpencodeClientManager.resetInstance() before creating the provider.",
       );
       return;
     }
 
     this.logger.warn(
-      "Client manager already initialized; new options from createOpencode() were ignored. Use separate client manager instances or call dispose() first.",
+      "Client manager already initialized; new options from createOpencode() were ignored. Use OpencodeClientManager.createInstance() with the clientManager provider setting for isolated configuration, or call OpencodeClientManager.resetInstance() first.",
     );
   }
 
@@ -325,6 +325,12 @@ export class OpencodeClientManager {
 
     this.isDisposed = true;
     this.unregisterCleanupHandlers();
+
+    // Release the singleton slot so a later getInstance() builds a fresh
+    // manager instead of returning this disposed one.
+    if (OpencodeClientManager.instance === this) {
+      OpencodeClientManager.instance = null;
+    }
 
     if (this.server) {
       this.logger.debug?.("Stopping managed OpenCode server");

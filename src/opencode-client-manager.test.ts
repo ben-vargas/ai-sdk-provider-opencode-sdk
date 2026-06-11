@@ -509,6 +509,27 @@ describe("opencode-client-manager", () => {
       // Attempting to get client should throw
       await expect(instance.getClient()).rejects.toThrow("disposed");
     });
+
+    it("should allow a fresh singleton to be created after dispose", async () => {
+      const clientA = {
+        session: { create: vi.fn(), prompt: vi.fn(), abort: vi.fn() },
+        event: { subscribe: vi.fn() },
+      } as unknown as OpencodeClient;
+
+      const clientB = {
+        session: { create: vi.fn(), prompt: vi.fn(), abort: vi.fn() },
+        event: { subscribe: vi.fn() },
+      } as unknown as OpencodeClient;
+
+      const first = OpencodeClientManager.getInstance({ client: clientA });
+      expect(await first.getClient()).toBe(clientA);
+
+      await first.dispose();
+
+      const second = OpencodeClientManager.getInstance({ client: clientB });
+      expect(second).not.toBe(first);
+      expect(await second.getClient()).toBe(clientB);
+    });
   });
 
   describe("createClientManager", () => {
