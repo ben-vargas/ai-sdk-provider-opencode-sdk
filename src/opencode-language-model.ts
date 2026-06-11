@@ -32,7 +32,12 @@ import {
 import { mapOpencodeFinishReason } from "./map-opencode-finish-reason.js";
 import { getLogger, logUnsupportedCallOptions } from "./logger.js";
 import { validateModelId, validateSettings } from "./validation.js";
-import { wrapError, extractErrorMessage, isAbortError } from "./errors.js";
+import {
+  wrapError,
+  extractErrorMessage,
+  isAbortError,
+  createEmptyResponseDataError,
+} from "./errors.js";
 import {
   safeStringifyToolInput,
   planFilePartConversion,
@@ -83,6 +88,27 @@ function convertUsage(usage: StreamingUsage): LanguageModelV3Usage {
       total_cost: usage.totalCost,
     },
   };
+}
+
+/**
+ * Normalize an SDK request result. Managed clients resolve to a
+ * fields-style result ({ data, error }), but a caller-supplied client may be
+ * configured with responseStyle: "data", which resolves to the payload
+ * itself (or undefined on failure).
+ */
+function extractSdkResult(result: unknown): {
+  data?: unknown;
+  error?: unknown;
+} {
+  if (
+    result &&
+    typeof result === "object" &&
+    ("data" in result || "error" in result)
+  ) {
+    return result as { data?: unknown; error?: unknown };
+  }
+
+  return { data: result };
 }
 
 function getMessageIDFromProviderOptions(
@@ -263,9 +289,12 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
 
       const result = await client.session.prompt(requestBody);
 
-      const data = result.data;
+      const { data, error: responseError } = extractSdkResult(result);
       if (!data) {
-        throw new Error("No response data from OpenCode");
+        throw createEmptyResponseDataError(responseError, {
+          sessionId,
+          modelId: this.modelId,
+        });
       }
 
       const responseData = data as {
@@ -418,15 +447,33 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
             }
           }
 
-          client.session.prompt(requestBody).catch((error: unknown) => {
+          const handlePromptFailure = (error: unknown) => {
             const wrappedError = wrapError(error, {
               sessionId,
               modelId: this.modelId,
             });
             logger.error(`Prompt error: ${extractErrorMessage(wrappedError)}`);
-            controller.enqueue({ type: "error", error: wrappedError });
+            try {
+              controller.enqueue({ type: "error", error: wrappedError });
+            } catch (enqueueError) {
+              logger.debug?.(
+                `Failed to enqueue prompt error after stream closed: ${extractErrorMessage(enqueueError)}`,
+              );
+            }
             resolvePromptFailed?.();
-          });
+          };
+
+          client.session.prompt(requestBody).then((result) => {
+            const { data, error: responseError } = extractSdkResult(result);
+            if (!data) {
+              handlePromptFailure(
+                createEmptyResponseDataError(responseError, {
+                  sessionId,
+                  modelId: this.modelId,
+                }),
+              );
+            }
+          }, handlePromptFailure);
 
           const state = createStreamState();
           let lastMessageInfo: Message | undefined;
@@ -707,10 +754,11 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
           : {}),
       });
 
-      const data = result.data as { id: string } | undefined;
+      const { data: createData, error: createError } = extractSdkResult(result);
+      const data = createData as { id: string } | undefined;
       if (!data?.id) {
         throw new Error(
-          `Failed to create session: ${JSON.stringify(result.error ?? result.data)}`,
+          `Failed to create session: ${JSON.stringify(createError ?? createData)}`,
         );
       }
 

@@ -54,6 +54,7 @@ export {
   isOutputLengthError,
   createAuthenticationError,
   createAPICallError,
+  createEmptyResponseDataError,
   createTimeoutError,
   extractErrorMessage,
   wrapError,

@@ -210,6 +210,36 @@ function createEmptyResponseError(
 }
 
 /**
+ * Create an actionable error for OpenCode responses that complete without
+ * any response data.
+ */
+export function createEmptyResponseDataError(
+  error: unknown,
+  metadata?: Partial<OpencodeErrorMetadata>,
+): APICallError {
+  const modelHint = metadata?.modelId ? ` for model "${metadata.modelId}"` : "";
+  const detail = error ? ` Original error: ${extractErrorMessage(error)}` : "";
+
+  return new APICallError({
+    message:
+      `OpenCode returned no response data${modelHint}. ` +
+      "This usually means the configured provider/model ID is invalid or unavailable. " +
+      "Run `opencode models` to list available model IDs and check the OpenCode provider configuration." +
+      detail,
+    url: "opencode://session",
+    requestBodyValues: {},
+    statusCode: metadata?.statusCode ?? extractStatusCode(error),
+    isRetryable: false,
+    data: {
+      errorType: "EmptyResponseData",
+      sessionId: metadata?.sessionId,
+      messageId: metadata?.messageId,
+      modelId: metadata?.modelId,
+    },
+  });
+}
+
+/**
  * Create a timeout error.
  */
 export function createTimeoutError(
@@ -375,6 +405,11 @@ export function wrapError(
   error: unknown,
   metadata?: Partial<OpencodeErrorMetadata>,
 ): Error {
+  // Errors created by this module are already actionable AI SDK errors.
+  if (APICallError.isInstance(error) || LoadAPIKeyError.isInstance(error)) {
+    return error;
+  }
+
   if (isAuthenticationError(error)) {
     return createAuthenticationError(error);
   }
