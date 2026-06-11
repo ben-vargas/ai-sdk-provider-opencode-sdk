@@ -23,13 +23,17 @@ import {
   createStreamState,
   createFinishParts,
   createStreamStartPart,
+  hasCompletedStructuredOutput,
   isEventForSession,
   isSessionComplete,
   STRUCTURED_OUTPUT_TOOL,
   type Message,
   type Part,
 } from "./convert-from-opencode-events.js";
-import { mapOpencodeFinishReason } from "./map-opencode-finish-reason.js";
+import {
+  mapOpencodeFinishReason,
+  resolveStructuredOutputFinishReason,
+} from "./map-opencode-finish-reason.js";
 import { getLogger, logUnsupportedCallOptions } from "./logger.js";
 import { validateModelId, validateSettings } from "./validation.js";
 import {
@@ -343,7 +347,10 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
         `[doGenerate] extracted content: ${JSON.stringify(content.map((c) => ({ type: c.type, ...(c.type === "text" ? { text: (c as any).text?.slice(0, 200) } : {}), ...(c.type === "tool-call" ? { toolName: (c as any).toolName } : {}) })))}`,
       );
       const usage = this.extractUsageFromParts(responseData.parts ?? []);
-      const finishReason = mapOpencodeFinishReason(responseData.info);
+      const finishReason = resolveStructuredOutputFinishReason(
+        mapOpencodeFinishReason(responseData.info),
+        hasCompletedStructuredOutput(responseData.parts ?? []),
+      );
 
       return {
         content,

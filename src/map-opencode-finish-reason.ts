@@ -92,13 +92,22 @@ function mapFinishToReason(finish: string): LanguageModelV3FinishReason {
     return { unified: "length", raw: finish };
   }
 
-  // Tool use
-  if (normalizedFinish === "tool_use" || normalizedFinish === "tool_calls") {
+  // Tool use. OpenCode stores AI SDK-style hyphenated reasons ("tool-calls")
+  // alongside provider-style raw values ("tool_use", "tool_calls").
+  if (
+    normalizedFinish === "tool_use" ||
+    normalizedFinish === "tool_calls" ||
+    normalizedFinish === "tool-calls"
+  ) {
     return { unified: "tool-calls", raw: finish };
   }
 
   // Content filter
-  if (normalizedFinish === "content_filter" || normalizedFinish === "safety") {
+  if (
+    normalizedFinish === "content_filter" ||
+    normalizedFinish === "content-filter" ||
+    normalizedFinish === "safety"
+  ) {
     return { unified: "content-filter", raw: finish };
   }
 
@@ -134,4 +143,28 @@ export function mapErrorToFinishReasonFromUnknown(
  */
 export function hasToolCalls(parts: Array<{ type: string }>): boolean {
   return parts.some((part) => part.type === "tool");
+}
+
+/**
+ * Resolve the finish reason for a turn that delivered structured output.
+ *
+ * When a json_schema format is requested, OpenCode ends the turn on the
+ * StructuredOutput tool call, so the message finishes with "tool-calls".
+ * The provider flattens that tool call into text content, and the AI SDK
+ * only parses `Output.object()` / `Output.array()` results when the finish
+ * reason is "stop" — so a tool-call finish would make `generateText` discard
+ * the structured output and throw NoOutputGeneratedError.
+ */
+export function resolveStructuredOutputFinishReason(
+  finishReason: LanguageModelV3FinishReason,
+  structuredOutputCompleted: boolean,
+): LanguageModelV3FinishReason {
+  if (
+    structuredOutputCompleted &&
+    (finishReason.unified === "tool-calls" || finishReason.unified === "other")
+  ) {
+    return { unified: "stop", raw: finishReason.raw };
+  }
+
+  return finishReason;
 }

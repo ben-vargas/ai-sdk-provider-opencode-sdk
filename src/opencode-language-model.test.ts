@@ -773,6 +773,74 @@ describe("opencode-language-model", () => {
       expect(parts.some((p: any) => p.type === "tool-result")).toBe(false);
     });
 
+    it('should report "stop" finish when structured output completes a "tool-calls" turn', async () => {
+      const structuredInput = { name: "Alex", yearsExperience: 12 };
+      mockClient.event.subscribe.mockResolvedValueOnce({
+        stream: (async function* () {
+          yield {
+            type: "message.updated",
+            properties: {
+              info: {
+                id: "msg-1",
+                sessionID: "session-123",
+                role: "assistant",
+                finish: "tool-calls",
+              },
+            },
+          };
+          yield {
+            type: "message.part.updated",
+            properties: {
+              part: {
+                id: "part-1",
+                sessionID: "session-123",
+                messageID: "msg-1",
+                type: "tool",
+                callID: "call-so-1",
+                tool: "StructuredOutput",
+                state: {
+                  status: "completed",
+                  input: structuredInput,
+                  output: "Structured output captured successfully.",
+                  title: "Structured Output",
+                  time: { start: 1000, end: 2000 },
+                },
+              },
+            },
+          };
+          yield {
+            type: "session.status",
+            properties: {
+              sessionID: "session-123",
+              status: { type: "idle" },
+            },
+          };
+        })(),
+      });
+
+      const result = await model.doStream({
+        prompt: [
+          { role: "user", content: [{ type: "text", text: "give me output" }] },
+        ],
+        responseFormat: { type: "json", schema: { type: "object" } },
+      });
+
+      const parts: unknown[] = [];
+      const reader = result.stream.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        parts.push(value);
+      }
+
+      const finishPart = parts.find((p: any) => p.type === "finish");
+      expect(finishPart).toBeDefined();
+      expect((finishPart as any).finishReason).toEqual({
+        unified: "stop",
+        raw: "tool-calls",
+      });
+    });
+
     it("should use native JSON schema mode without adding prompt instructions", async () => {
       const result = await model.doStream({
         prompt: basicPrompt,
@@ -1510,6 +1578,104 @@ describe("opencode-language-model", () => {
       );
       expect(toolCalls).toHaveLength(0);
       expect(toolResults).toHaveLength(0);
+    });
+
+    it('should report "stop" when structured output completes a "tool-calls" turn', async () => {
+      // OpenCode 1.17.x ends json_schema turns on the StructuredOutput tool
+      // call, so the message finishes with "tool-calls". generateText only
+      // parses Output.object() results on a "stop" finish (issue: native
+      // non-streaming structured output always threw NoOutputGeneratedError).
+      const structuredInput = { name: "Alex", yearsExperience: 12 };
+      mockClient.session.prompt.mockResolvedValueOnce({
+        data: {
+          info: {
+            id: "msg-1",
+            sessionID: "session-123",
+            role: "assistant",
+            finish: "tool-calls",
+          },
+          parts: [
+            {
+              id: "part-1",
+              type: "tool",
+              callID: "call-so-1",
+              tool: "StructuredOutput",
+              state: {
+                status: "completed",
+                input: structuredInput,
+                output: "Structured output captured successfully.",
+              },
+            },
+            {
+              id: "part-2",
+              type: "step-finish",
+              reason: "tool-calls",
+              cost: 0.001,
+              tokens: {
+                input: 10,
+                output: 5,
+                reasoning: 0,
+                cache: { read: 0, write: 0 },
+              },
+            },
+          ],
+        },
+      });
+
+      const result = await model.doGenerate({
+        prompt: [
+          { role: "user", content: [{ type: "text", text: "give me output" }] },
+        ],
+        responseFormat: { type: "json", schema: { type: "object" } },
+      });
+
+      expect(result.finishReason).toEqual({
+        unified: "stop",
+        raw: "tool-calls",
+      });
+
+      const textParts = result.content.filter((c) => c.type === "text");
+      expect(textParts).toHaveLength(1);
+      expect(JSON.parse((textParts[0] as { text: string }).text)).toEqual(
+        structuredInput,
+      );
+    });
+
+    it('should keep "tool-calls" finish for turns without structured output', async () => {
+      mockClient.session.prompt.mockResolvedValueOnce({
+        data: {
+          info: {
+            id: "msg-1",
+            sessionID: "session-123",
+            role: "assistant",
+            finish: "tool-calls",
+          },
+          parts: [
+            {
+              id: "part-1",
+              type: "tool",
+              callID: "call-1",
+              tool: "bash",
+              state: {
+                status: "completed",
+                input: { command: "ls" },
+                output: "file.txt",
+              },
+            },
+          ],
+        },
+      });
+
+      const result = await model.doGenerate({
+        prompt: [
+          { role: "user", content: [{ type: "text", text: "list files" }] },
+        ],
+      });
+
+      expect(result.finishReason).toEqual({
+        unified: "tool-calls",
+        raw: "tool-calls",
+      });
     });
 
     it("should not affect non-StructuredOutput tool parts", async () => {

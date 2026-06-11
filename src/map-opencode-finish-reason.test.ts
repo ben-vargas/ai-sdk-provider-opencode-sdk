@@ -3,6 +3,7 @@ import {
   mapOpencodeFinishReason,
   mapErrorToFinishReasonFromUnknown,
   hasToolCalls,
+  resolveStructuredOutputFinishReason,
 } from "./map-opencode-finish-reason.js";
 
 const unified = (message: Parameters<typeof mapOpencodeFinishReason>[0]) =>
@@ -46,8 +47,16 @@ describe("map-opencode-finish-reason", () => {
       expect(unified({ finish: "tool_calls" })).toBe("tool-calls");
     });
 
+    it('should return "tool-calls" for hyphenated tool-calls finish', () => {
+      expect(unified({ finish: "tool-calls" })).toBe("tool-calls");
+    });
+
     it('should return "content-filter" for content_filter finish', () => {
       expect(unified({ finish: "content_filter" })).toBe("content-filter");
+    });
+
+    it('should return "content-filter" for hyphenated content-filter finish', () => {
+      expect(unified({ finish: "content-filter" })).toBe("content-filter");
     });
 
     it('should return "content-filter" for safety finish', () => {
@@ -200,6 +209,59 @@ describe("map-opencode-finish-reason", () => {
     it("should handle multiple tool parts", () => {
       const parts = [{ type: "tool" }, { type: "tool" }];
       expect(hasToolCalls(parts)).toBe(true);
+    });
+  });
+
+  describe("resolveStructuredOutputFinishReason", () => {
+    it('should resolve "tool-calls" to "stop" when structured output completed', () => {
+      const result = resolveStructuredOutputFinishReason(
+        { unified: "tool-calls", raw: "tool-calls" },
+        true,
+      );
+      expect(result).toEqual({ unified: "stop", raw: "tool-calls" });
+    });
+
+    it('should resolve "other" to "stop" when structured output completed', () => {
+      const result = resolveStructuredOutputFinishReason(
+        { unified: "other", raw: "tool-calls" },
+        true,
+      );
+      expect(result).toEqual({ unified: "stop", raw: "tool-calls" });
+    });
+
+    it('should keep "tool-calls" when structured output did not complete', () => {
+      const result = resolveStructuredOutputFinishReason(
+        { unified: "tool-calls", raw: "tool_use" },
+        false,
+      );
+      expect(result).toEqual({ unified: "tool-calls", raw: "tool_use" });
+    });
+
+    it('should keep "error" even when structured output completed', () => {
+      const result = resolveStructuredOutputFinishReason(
+        { unified: "error", raw: "StructuredOutputError" },
+        true,
+      );
+      expect(result).toEqual({
+        unified: "error",
+        raw: "StructuredOutputError",
+      });
+    });
+
+    it('should keep "length" even when structured output completed', () => {
+      const result = resolveStructuredOutputFinishReason(
+        { unified: "length", raw: "max_tokens" },
+        true,
+      );
+      expect(result).toEqual({ unified: "length", raw: "max_tokens" });
+    });
+
+    it('should keep "stop" unchanged', () => {
+      const result = resolveStructuredOutputFinishReason(
+        { unified: "stop", raw: "end_turn" },
+        true,
+      );
+      expect(result).toEqual({ unified: "stop", raw: "end_turn" });
     });
   });
 });
