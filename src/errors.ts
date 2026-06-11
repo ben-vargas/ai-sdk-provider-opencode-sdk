@@ -6,6 +6,7 @@ import { APICallError, LoadAPIKeyError } from "@ai-sdk/provider";
 export interface OpencodeErrorMetadata {
   sessionId?: string;
   messageId?: string;
+  modelId?: string;
   statusCode?: number;
   isRetryable: boolean;
   errorType?: string;
@@ -175,6 +176,35 @@ export function createAPICallError(
       errorType: metadata?.errorType ?? extractErrorType(error),
       sessionId: metadata?.sessionId,
       messageId: metadata?.messageId,
+      modelId: metadata?.modelId,
+    },
+  });
+}
+
+/**
+ * Create an actionable error for empty JSON responses from OpenCode.
+ */
+function createEmptyResponseError(
+  error: unknown,
+  metadata?: Partial<OpencodeErrorMetadata>,
+): APICallError {
+  const modelHint = metadata?.modelId ? ` for model "${metadata.modelId}"` : "";
+  const originalMessage = extractErrorMessage(error);
+
+  return new APICallError({
+    message:
+      `OpenCode returned an empty JSON response${modelHint}. ` +
+      "This usually means the OpenCode server rejected the request before returning response data, often because the configured provider/model is unavailable or invalid. " +
+      `Check the model ID and OpenCode provider configuration. Original error: ${originalMessage}`,
+    url: "opencode://session",
+    requestBodyValues: {},
+    statusCode: metadata?.statusCode ?? extractStatusCode(error),
+    isRetryable: false,
+    data: {
+      errorType: "EmptyJSONResponse",
+      sessionId: metadata?.sessionId,
+      messageId: metadata?.messageId,
+      modelId: metadata?.modelId,
     },
   });
 }
@@ -357,10 +387,34 @@ export function wrapError(
     return createTimeoutError(timeoutMs, "request");
   }
 
+  if (isEmptyJsonResponseError(error)) {
+    return createEmptyResponseError(error, metadata);
+  }
+
   return createAPICallError(error, metadata);
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
+
+function isEmptyJsonResponseError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const err = error as Record<string, unknown>;
+  const name =
+    error instanceof SyntaxError
+      ? "SyntaxError"
+      : typeof err.name === "string"
+        ? err.name
+        : undefined;
+
+  return (
+    name === "SyntaxError" &&
+    typeof err.message === "string" &&
+    err.message === "Unexpected end of JSON input"
+  );
+}
 
 function extractTimeoutMs(error: unknown): number | undefined {
   if (!error || typeof error !== "object") {

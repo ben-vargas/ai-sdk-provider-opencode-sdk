@@ -337,6 +337,20 @@ describe("opencode-language-model", () => {
       expect(result.request?.body).toBeDefined();
     });
 
+    it("should wrap empty OpenCode JSON responses with model context", async () => {
+      mockClient.session.prompt.mockRejectedValueOnce(
+        new SyntaxError("Unexpected end of JSON input"),
+      );
+
+      await expect(
+        model.doGenerate({
+          prompt: basicPrompt,
+        }),
+      ).rejects.toThrow(
+        'OpenCode returned an empty JSON response for model "anthropic/claude-3-5-sonnet-20241022"',
+      );
+    });
+
     it("should handle JSON mode", async () => {
       await model.doGenerate({
         prompt: basicPrompt,
@@ -1048,7 +1062,10 @@ describe("opencode-language-model", () => {
     });
 
     it("should emit StructuredOutput tool input as text content", async () => {
-      const structuredInput = { output: "# Hello World", outputType: "markdown" };
+      const structuredInput = {
+        output: "# Hello World",
+        outputType: "markdown",
+      };
       mockClient.session.prompt.mockResolvedValueOnce({
         data: {
           info: {
@@ -1093,10 +1110,14 @@ describe("opencode-language-model", () => {
 
       const textParts = result.content.filter((c) => c.type === "text");
       expect(textParts).toHaveLength(1);
-      expect(JSON.parse((textParts[0] as { text: string }).text)).toEqual(structuredInput);
+      expect(JSON.parse((textParts[0] as { text: string }).text)).toEqual(
+        structuredInput,
+      );
 
       const toolCalls = result.content.filter((c) => c.type === "tool-call");
-      const toolResults = result.content.filter((c) => c.type === "tool-result");
+      const toolResults = result.content.filter(
+        (c) => c.type === "tool-result",
+      );
       expect(toolCalls).toHaveLength(0);
       expect(toolResults).toHaveLength(0);
     });
@@ -1149,7 +1170,9 @@ describe("opencode-language-model", () => {
 
       const textParts = result.content.filter((c) => c.type === "text");
       expect(textParts).toHaveLength(1);
-      expect(JSON.parse((textParts[0] as { text: string }).text)).toEqual({ result: "done" });
+      expect(JSON.parse((textParts[0] as { text: string }).text)).toEqual({
+        result: "done",
+      });
     });
 
     it("should not emit tool-call/tool-result for error-status StructuredOutput", async () => {
@@ -1184,7 +1207,9 @@ describe("opencode-language-model", () => {
       });
 
       const toolCalls = result.content.filter((c) => c.type === "tool-call");
-      const toolResults = result.content.filter((c) => c.type === "tool-result");
+      const toolResults = result.content.filter(
+        (c) => c.type === "tool-result",
+      );
       expect(toolCalls).toHaveLength(0);
       expect(toolResults).toHaveLength(0);
     });
