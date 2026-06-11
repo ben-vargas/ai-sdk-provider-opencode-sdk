@@ -6,6 +6,7 @@ import {
   isOutputLengthError,
   createAuthenticationError,
   createAPICallError,
+  createEmptyResponseDataError,
   createTimeoutError,
   extractErrorMessage,
   wrapError,
@@ -240,6 +241,45 @@ describe("errors", () => {
     });
   });
 
+  describe("createEmptyResponseDataError", () => {
+    it("should create actionable error with model guidance", () => {
+      const result = createEmptyResponseDataError(undefined, {
+        sessionId: "session-123",
+        modelId: "github-copilot/gpt-5",
+      });
+
+      expect(result).toBeInstanceOf(APICallError);
+      expect(result.message).toContain("OpenCode returned no response data");
+      expect(result.message).toContain('for model "github-copilot/gpt-5"');
+      expect(result.message).toContain("provider/model");
+      expect(result.message).toContain("opencode models");
+      expect(result.isRetryable).toBe(false);
+      expect(result.data).toMatchObject({
+        errorType: "EmptyResponseData",
+        sessionId: "session-123",
+        modelId: "github-copilot/gpt-5",
+      });
+    });
+
+    it("should omit model hint when modelId is missing", () => {
+      const result = createEmptyResponseDataError(undefined);
+
+      expect(result.message).toContain("OpenCode returned no response data");
+      expect(result.message).not.toContain("for model");
+      expect(result.message).not.toContain("Original error");
+    });
+
+    it("should include original error details when available", () => {
+      const result = createEmptyResponseDataError(
+        { message: "model not found", statusCode: 400 },
+        { modelId: "github-copilot/gpt-5" },
+      );
+
+      expect(result.message).toContain("Original error: model not found");
+      expect(result.statusCode).toBe(400);
+    });
+  });
+
   describe("createTimeoutError", () => {
     it("should create timeout error with duration", () => {
       const result = createTimeoutError(5000);
@@ -367,6 +407,20 @@ describe("errors", () => {
       const result = wrapError(error, { sessionId: "session-123" });
 
       expect((result as APICallError).data).toMatchObject({
+        sessionId: "session-123",
+      });
+    });
+
+    it("should return already-wrapped AI SDK errors unchanged", () => {
+      const original = createEmptyResponseDataError(undefined, {
+        sessionId: "session-123",
+        modelId: "github-copilot/gpt-5",
+      });
+      const result = wrapError(original, { sessionId: "other-session" });
+
+      expect(result).toBe(original);
+      expect((result as APICallError).data).toMatchObject({
+        errorType: "EmptyResponseData",
         sessionId: "session-123",
       });
     });

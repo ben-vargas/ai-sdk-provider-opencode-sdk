@@ -32,7 +32,12 @@ import {
 import { mapOpencodeFinishReason } from "./map-opencode-finish-reason.js";
 import { getLogger, logUnsupportedCallOptions } from "./logger.js";
 import { validateModelId, validateSettings } from "./validation.js";
-import { wrapError, extractErrorMessage, isAbortError } from "./errors.js";
+import {
+  wrapError,
+  extractErrorMessage,
+  isAbortError,
+  createEmptyResponseDataError,
+} from "./errors.js";
 import {
   safeStringifyToolInput,
   planFilePartConversion,
@@ -265,7 +270,10 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
 
       const data = result.data;
       if (!data) {
-        throw new Error("No response data from OpenCode");
+        throw createEmptyResponseDataError(result.error, {
+          sessionId,
+          modelId: this.modelId,
+        });
       }
 
       const responseData = data as {
@@ -418,15 +426,32 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
             }
           }
 
-          client.session.prompt(requestBody).catch((error: unknown) => {
+          const handlePromptFailure = (error: unknown) => {
             const wrappedError = wrapError(error, {
               sessionId,
               modelId: this.modelId,
             });
             logger.error(`Prompt error: ${extractErrorMessage(wrappedError)}`);
-            controller.enqueue({ type: "error", error: wrappedError });
+            try {
+              controller.enqueue({ type: "error", error: wrappedError });
+            } catch (enqueueError) {
+              logger.debug?.(
+                `Failed to enqueue prompt error after stream closed: ${extractErrorMessage(enqueueError)}`,
+              );
+            }
             resolvePromptFailed?.();
-          });
+          };
+
+          client.session.prompt(requestBody).then((result) => {
+            if (!result.data) {
+              handlePromptFailure(
+                createEmptyResponseDataError(result.error, {
+                  sessionId,
+                  modelId: this.modelId,
+                }),
+              );
+            }
+          }, handlePromptFailure);
 
           const state = createStreamState();
           let lastMessageInfo: Message | undefined;

@@ -7,8 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.0.5] - 2026-06-11
 
+### Added
+
+- **Exported `createEmptyResponseDataError`** - New error factory alongside the existing `createAPICallError` / `createTimeoutError` exports.
+
 ### Fixed
 
+- **Empty response data errors** - Prompt calls that succeed but return no response data (the behavior of opencode CLI 1.17.x for invalid or unavailable `provider/model` IDs, e.g. the `github-copilot/gpt-5` repro from [#21](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/issues/21)) now throw an actionable `APICallError` that names the requested model ID, suggests checking `opencode models`, includes the server error payload when available, and carries `errorType: "EmptyResponseData"` — replacing the generic `No response data from OpenCode`. The streaming path surfaces the same error as an `error` stream part and terminates the stream instead of hanging on the event subscription.
+- **`wrapError` double-wrapping** - `wrapError` now returns already-wrapped AI SDK errors (`APICallError`, `LoadAPIKeyError`) unchanged instead of re-wrapping them and losing their metadata.
 - **Singleton client manager recovery after dispose** - `OpencodeClientManager.dispose()` now releases the singleton slot when the disposed manager is the singleton, so a later `createOpencode()` builds a fresh client manager. Previously the singleton kept pointing at the disposed instance, and every subsequent provider in the same process failed with `Client manager has been disposed`.
 - **client-options example** - Step 2 of `examples/client-options.ts` now genuinely demonstrates the preconfigured-client pattern by passing an isolated manager via `clientManager: OpencodeClientManager.createInstance({ client })`. Previously the preconfigured client was handed to the singleton that step 1 had already initialized, so it was ignored and step 2's requests flowed through step 1's client while the demo reported success. The example now also echoes each outgoing request's `x-demo-source` header so the output proves which client served it, drops a spurious `await` on the synchronous v2 `createOpencodeClient()`, and allows overriding the example model via `OPENCODE_MODEL`.
 
