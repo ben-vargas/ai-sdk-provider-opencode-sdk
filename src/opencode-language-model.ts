@@ -288,24 +288,38 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
       );
 
       const abortSignal = options.abortSignal;
-      const result = abortSignal
-        ? await client.session.prompt(requestBody, { signal: abortSignal })
-        : await client.session.prompt(requestBody);
+      const abortServerSession = async () => {
+        const directory = this.getRequestDirectory();
+        try {
+          await client.session.abort({
+            sessionID: sessionId,
+            ...(directory ? { directory } : {}),
+          });
+        } catch {
+          // ignore abort errors
+        }
+      };
+
+      let result: unknown;
+      try {
+        result = abortSignal
+          ? await client.session.prompt(requestBody, { signal: abortSignal })
+          : await client.session.prompt(requestBody);
+      } catch (error) {
+        // Clients configured with throwOnError reject on fetch abort instead
+        // of resolving { error }; still stop server-side generation.
+        if (isAbortError(error) || abortSignal?.aborted) {
+          await abortServerSession();
+        }
+        throw error;
+      }
 
       const { data, error: responseError } = extractSdkResult(result);
       if (!data) {
         // The SDK surfaces fetch aborts as { error } instead of rejecting, so
         // map a caller-initiated abort to AbortError and stop server-side work.
         if (abortSignal?.aborted) {
-          const directory = this.getRequestDirectory();
-          try {
-            await client.session.abort({
-              sessionID: sessionId,
-              ...(directory ? { directory } : {}),
-            });
-          } catch {
-            // ignore abort errors
-          }
+          await abortServerSession();
           const abortError = new Error("Request aborted");
           abortError.name = "AbortError";
           throw abortError;

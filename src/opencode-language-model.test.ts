@@ -404,6 +404,38 @@ describe("opencode-language-model", () => {
       );
     });
 
+    it("should abort the server session when a throwOnError client rejects on abort", async () => {
+      mockClient.session.prompt.mockImplementationOnce(
+        (_body: unknown, options?: { signal?: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            // Emulate a client configured with throwOnError: an aborted
+            // fetch rejects instead of resolving with { error }.
+            options?.signal?.addEventListener("abort", () => {
+              reject(
+                Object.assign(new Error("This operation was aborted"), {
+                  name: "AbortError",
+                }),
+              );
+            });
+          }),
+      );
+
+      const abortController = new AbortController();
+      const resultPromise = model.doGenerate({
+        prompt: basicPrompt,
+        abortSignal: abortController.signal,
+      });
+
+      setTimeout(() => abortController.abort(), 10);
+
+      await expect(resultPromise).rejects.toMatchObject({
+        name: "AbortError",
+      });
+      expect(mockClient.session.abort).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionID: "session-123" }),
+      );
+    });
+
     it("should include response error details when response data is missing", async () => {
       mockClient.session.prompt.mockResolvedValueOnce({
         data: undefined,
