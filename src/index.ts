@@ -33,6 +33,11 @@ export type {
   OpencodePermissionAction,
   OpencodePermissionRule,
   OpencodePermissionRuleset,
+  OpencodeQuestionOption,
+  OpencodeQuestionInfo,
+  OpencodeQuestionRequest,
+  OpencodeQuestionAnswer,
+  OpencodeQuestionResponse,
   ToolStreamState,
   StreamingUsage,
 } from "./types.js";

@@ -68,15 +68,21 @@ interface ApprovalClient {
 
 interface QuestionClient {
   question?: {
-    reply?: (parameters: {
-      requestID: string;
-      answers: string[][];
-      directory?: string;
-    }) => Promise<unknown> | unknown;
-    reject?: (parameters: {
-      requestID: string;
-      directory?: string;
-    }) => Promise<unknown> | unknown;
+    reply?: (
+      parameters: {
+        requestID: string;
+        answers: string[][];
+        directory?: string;
+      },
+      options?: { signal?: AbortSignal },
+    ) => Promise<unknown> | unknown;
+    reject?: (
+      parameters: {
+        requestID: string;
+        directory?: string;
+      },
+      options?: { signal?: AbortSignal },
+    ) => Promise<unknown> | unknown;
   };
 }
 
@@ -629,6 +635,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
                   client,
                   event as EventQuestionAsked,
                   state.questionRequests,
+                  requestAbortController.signal,
                 );
                 if (questionResult.handled) {
                   if (questionResult.error) {
@@ -814,6 +821,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
     client: QuestionClient,
     event: EventQuestionAsked,
     seenQuestionIds: Set<string>,
+    signal: AbortSignal,
   ): Promise<{ handled: boolean; error?: Error }> {
     const handler = this.settings.onQuestionAsked;
     if (!handler) {
@@ -848,6 +856,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
 
     const directory = this.getRequestDirectory();
     try {
+      let result: unknown;
       if (isRejectQuestionResponse(response)) {
         if (typeof client.question?.reject !== "function") {
           return {
@@ -858,10 +867,13 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
           };
         }
 
-        await client.question.reject({
-          requestID: requestId,
-          ...(directory ? { directory } : {}),
-        });
+        result = await client.question.reject(
+          {
+            requestID: requestId,
+            ...(directory ? { directory } : {}),
+          },
+          { signal },
+        );
       } else {
         if (typeof client.question?.reply !== "function") {
           return {
@@ -872,12 +884,29 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
           };
         }
 
-        await client.question.reply({
-          requestID: requestId,
-          answers: response.answers,
-          ...(directory ? { directory } : {}),
-        });
+        result = await client.question.reply(
+          {
+            requestID: requestId,
+            answers: response.answers,
+            ...(directory ? { directory } : {}),
+          },
+          { signal },
+        );
       }
+
+      // Fields-style clients report API failures via the result rather than
+      // throwing, so a missing check would record the question as answered
+      // while OpenCode keeps waiting (issue #15).
+      const { error: resultError } = extractSdkResult(result);
+      if (resultError) {
+        return {
+          handled: true,
+          error: new Error(
+            `Failed to apply OpenCode question response for ${requestId}: ${extractErrorMessage(resultError)}`,
+          ),
+        };
+      }
+
       seenQuestionIds.add(requestId);
       return { handled: true };
     } catch (error) {
