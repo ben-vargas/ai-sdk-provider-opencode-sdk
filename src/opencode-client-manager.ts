@@ -40,6 +40,7 @@ export class OpencodeClientManager {
   private logger: Logger;
   private initPromise: Promise<OpencodeClient> | null = null;
   private isDisposed = false;
+  private activeEventSubscriptions = new Set<AbortController>();
   private cleanupHandlersRegistered = false;
   private cleanupHandlers: {
     exit?: () => void;
@@ -322,6 +323,17 @@ export class OpencodeClientManager {
   }
 
   /**
+   * Track an event-stream AbortController so dispose() can tear down SSE
+   * connections that are still open. Returns an unregister function.
+   */
+  registerEventSubscription(controller: AbortController): () => void {
+    this.activeEventSubscriptions.add(controller);
+    return () => {
+      this.activeEventSubscriptions.delete(controller);
+    };
+  }
+
+  /**
    * Dispose of the client manager, stopping the server if managed.
    */
   async dispose(): Promise<void> {
@@ -331,6 +343,13 @@ export class OpencodeClientManager {
 
     this.isDisposed = true;
     this.unregisterCleanupHandlers();
+
+    // Abort any SSE event streams still open; stopping a managed server does
+    // not close them, and for reused servers nothing else would.
+    for (const controller of this.activeEventSubscriptions) {
+      controller.abort();
+    }
+    this.activeEventSubscriptions.clear();
 
     // Release the singleton slot so a later getInstance() builds a fresh
     // manager instead of returning this disposed one.

@@ -6,6 +6,7 @@ import type {
   LanguageModelV3Usage,
 } from "@ai-sdk/provider";
 import type { Logger, ToolStreamState, StreamingUsage } from "./types.js";
+import { resolveStructuredOutputFinishReason } from "./map-opencode-finish-reason.js";
 import {
   safeStringifyToolInput,
   planFilePartConversion,
@@ -268,6 +269,13 @@ export interface StreamState {
    * tool call reaches `tool-input-available`.
    */
   pendingApprovals: Map<string, PendingApproval>;
+  /**
+   * Whether a StructuredOutput tool call completed during this stream.
+   * Used to report a "stop" finish reason: OpenCode ends json_schema turns
+   * on the StructuredOutput tool call ("tool-calls"), but the provider
+   * exposes that call as text content.
+   */
+  structuredOutputCompleted: boolean;
 }
 
 /**
@@ -294,6 +302,7 @@ export function createStreamState(): StreamState {
     permissionRequests: new Set(),
     questionRequests: new Set(),
     pendingApprovals: new Map(),
+    structuredOutputCompleted: false,
   };
 }
 
@@ -1057,6 +1066,7 @@ function handleStructuredOutputToolPart(
 
     case "completed":
       emitTextDelta("completed", toolState.input);
+      state.structuredOutputCompleted = true;
       if (state.textStarted && state.textPartId === textId) {
         parts.push({ type: "text-end", id: textId });
         state.textStarted = false;
@@ -1207,7 +1217,10 @@ export function createFinishParts(
   parts.push({
     type: "finish",
     usage,
-    finishReason,
+    finishReason: resolveStructuredOutputFinishReason(
+      finishReason,
+      state.structuredOutputCompleted,
+    ),
     providerMetadata: {
       opencode: {
         sessionId,
@@ -1218,6 +1231,20 @@ export function createFinishParts(
   });
 
   return parts;
+}
+
+/**
+ * Check whether a completed StructuredOutput tool part is present.
+ * Used by the non-streaming path to resolve the finish reason the same way
+ * the streaming path does via StreamState.structuredOutputCompleted.
+ */
+export function hasCompletedStructuredOutput(parts: Part[]): boolean {
+  return parts.some(
+    (part) =>
+      part.type === "tool" &&
+      (part as ToolPart).tool === STRUCTURED_OUTPUT_TOOL &&
+      (part as ToolPart).state?.status === "completed",
+  );
 }
 
 /**

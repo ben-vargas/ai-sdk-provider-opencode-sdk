@@ -84,6 +84,7 @@ const mockClientManager = {
   getClient: vi.fn().mockResolvedValue(mockClient),
   dispose: vi.fn().mockResolvedValue(undefined),
   getServerUrl: vi.fn().mockReturnValue("http://127.0.0.1:4096"),
+  registerEventSubscription: vi.fn().mockReturnValue(() => {}),
 };
 
 describe("opencode-language-model", () => {
@@ -377,6 +378,70 @@ describe("opencode-language-model", () => {
           modelId: "anthropic/claude-3-5-sonnet-20241022",
         }),
       });
+    });
+
+    it("should cancel the prompt request and throw AbortError when aborted mid-flight", async () => {
+      mockClient.session.prompt.mockImplementationOnce(
+        (_body: unknown, options?: { signal?: AbortSignal }) =>
+          new Promise((resolve) => {
+            // Emulate fetch abort semantics: the SDK resolves with { error }
+            // instead of rejecting when the request signal is aborted.
+            options?.signal?.addEventListener("abort", () => {
+              resolve({
+                error: Object.assign(new Error("aborted"), {
+                  name: "AbortError",
+                }),
+              });
+            });
+          }),
+      );
+
+      const abortController = new AbortController();
+      const resultPromise = model.doGenerate({
+        prompt: basicPrompt,
+        abortSignal: abortController.signal,
+      });
+
+      setTimeout(() => abortController.abort(), 10);
+
+      await expect(resultPromise).rejects.toMatchObject({
+        name: "AbortError",
+      });
+      expect(mockClient.session.abort).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionID: "session-123" }),
+      );
+    });
+
+    it("should abort the server session when a throwOnError client rejects on abort", async () => {
+      mockClient.session.prompt.mockImplementationOnce(
+        (_body: unknown, options?: { signal?: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            // Emulate a client configured with throwOnError: an aborted
+            // fetch rejects instead of resolving with { error }.
+            options?.signal?.addEventListener("abort", () => {
+              reject(
+                Object.assign(new Error("This operation was aborted"), {
+                  name: "AbortError",
+                }),
+              );
+            });
+          }),
+      );
+
+      const abortController = new AbortController();
+      const resultPromise = model.doGenerate({
+        prompt: basicPrompt,
+        abortSignal: abortController.signal,
+      });
+
+      setTimeout(() => abortController.abort(), 10);
+
+      await expect(resultPromise).rejects.toMatchObject({
+        name: "AbortError",
+      });
+      expect(mockClient.session.abort).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionID: "session-123" }),
+      );
     });
 
     it("should include response error details when response data is missing", async () => {
@@ -714,6 +779,74 @@ describe("opencode-language-model", () => {
       // No tool parts emitted
       expect(parts.some((p: any) => p.type === "tool-call")).toBe(false);
       expect(parts.some((p: any) => p.type === "tool-result")).toBe(false);
+    });
+
+    it('should report "stop" finish when structured output completes a "tool-calls" turn', async () => {
+      const structuredInput = { name: "Alex", yearsExperience: 12 };
+      mockClient.event.subscribe.mockResolvedValueOnce({
+        stream: (async function* () {
+          yield {
+            type: "message.updated",
+            properties: {
+              info: {
+                id: "msg-1",
+                sessionID: "session-123",
+                role: "assistant",
+                finish: "tool-calls",
+              },
+            },
+          };
+          yield {
+            type: "message.part.updated",
+            properties: {
+              part: {
+                id: "part-1",
+                sessionID: "session-123",
+                messageID: "msg-1",
+                type: "tool",
+                callID: "call-so-1",
+                tool: "StructuredOutput",
+                state: {
+                  status: "completed",
+                  input: structuredInput,
+                  output: "Structured output captured successfully.",
+                  title: "Structured Output",
+                  time: { start: 1000, end: 2000 },
+                },
+              },
+            },
+          };
+          yield {
+            type: "session.status",
+            properties: {
+              sessionID: "session-123",
+              status: { type: "idle" },
+            },
+          };
+        })(),
+      });
+
+      const result = await model.doStream({
+        prompt: [
+          { role: "user", content: [{ type: "text", text: "give me output" }] },
+        ],
+        responseFormat: { type: "json", schema: { type: "object" } },
+      });
+
+      const parts: unknown[] = [];
+      const reader = result.stream.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        parts.push(value);
+      }
+
+      const finishPart = parts.find((p: any) => p.type === "finish");
+      expect(finishPart).toBeDefined();
+      expect((finishPart as any).finishReason).toEqual({
+        unified: "stop",
+        raw: "tool-calls",
+      });
     });
 
     it("should use native JSON schema mode without adding prompt instructions", async () => {
@@ -1267,8 +1400,125 @@ describe("opencode-language-model", () => {
       expect(parts[0]).toMatchObject({ type: "stream-start" });
       expect(mockClient.session.abort).toHaveBeenCalledWith(
         expect.objectContaining({ sessionID: "session-123" }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
       expect(iteratorReturn).toHaveBeenCalled();
+    });
+
+    it("should cancel the in-flight prompt request when the stream is aborted", async () => {
+      const hangingStream: AsyncIterable<unknown> = {
+        [Symbol.asyncIterator]() {
+          return {
+            next() {
+              return new Promise<IteratorResult<unknown>>(() => {
+                // Intentionally never resolves to emulate an idle stream.
+              });
+            },
+            return: () =>
+              Promise.resolve({ done: true as const, value: undefined }),
+          };
+        },
+      };
+
+      mockClient.event.subscribe.mockResolvedValueOnce({
+        stream: hangingStream,
+      });
+
+      let promptOptions: { signal?: AbortSignal } | undefined;
+      mockClient.session.prompt.mockImplementationOnce(
+        (_body: unknown, options?: { signal?: AbortSignal }) => {
+          promptOptions = options;
+          // Emulate a prompt request the server never completes.
+          return new Promise(() => {});
+        },
+      );
+
+      const abortController = new AbortController();
+      const result = await model.doStream({
+        prompt: basicPrompt,
+        abortSignal: abortController.signal,
+      });
+
+      const reader = result.stream.getReader();
+      setTimeout(() => abortController.abort(), 10);
+      while (true) {
+        const { done } = await reader.read();
+        if (done) break;
+      }
+
+      expect(promptOptions?.signal).toBeInstanceOf(AbortSignal);
+      expect(promptOptions?.signal?.aborted).toBe(true);
+    });
+
+    it("should cancel the SSE event subscription when the stream closes", async () => {
+      let subscribeOptions: { signal?: AbortSignal } | undefined;
+      let signalAbortedAtReturn: boolean | undefined;
+
+      mockClient.event.subscribe.mockImplementationOnce(
+        (_params: unknown, options?: { signal?: AbortSignal }) => {
+          subscribeOptions = options;
+          return Promise.resolve({
+            stream: {
+              [Symbol.asyncIterator]() {
+                return {
+                  next: () =>
+                    new Promise<IteratorResult<unknown>>(() => {
+                      // Never resolves: no events arrive for this session.
+                    }),
+                  return: () => {
+                    signalAbortedAtReturn = subscribeOptions?.signal?.aborted;
+                    return Promise.resolve({
+                      done: true as const,
+                      value: undefined,
+                    });
+                  },
+                };
+              },
+            },
+          });
+        },
+      );
+      mockClient.session.prompt.mockImplementationOnce(
+        () => new Promise(() => {}),
+      );
+
+      const abortController = new AbortController();
+      const result = await model.doStream({
+        prompt: basicPrompt,
+        abortSignal: abortController.signal,
+      });
+
+      const reader = result.stream.getReader();
+      setTimeout(() => abortController.abort(), 10);
+      while (true) {
+        const { done } = await reader.read();
+        if (done) break;
+      }
+
+      expect(subscribeOptions?.signal).toBeInstanceOf(AbortSignal);
+      expect(subscribeOptions?.signal?.aborted).toBe(true);
+      // The signal must abort before iterator.return(): the SDK's SSE
+      // generator cancels its underlying fetch only through the signal, and
+      // return() can block until the next event while a read is pending.
+      expect(signalAbortedAtReturn).toBe(true);
+    });
+
+    it("should abort the prompt request signal after the stream completes normally", async () => {
+      const result = await model.doStream({
+        prompt: basicPrompt,
+      });
+
+      const reader = result.stream.getReader();
+      while (true) {
+        const { done } = await reader.read();
+        if (done) break;
+      }
+
+      const promptOptions = mockClient.session.prompt.mock.calls[0]?.[1] as
+        | { signal?: AbortSignal }
+        | undefined;
+      expect(promptOptions?.signal).toBeInstanceOf(AbortSignal);
+      expect(promptOptions?.signal?.aborted).toBe(true);
     });
   });
 
@@ -1453,6 +1703,104 @@ describe("opencode-language-model", () => {
       );
       expect(toolCalls).toHaveLength(0);
       expect(toolResults).toHaveLength(0);
+    });
+
+    it('should report "stop" when structured output completes a "tool-calls" turn', async () => {
+      // OpenCode 1.17.x ends json_schema turns on the StructuredOutput tool
+      // call, so the message finishes with "tool-calls". generateText only
+      // parses Output.object() results on a "stop" finish (issue: native
+      // non-streaming structured output always threw NoOutputGeneratedError).
+      const structuredInput = { name: "Alex", yearsExperience: 12 };
+      mockClient.session.prompt.mockResolvedValueOnce({
+        data: {
+          info: {
+            id: "msg-1",
+            sessionID: "session-123",
+            role: "assistant",
+            finish: "tool-calls",
+          },
+          parts: [
+            {
+              id: "part-1",
+              type: "tool",
+              callID: "call-so-1",
+              tool: "StructuredOutput",
+              state: {
+                status: "completed",
+                input: structuredInput,
+                output: "Structured output captured successfully.",
+              },
+            },
+            {
+              id: "part-2",
+              type: "step-finish",
+              reason: "tool-calls",
+              cost: 0.001,
+              tokens: {
+                input: 10,
+                output: 5,
+                reasoning: 0,
+                cache: { read: 0, write: 0 },
+              },
+            },
+          ],
+        },
+      });
+
+      const result = await model.doGenerate({
+        prompt: [
+          { role: "user", content: [{ type: "text", text: "give me output" }] },
+        ],
+        responseFormat: { type: "json", schema: { type: "object" } },
+      });
+
+      expect(result.finishReason).toEqual({
+        unified: "stop",
+        raw: "tool-calls",
+      });
+
+      const textParts = result.content.filter((c) => c.type === "text");
+      expect(textParts).toHaveLength(1);
+      expect(JSON.parse((textParts[0] as { text: string }).text)).toEqual(
+        structuredInput,
+      );
+    });
+
+    it('should keep "tool-calls" finish for turns without structured output', async () => {
+      mockClient.session.prompt.mockResolvedValueOnce({
+        data: {
+          info: {
+            id: "msg-1",
+            sessionID: "session-123",
+            role: "assistant",
+            finish: "tool-calls",
+          },
+          parts: [
+            {
+              id: "part-1",
+              type: "tool",
+              callID: "call-1",
+              tool: "bash",
+              state: {
+                status: "completed",
+                input: { command: "ls" },
+                output: "file.txt",
+              },
+            },
+          ],
+        },
+      });
+
+      const result = await model.doGenerate({
+        prompt: [
+          { role: "user", content: [{ type: "text", text: "list files" }] },
+        ],
+      });
+
+      expect(result.finishReason).toEqual({
+        unified: "tool-calls",
+        raw: "tool-calls",
+      });
     });
 
     it("should not affect non-StructuredOutput tool parts", async () => {
