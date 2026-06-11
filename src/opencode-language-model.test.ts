@@ -76,6 +76,7 @@ const mockClientManager = {
   getClient: vi.fn().mockResolvedValue(mockClient),
   dispose: vi.fn().mockResolvedValue(undefined),
   getServerUrl: vi.fn().mockReturnValue("http://127.0.0.1:4096"),
+  registerEventSubscription: vi.fn().mockReturnValue(() => {}),
 };
 
 describe("opencode-language-model", () => {
