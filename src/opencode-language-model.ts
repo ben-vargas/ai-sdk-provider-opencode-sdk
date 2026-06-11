@@ -403,9 +403,17 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
         const streamWarnings = [...warnings];
         let streamStartEmitted = false;
 
+        // The SDK's SSE generator only cancels its fetch reader from an
+        // abort-signal handler; closing the iterator alone leaves the socket
+        // open and keeps the Node event loop alive.
+        const eventAbortController = new AbortController();
+        const unregisterEventSubscription =
+          this.clientManager.registerEventSubscription(eventAbortController);
+
         try {
           const eventsResult = await client.event.subscribe(
             directory ? { directory } : undefined,
+            { signal: eventAbortController.signal },
           );
 
           const eventStream = eventsResult.stream;
@@ -484,6 +492,10 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
               return;
             }
             iteratorClosed = true;
+            // Abort before iterator.return(): the abort handler cancels the
+            // SSE reader, which also unblocks a pending iterator.next() the
+            // return() call would otherwise wait on.
+            eventAbortController.abort();
             if (typeof iterator.return === "function") {
               try {
                 await iterator.return(undefined);
@@ -581,6 +593,8 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
             controller.enqueue({ type: "error", error: wrappedError });
           }
         } finally {
+          eventAbortController.abort();
+          unregisterEventSubscription();
           controller.close();
         }
       },

@@ -26,6 +26,7 @@ vi.mock("./opencode-client-manager.js", async (importOriginal) => {
         }),
         dispose: vi.fn().mockResolvedValue(undefined),
         getServerUrl: vi.fn().mockReturnValue("http://127.0.0.1:4096"),
+        registerEventSubscription: vi.fn().mockReturnValue(() => {}),
       }),
       resetInstance: vi.fn(),
     },
@@ -33,6 +34,7 @@ vi.mock("./opencode-client-manager.js", async (importOriginal) => {
       getClient: vi.fn().mockResolvedValue({}),
       dispose: vi.fn().mockResolvedValue(undefined),
       getServerUrl: vi.fn().mockReturnValue("http://127.0.0.1:4096"),
+      registerEventSubscription: vi.fn().mockReturnValue(() => {}),
     }),
   };
 });
