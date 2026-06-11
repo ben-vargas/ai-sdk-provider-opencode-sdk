@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.5] - 2026-06-11
+
+### Fixed
+
+- **Singleton client manager recovery after dispose** - `OpencodeClientManager.dispose()` now releases the singleton slot when the disposed manager is the singleton, so a later `createOpencode()` builds a fresh client manager. Previously the singleton kept pointing at the disposed instance, and every subsequent provider in the same process failed with `Client manager has been disposed`.
+- **client-options example** - Step 2 of `examples/client-options.ts` now genuinely demonstrates the preconfigured-client pattern by passing an isolated manager via `clientManager: OpencodeClientManager.createInstance({ client })`. Previously the preconfigured client was handed to the singleton that step 1 had already initialized, so it was ignored and step 2's requests flowed through step 1's client while the demo reported success. The example now also echoes each outgoing request's `x-demo-source` header so the output proves which client served it, drops a spurious `await` on the synchronous v2 `createOpencodeClient()`, and allows overriding the example model via `OPENCODE_MODEL`.
+
+### Changed
+
+- **Clearer stale-options warnings** - The client manager's "already initialized" warnings now point at the escape hatches that actually work (`OpencodeClientManager.createInstance()` with the `clientManager` provider setting, or `OpencodeClientManager.resetInstance()`) instead of the previous generic advice.
+
 ## [3.0.4] - 2026-06-11
 
 ### Fixed
