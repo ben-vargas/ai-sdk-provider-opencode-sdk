@@ -46,6 +46,7 @@ describe("convert-from-opencode-events", () => {
         permissionRequests: expect.any(Set),
         questionRequests: expect.any(Set),
         pendingApprovals: expect.any(Map),
+        structuredOutputCompleted: false,
       });
     });
   });
@@ -1860,6 +1861,39 @@ describe("convert-from-opencode-events", () => {
             total: 0,
           },
         },
+      });
+    });
+
+    it('should resolve a "tool-calls" finish to "stop" when structured output completed', () => {
+      const state = createStreamState();
+      state.structuredOutputCompleted = true;
+
+      const parts = createFinishParts(
+        state,
+        { unified: "tool-calls", raw: "tool-calls" },
+        "session-123",
+      );
+
+      const finishPart = parts.find((p) => p.type === "finish");
+      expect(finishPart).toMatchObject({
+        type: "finish",
+        finishReason: { unified: "stop", raw: "tool-calls" },
+      });
+    });
+
+    it('should keep a "tool-calls" finish when structured output did not complete', () => {
+      const state = createStreamState();
+
+      const parts = createFinishParts(
+        state,
+        { unified: "tool-calls", raw: "tool-calls" },
+        "session-123",
+      );
+
+      const finishPart = parts.find((p) => p.type === "finish");
+      expect(finishPart).toMatchObject({
+        type: "finish",
+        finishReason: { unified: "tool-calls", raw: "tool-calls" },
       });
     });
   });
