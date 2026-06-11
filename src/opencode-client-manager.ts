@@ -271,7 +271,9 @@ export class OpencodeClientManager {
   /**
    * Build client options with manager-owned baseUrl and directory.
    */
-  private createManagedClientOptions(baseUrl: string): OpencodeCreateClientOptions {
+  private createManagedClientOptions(
+    baseUrl: string,
+  ): OpencodeCreateClientOptions {
     const options = this.options.clientOptions ?? {};
     const optionsRecord = options as Record<string, unknown>;
 

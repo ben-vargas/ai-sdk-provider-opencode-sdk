@@ -116,9 +116,8 @@ describe("opencode-provider", () => {
         >,
       });
 
-      const { createClientManagerFromSettings } = await import(
-        "./opencode-client-manager.js"
-      );
+      const { createClientManagerFromSettings } =
+        await import("./opencode-client-manager.js");
       expect(createClientManagerFromSettings).toHaveBeenCalledWith(
         expect.objectContaining({
           baseUrl: "http://custom:8080",

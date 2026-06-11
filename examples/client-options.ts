@@ -43,7 +43,10 @@ async function runStep(title: string, fn: () => Promise<void>) {
 
 async function main() {
   console.log("=== OpenCode: clientOptions and preconfigured client ===");
-  console.log("This example assumes an OpenCode server is available at", BASE_URL);
+  console.log(
+    "This example assumes an OpenCode server is available at",
+    BASE_URL,
+  );
   console.log();
 
   const providerWithClientOptions = createOpencode({

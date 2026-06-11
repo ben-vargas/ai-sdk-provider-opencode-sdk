@@ -132,7 +132,9 @@ describe("validation", () => {
       const result = validateProviderSettings(settings);
       expect(
         result.warnings.some(
-          (w) => w.includes("client and clientOptions") || w.includes("clientOptions"),
+          (w) =>
+            w.includes("client and clientOptions") ||
+            w.includes("clientOptions"),
         ),
       ).toBe(true);
     });
@@ -153,7 +155,8 @@ describe("validation", () => {
       ).toBe(true);
       expect(
         result.warnings.some(
-          (w) => w.includes("clientOptions.directory") || w.includes("directory"),
+          (w) =>
+            w.includes("clientOptions.directory") || w.includes("directory"),
         ),
       ).toBe(true);
     });
@@ -177,7 +180,8 @@ describe("validation", () => {
       ).toBe(false);
       expect(
         result.warnings.some(
-          (w) => w.includes("clientOptions.directory") || w.includes("directory"),
+          (w) =>
+            w.includes("clientOptions.directory") || w.includes("directory"),
         ),
       ).toBe(false);
     });
