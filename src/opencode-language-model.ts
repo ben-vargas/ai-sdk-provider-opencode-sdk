@@ -91,12 +91,12 @@ function convertUsage(usage: StreamingUsage): LanguageModelV3Usage {
 }
 
 /**
- * Normalize a session.prompt result. Managed clients resolve to a
+ * Normalize an SDK request result. Managed clients resolve to a
  * fields-style result ({ data, error }), but a caller-supplied client may be
  * configured with responseStyle: "data", which resolves to the payload
  * itself (or undefined on failure).
  */
-function extractPromptResult(result: unknown): {
+function extractSdkResult(result: unknown): {
   data?: unknown;
   error?: unknown;
 } {
@@ -289,7 +289,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
 
       const result = await client.session.prompt(requestBody);
 
-      const { data, error: responseError } = extractPromptResult(result);
+      const { data, error: responseError } = extractSdkResult(result);
       if (!data) {
         throw createEmptyResponseDataError(responseError, {
           sessionId,
@@ -464,7 +464,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
           };
 
           client.session.prompt(requestBody).then((result) => {
-            const { data, error: responseError } = extractPromptResult(result);
+            const { data, error: responseError } = extractSdkResult(result);
             if (!data) {
               handlePromptFailure(
                 createEmptyResponseDataError(responseError, {
@@ -754,10 +754,11 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
           : {}),
       });
 
-      const data = result.data as { id: string } | undefined;
+      const { data: createData, error: createError } = extractSdkResult(result);
+      const data = createData as { id: string } | undefined;
       if (!data?.id) {
         throw new Error(
-          `Failed to create session: ${JSON.stringify(result.error ?? result.data)}`,
+          `Failed to create session: ${JSON.stringify(createError ?? createData)}`,
         );
       }
 

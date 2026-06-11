@@ -384,6 +384,27 @@ describe("opencode-language-model", () => {
       ).rejects.toThrow("Original error: model not found");
     });
 
+    it("should handle data-style session creation results from custom clients", async () => {
+      // A caller-supplied client configured with responseStyle: "data"
+      // resolves session.create to the session payload itself.
+      mockClient.session.create.mockResolvedValueOnce({
+        id: "session-data-style",
+      });
+
+      const result = await model.doGenerate({
+        prompt: basicPrompt,
+      });
+
+      expect(result.providerMetadata?.opencode?.sessionId).toBe(
+        "session-data-style",
+      );
+      expect(mockClient.session.prompt).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionID: "session-data-style",
+        }),
+      );
+    });
+
     it("should handle data-style prompt results from custom clients", async () => {
       // A caller-supplied client configured with responseStyle: "data"
       // resolves session.prompt to the payload itself.
