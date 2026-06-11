@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Silent permission reply failures** ([#35](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/pull/35)) - `replyToPendingApprovals` never inspected the resolved value of `permission.reply`. Managed clients use `responseStyle: "fields"` without `throwOnError`, so API-level failures resolve as `{ error }` instead of throwing — a failed reply was silently recorded as replied and never retried, leaving OpenCode waiting on the permission request. The result is now checked via `extractSdkResult` (matching the question-reply handling): on error, a warning is logged and surfaced in the response `warnings`, and the approval id is not recorded as replied so the next turn retries it.
+
 ## [3.0.6] - 2026-06-11
 
 ### Fixed

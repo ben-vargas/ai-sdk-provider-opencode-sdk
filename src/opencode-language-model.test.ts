@@ -642,6 +642,55 @@ describe("opencode-language-model", () => {
       expect(mockClient.permission.reply).toHaveBeenCalledTimes(1);
     });
 
+    it("should warn and not record the approval as replied when permission.reply returns an API error", async () => {
+      mockClient.permission.reply.mockResolvedValueOnce({
+        error: { message: "unknown permission request" },
+      });
+      const logger = { warn: vi.fn(), error: vi.fn() };
+      model = new OpencodeLanguageModel({
+        modelId: "anthropic/claude-3-5-sonnet-20241022",
+        settings: { logger },
+        clientManager: mockClientManager as unknown as OpencodeClientManager,
+      });
+      const promptWithApproval: LanguageModelV3Prompt = [
+        {
+          role: "user",
+          content: [{ type: "text", text: "Continue after approval." }],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-approval-response",
+              approvalId: "approval-1",
+              approved: true,
+            },
+          ],
+        },
+      ];
+
+      const result = await model.doGenerate({
+        prompt: promptWithApproval,
+      });
+
+      const expectedWarning = expect.stringContaining(
+        "Failed to apply tool approval response for approval-1",
+      );
+      expect(logger.warn).toHaveBeenCalledWith(expectedWarning);
+      expect(result.warnings).toContainEqual({
+        type: "other",
+        message: expectedWarning,
+      });
+
+      // The failed reply must not be recorded as replied, so the next turn
+      // retries it.
+      await model.doGenerate({
+        prompt: promptWithApproval,
+      });
+
+      expect(mockClient.permission.reply).toHaveBeenCalledTimes(2);
+    });
+
     it("should not emit duplicate document sources for local files with source metadata", async () => {
       mockClient.session.prompt.mockResolvedValueOnce({
         data: {
