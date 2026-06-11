@@ -50,7 +50,7 @@ async function main() {
     const mediaType = SUPPORTED_EXTENSIONS[ext]!;
 
     const result = streamText({
-      model: opencode("openai/gpt-5.3-codex"),
+      model: opencode("openai/gpt-5.5"),
       messages: [
         {
           role: "user",

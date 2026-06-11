@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Empty OpenCode response errors** - Empty-body JSON parse failures from the OpenCode server (`SyntaxError: Unexpected end of JSON input`, most commonly caused by an invalid or unavailable `provider/model` ID) are now wrapped in an actionable `APICallError` that names the requested model ID and likely cause. The same wrapping is applied to the streaming prompt failure path, and `modelId` is now included in API call error metadata. (Fixes [#21](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/issues/21), PR [#24](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/pull/24) by [@slegarraga](https://github.com/slegarraga))
+- **image-input example** - Updated `examples/image-input.ts` to use `openai/gpt-5.5` instead of the no-longer-available `openai/gpt-5.3-codex`, which caused the example to fail silently (empty response, zero usage).
 
 ## [3.0.3] - 2026-06-09
 
