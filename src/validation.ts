@@ -44,6 +44,12 @@ export const opcodeSettingsSchema = z.object({
   cwd: z.string().optional(),
   directory: z.string().optional(),
   outputFormatRetryCount: z.number().int().nonnegative().optional(),
+  onQuestionAsked: z
+    .any()
+    .refine((val) => val === undefined || typeof val === "function", {
+      message: "onQuestionAsked must be a function",
+    })
+    .optional(),
   logger: z.union([loggerSchema, z.literal(false)]).optional(),
   verbose: z.boolean().optional(),
 });

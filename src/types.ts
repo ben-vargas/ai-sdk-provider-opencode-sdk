@@ -57,6 +57,35 @@ export interface OpencodePermissionRule {
  */
 export type OpencodePermissionRuleset = OpencodePermissionRule[];
 
+export interface OpencodeQuestionOption {
+  label: string;
+  description: string;
+}
+
+export interface OpencodeQuestionInfo {
+  header: string;
+  question: string;
+  options: OpencodeQuestionOption[];
+  multiple?: boolean;
+  custom?: boolean;
+}
+
+export interface OpencodeQuestionRequest {
+  requestId: string;
+  sessionId: string;
+  questions: OpencodeQuestionInfo[];
+  tool?: {
+    messageID: string;
+    callID: string;
+  };
+}
+
+export type OpencodeQuestionAnswer = string[];
+
+export type OpencodeQuestionResponse =
+  | { answers: OpencodeQuestionAnswer[] }
+  | { reject: true };
+
 /**
  * Settings for individual model instances.
  */
@@ -127,6 +156,18 @@ export interface OpencodeSettings {
    * Number of OpenCode retries for JSON schema output formatting.
    */
   outputFormatRetryCount?: number;
+
+  /**
+   * Answer or reject OpenCode interactive question requests during streaming.
+   * Return undefined/null to keep the default unsupported-question error.
+   */
+  onQuestionAsked?: (
+    request: OpencodeQuestionRequest,
+  ) =>
+    | OpencodeQuestionResponse
+    | null
+    | undefined
+    | Promise<OpencodeQuestionResponse | null | undefined>;
 
   /**
    * Logger instance or false to disable logging.

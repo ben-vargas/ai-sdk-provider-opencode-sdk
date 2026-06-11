@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Interactive question handling (`onQuestionAsked`)** ([#33](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/pull/33)) - New opt-in model setting that answers or rejects OpenCode `question.asked` events during streaming, which previously always surfaced as an unsupported-question stream error and left the session stuck ([#15](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/issues/15)). The handler receives the question request (`requestId`, `sessionId`, `questions`, and the originating `tool` when present) and returns `{ answers }` to reply via `question.reply`, `{ reject: true }` to reject via `question.reject`, or `undefined`/`null` to keep the existing unsupported-question error. Handler exceptions and API-level reply failures surface as stream errors instead of leaving OpenCode waiting on the question, and reply/reject requests are tied to the per-stream abort signal so they are cancelled on stream teardown. The question types (`OpencodeQuestionRequest`, `OpencodeQuestionResponse`, `OpencodeQuestionInfo`, `OpencodeQuestionOption`, `OpencodeQuestionAnswer`) are exported from the package entry point. Thanks to [@slegarraga](https://github.com/slegarraga) for the contribution.
+
 ### Fixed
 
 - **Silent permission reply failures** ([#35](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/pull/35)) - `replyToPendingApprovals` never inspected the resolved value of `permission.reply`. Managed clients use `responseStyle: "fields"` without `throwOnError`, so API-level failures resolve as `{ error }` instead of throwing — a failed reply was silently recorded as replied and never retried, leaving OpenCode waiting on the permission request. The result is now checked via `extractSdkResult` (matching the question-reply handling): on error, a warning is logged and surfaced in the response `warnings`, and the approval id is not recorded as replied so the next turn retries it.

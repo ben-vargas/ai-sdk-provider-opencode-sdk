@@ -70,6 +70,14 @@ const mockClient = {
       data: true,
     }),
   },
+  question: {
+    reply: vi.fn().mockResolvedValue({
+      data: true,
+    }),
+    reject: vi.fn().mockResolvedValue({
+      data: true,
+    }),
+  },
 };
 
 const mockClientManager = {
@@ -1031,6 +1039,268 @@ describe("opencode-language-model", () => {
       reader.releaseLock();
 
       expect(mockClient.permission.reply).toHaveBeenCalledTimes(1);
+    });
+
+    it("should answer OpenCode question requests with onQuestionAsked", async () => {
+      const onQuestionAsked = vi.fn().mockResolvedValue({
+        answers: [["Deploy now"]],
+      });
+      model = new OpencodeLanguageModel({
+        modelId: "anthropic/claude-3-5-sonnet-20241022",
+        settings: { onQuestionAsked },
+        clientManager: mockClientManager as unknown as OpencodeClientManager,
+      });
+      mockClient.event.subscribe.mockResolvedValueOnce({
+        stream: (async function* () {
+          yield {
+            type: "question.asked",
+            properties: {
+              id: "question-1",
+              sessionID: "session-123",
+              questions: [
+                {
+                  header: "Deploy",
+                  question: "Pick deployment strategy",
+                  options: [
+                    {
+                      label: "Deploy now",
+                      description: "Continue immediately",
+                    },
+                  ],
+                },
+              ],
+            },
+          };
+          yield {
+            type: "session.idle",
+            properties: {
+              sessionID: "session-123",
+            },
+          };
+        })(),
+      });
+
+      const result = await model.doStream({
+        prompt: basicPrompt,
+      });
+
+      const parts: unknown[] = [];
+      for await (const part of result.stream) {
+        parts.push(part);
+      }
+
+      expect(onQuestionAsked).toHaveBeenCalledWith({
+        requestId: "question-1",
+        sessionId: "session-123",
+        questions: [
+          {
+            header: "Deploy",
+            question: "Pick deployment strategy",
+            options: [
+              {
+                label: "Deploy now",
+                description: "Continue immediately",
+              },
+            ],
+          },
+        ],
+      });
+      expect(mockClient.question.reply).toHaveBeenCalledWith(
+        {
+          requestID: "question-1",
+          answers: [["Deploy now"]],
+        },
+        { signal: expect.any(AbortSignal) },
+      );
+      const hasErrorPart = parts.some((part) => {
+        if (part == null || typeof part !== "object" || !("type" in part)) {
+          return false;
+        }
+
+        return (part as { type?: unknown }).type === "error";
+      });
+      expect(hasErrorPart).toBe(false);
+    });
+
+    it("should reject OpenCode question requests when onQuestionAsked returns reject", async () => {
+      model = new OpencodeLanguageModel({
+        modelId: "anthropic/claude-3-5-sonnet-20241022",
+        settings: {
+          onQuestionAsked: vi.fn().mockResolvedValue({ reject: true }),
+        },
+        clientManager: mockClientManager as unknown as OpencodeClientManager,
+      });
+      mockClient.event.subscribe.mockResolvedValueOnce({
+        stream: (async function* () {
+          yield {
+            type: "question.asked",
+            properties: {
+              id: "question-2",
+              sessionID: "session-123",
+              questions: [],
+            },
+          };
+          yield {
+            type: "session.idle",
+            properties: {
+              sessionID: "session-123",
+            },
+          };
+        })(),
+      });
+
+      const result = await model.doStream({
+        prompt: basicPrompt,
+      });
+      for await (const _part of result.stream) {
+        // drain stream
+      }
+
+      expect(mockClient.question.reject).toHaveBeenCalledWith(
+        {
+          requestID: "question-2",
+        },
+        { signal: expect.any(AbortSignal) },
+      );
+    });
+
+    it("should emit error and close stream when question.reply returns an API error", async () => {
+      mockClient.question.reply.mockResolvedValueOnce({
+        error: { message: "unknown question request" },
+      });
+      model = new OpencodeLanguageModel({
+        modelId: "anthropic/claude-3-5-sonnet-20241022",
+        settings: {
+          onQuestionAsked: vi.fn().mockResolvedValue({ answers: [["Yes"]] }),
+        },
+        clientManager: mockClientManager as unknown as OpencodeClientManager,
+      });
+      mockClient.event.subscribe.mockResolvedValueOnce({
+        stream: (async function* () {
+          yield {
+            type: "question.asked",
+            properties: {
+              id: "question-3",
+              sessionID: "session-123",
+              questions: [],
+            },
+          };
+          yield {
+            type: "session.idle",
+            properties: {
+              sessionID: "session-123",
+            },
+          };
+        })(),
+      });
+
+      const result = await model.doStream({
+        prompt: basicPrompt,
+      });
+      const parts: unknown[] = [];
+      for await (const part of result.stream) {
+        parts.push(part);
+      }
+
+      const errorPart = parts.find(
+        (part) =>
+          part != null &&
+          typeof part === "object" &&
+          (part as { type?: unknown }).type === "error",
+      ) as { error?: Error } | undefined;
+      expect(errorPart).toBeDefined();
+      expect(String(errorPart?.error)).toContain(
+        "Failed to apply OpenCode question response for question-3",
+      );
+    });
+
+    it("should emit error when onQuestionAsked throws", async () => {
+      model = new OpencodeLanguageModel({
+        modelId: "anthropic/claude-3-5-sonnet-20241022",
+        settings: {
+          onQuestionAsked: vi.fn().mockRejectedValue(new Error("handler boom")),
+        },
+        clientManager: mockClientManager as unknown as OpencodeClientManager,
+      });
+      mockClient.event.subscribe.mockResolvedValueOnce({
+        stream: (async function* () {
+          yield {
+            type: "question.asked",
+            properties: {
+              id: "question-4",
+              sessionID: "session-123",
+              questions: [],
+            },
+          };
+        })(),
+      });
+
+      const result = await model.doStream({
+        prompt: basicPrompt,
+      });
+      const parts: unknown[] = [];
+      for await (const part of result.stream) {
+        parts.push(part);
+      }
+
+      expect(mockClient.question.reply).not.toHaveBeenCalled();
+      const errorPart = parts.find(
+        (part) =>
+          part != null &&
+          typeof part === "object" &&
+          (part as { type?: unknown }).type === "error",
+      ) as { error?: Error } | undefined;
+      expect(String(errorPart?.error)).toContain(
+        "OpenCode question handler failed for question-4: handler boom",
+      );
+    });
+
+    it("should fall back to the unsupported-question error when onQuestionAsked returns undefined", async () => {
+      const onQuestionAsked = vi.fn().mockResolvedValue(undefined);
+      model = new OpencodeLanguageModel({
+        modelId: "anthropic/claude-3-5-sonnet-20241022",
+        settings: { onQuestionAsked },
+        clientManager: mockClientManager as unknown as OpencodeClientManager,
+      });
+      mockClient.event.subscribe.mockResolvedValueOnce({
+        stream: (async function* () {
+          yield {
+            type: "question.asked",
+            properties: {
+              id: "question-5",
+              sessionID: "session-123",
+              questions: [],
+            },
+          };
+          yield {
+            type: "session.idle",
+            properties: {
+              sessionID: "session-123",
+            },
+          };
+        })(),
+      });
+
+      const result = await model.doStream({
+        prompt: basicPrompt,
+      });
+      const parts: unknown[] = [];
+      for await (const part of result.stream) {
+        parts.push(part);
+      }
+
+      expect(onQuestionAsked).toHaveBeenCalledTimes(1);
+      expect(mockClient.question.reply).not.toHaveBeenCalled();
+      expect(mockClient.question.reject).not.toHaveBeenCalled();
+      const errorPart = parts.find(
+        (part) =>
+          part != null &&
+          typeof part === "object" &&
+          (part as { type?: unknown }).type === "error",
+      ) as { error?: Error } | undefined;
+      expect(String(errorPart?.error)).toContain(
+        "OpenCode question.asked events are not yet mapped to AI SDK responses",
+      );
     });
 
     it("should close event iterator on normal session completion", async () => {

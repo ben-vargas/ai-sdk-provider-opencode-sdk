@@ -35,6 +35,7 @@ describe("validation", () => {
         cwd: "/home/user",
         directory: "/home/user",
         outputFormatRetryCount: 2,
+        onQuestionAsked: vi.fn(),
         verbose: true,
       };
 
