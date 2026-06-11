@@ -13,6 +13,7 @@ import { InvalidArgumentError } from "@ai-sdk/provider";
 import type {
   Logger,
   OpencodeSettings,
+  OpencodeQuestionResponse,
   ParsedModelId,
   StreamingUsage,
 } from "./types.js";
@@ -26,6 +27,7 @@ import {
   isEventForSession,
   isSessionComplete,
   STRUCTURED_OUTPUT_TOOL,
+  type EventQuestionAsked,
   type Message,
   type Part,
 } from "./convert-from-opencode-events.js";
@@ -55,6 +57,20 @@ interface ApprovalClient {
       requestID: string;
       reply: "once" | "always" | "reject";
       message?: string;
+      directory?: string;
+    }) => Promise<unknown> | unknown;
+  };
+}
+
+interface QuestionClient {
+  question?: {
+    reply?: (parameters: {
+      requestID: string;
+      answers: string[][];
+      directory?: string;
+    }) => Promise<unknown> | unknown;
+    reject?: (parameters: {
+      requestID: string;
       directory?: string;
     }) => Promise<unknown> | unknown;
   };
@@ -162,6 +178,12 @@ function extractToolApprovalResponses(
   }
 
   return responses;
+}
+
+function isRejectQuestionResponse(
+  response: OpencodeQuestionResponse,
+): response is { reject: true } {
+  return "reject" in response && response.reject === true;
 }
 
 /**
@@ -532,6 +554,25 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
                 continue;
               }
 
+              if (event.type === "question.asked") {
+                const questionResult = await this.replyToQuestionIfConfigured(
+                  client,
+                  event as EventQuestionAsked,
+                  state.questionRequests,
+                );
+                if (questionResult.handled) {
+                  if (questionResult.error) {
+                    controller.enqueue({
+                      type: "error",
+                      error: questionResult.error,
+                    });
+                    await closeIterator();
+                    break;
+                  }
+                  continue;
+                }
+              }
+
               const streamParts = convertEventToStreamParts(
                 event,
                 state,
@@ -695,6 +736,86 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
     }
 
     return warnings;
+  }
+
+  private async replyToQuestionIfConfigured(
+    client: QuestionClient,
+    event: EventQuestionAsked,
+    seenQuestionIds: Set<string>,
+  ): Promise<{ handled: boolean; error?: Error }> {
+    const handler = this.settings.onQuestionAsked;
+    if (!handler) {
+      return { handled: false };
+    }
+
+    const requestId = event.properties.id;
+    if (seenQuestionIds.has(requestId)) {
+      return { handled: true };
+    }
+
+    let response: OpencodeQuestionResponse | null | undefined;
+    try {
+      response = await handler({
+        requestId,
+        sessionId: event.properties.sessionID,
+        questions: event.properties.questions,
+        ...(event.properties.tool ? { tool: event.properties.tool } : {}),
+      });
+    } catch (error) {
+      return {
+        handled: true,
+        error: new Error(
+          `OpenCode question handler failed for ${requestId}: ${extractErrorMessage(error)}`,
+        ),
+      };
+    }
+
+    if (response == null) {
+      return { handled: false };
+    }
+
+    const directory = this.getRequestDirectory();
+    try {
+      if (isRejectQuestionResponse(response)) {
+        if (typeof client.question?.reject !== "function") {
+          return {
+            handled: true,
+            error: new Error(
+              "OpenCode question.reject is unavailable; question response was ignored.",
+            ),
+          };
+        }
+
+        await client.question.reject({
+          requestID: requestId,
+          ...(directory ? { directory } : {}),
+        });
+      } else {
+        if (typeof client.question?.reply !== "function") {
+          return {
+            handled: true,
+            error: new Error(
+              "OpenCode question.reply is unavailable; question response was ignored.",
+            ),
+          };
+        }
+
+        await client.question.reply({
+          requestID: requestId,
+          answers: response.answers,
+          ...(directory ? { directory } : {}),
+        });
+      }
+      seenQuestionIds.add(requestId);
+      return { handled: true };
+    } catch (error) {
+      return {
+        handled: true,
+        error: new Error(
+          `Failed to apply OpenCode question response for ${requestId}: ${extractErrorMessage(error)}`,
+        ),
+      };
+    }
   }
 
   private getPendingApprovalResponses(

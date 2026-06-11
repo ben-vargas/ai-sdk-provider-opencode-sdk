@@ -234,6 +234,26 @@ for await (const part of result.fullStream) {
 }
 ```
 
+### Interactive Questions
+
+Some OpenCode flows emit `question.asked` events and wait for an answer before
+continuing. Provide `onQuestionAsked` to answer or reject those prompts during
+streaming:
+
+```typescript
+const model = opencode("openai/gpt-5.3-codex-spark", {
+  onQuestionAsked: async (request) => ({
+    answers: request.questions.map((question) => [
+      question.options[0]?.label ?? "",
+    ]),
+  }),
+});
+```
+
+Return `{ reject: true }` to reject a question. If `onQuestionAsked` is omitted
+or returns `undefined`, the provider keeps the existing unsupported-question
+stream error.
+
 ## Feature Support
 
 | Feature                  | Support    | Notes                                                                       |
@@ -251,6 +271,7 @@ for await (const part of result.fullStream) {
 | Structured output (JSON) | ⚠️ Partial | Native `json_schema`; use prompt+validation fallback for strict reliability |
 | Custom tools             | ❌ None    | Server-side only                                                            |
 | Tool approvals           | ✅ Full    | `tool-approval-request` / `tool-approval-response`                          |
+| Interactive questions    | ✅ Full    | `onQuestionAsked` answers or rejects OpenCode `question.asked` events       |
 | File/source streaming    | ✅ Full    | Emits `file` and `source` stream parts                                      |
 | temperature/topP/topK    | ❌ None    | Provider defaults                                                           |
 | maxTokens                | ❌ None    | Agent config                                                                |
