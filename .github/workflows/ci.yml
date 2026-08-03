@@ -2,8 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [ai-sdk-v6]
   pull_request:
+    branches: [ai-sdk-v6]
 
 permissions:
   contents: read
