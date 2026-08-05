@@ -90,9 +90,7 @@ const MAX_HANDLED_QUESTION_REQUESTS = 1_000;
  * return undefined or a malformed object; treating that like a handler throw
  * (warn + reject fallback) keeps the stream alive.
  */
-function isQuestionResponse(
-  value: unknown,
-): value is OpencodeQuestionResponse {
+function isQuestionResponse(value: unknown): value is OpencodeQuestionResponse {
   if (typeof value !== "object" || value === null) {
     return false;
   }
@@ -998,9 +996,8 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
 
     if (this.settings.onQuestion) {
       try {
-        const handlerResponse: unknown = await this.settings.onQuestion(
-          request,
-        );
+        const handlerResponse: unknown =
+          await this.settings.onQuestion(request);
         if (isQuestionResponse(handlerResponse)) {
           response = handlerResponse;
         } else {
