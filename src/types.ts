@@ -166,9 +166,10 @@ export interface OpencodeSettings {
   ) => Promise<OpencodeQuestionResponse> | OpencodeQuestionResponse;
 
   /**
-   * What to do when an interactive question has no handler or the handler
-   * throws. Rejecting unblocks the session; waiting preserves the legacy
-   * behavior so an external client can answer.
+   * What to do when an interactive question has no handler. Rejecting unblocks
+   * the session; waiting preserves the legacy behavior so an external client
+   * can answer. If a configured handler throws, the question is always
+   * rejected regardless of this policy.
    * @default "reject"
    */
   questionPolicy?: "reject" | "wait";

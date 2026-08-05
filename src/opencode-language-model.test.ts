@@ -1573,7 +1573,11 @@ describe("opencode-language-model", () => {
         const onQuestion = vi
           .fn()
           .mockRejectedValue(new Error("handler exploded"));
-        const questionModel = createModel({ onQuestion, logger });
+        const questionModel = createModel({
+          onQuestion,
+          questionPolicy: "wait",
+          logger,
+        });
 
         mockClient.event.subscribe.mockResolvedValueOnce(
           eventStreamOf(questionAskedEvent(), sessionIdleEvent),
@@ -1816,6 +1820,94 @@ describe("opencode-language-model", () => {
         expect(result.content[0]).toMatchObject({
           type: "text",
           text: "Hello, world!",
+        });
+      });
+
+      it("should dedupe a shared question across concurrent doGenerate calls", async () => {
+        let releaseQuestion: (() => void) | undefined;
+        const questionBroadcast = new Promise<void>((resolve) => {
+          releaseQuestion = resolve;
+        });
+        let subscriptionCount = 0;
+        let resolveBothSubscribed: (() => void) | undefined;
+        const bothSubscribed = new Promise<void>((resolve) => {
+          resolveBothSubscribed = resolve;
+        });
+
+        const concurrentSubscribe = () => {
+          subscriptionCount += 1;
+          if (subscriptionCount === 2) {
+            resolveBothSubscribed?.();
+          }
+          return Promise.resolve({
+            stream: (async function* () {
+              await questionBroadcast;
+              yield questionAskedEvent({ id: "question-shared" });
+            })(),
+          });
+        };
+        mockClient.event.subscribe
+          .mockImplementationOnce(concurrentSubscribe)
+          .mockImplementationOnce(concurrentSubscribe);
+
+        const promptResolvers: Array<(value: typeof promptResult) => void> = [];
+        let resolveBothPromptsStarted: (() => void) | undefined;
+        const bothPromptsStarted = new Promise<void>((resolve) => {
+          resolveBothPromptsStarted = resolve;
+        });
+        const concurrentPrompt = () =>
+          new Promise<typeof promptResult>((resolve) => {
+            promptResolvers.push(resolve);
+            if (promptResolvers.length === 2) {
+              resolveBothPromptsStarted?.();
+            }
+          });
+        mockClient.session.prompt
+          .mockImplementationOnce(concurrentPrompt)
+          .mockImplementationOnce(concurrentPrompt);
+
+        let resolveHandlerStarted: (() => void) | undefined;
+        const handlerStarted = new Promise<void>((resolve) => {
+          resolveHandlerStarted = resolve;
+        });
+        let releaseHandler: (() => void) | undefined;
+        const handlerRelease = new Promise<void>((resolve) => {
+          releaseHandler = resolve;
+        });
+        const onQuestion = vi.fn(async () => {
+          resolveHandlerStarted?.();
+          await handlerRelease;
+          return {
+            type: "answer" as const,
+            answers: [["Blue/Green"]],
+          };
+        });
+        const questionModel = createModel({ onQuestion });
+
+        mockClient.question.reply.mockImplementationOnce(() => {
+          for (const resolvePrompt of promptResolvers) {
+            resolvePrompt(promptResult);
+          }
+          return Promise.resolve({ data: true });
+        });
+
+        const calls = [
+          questionModel.doGenerate({ prompt: basicPrompt }),
+          questionModel.doGenerate({ prompt: basicPrompt }),
+        ];
+
+        await Promise.all([bothSubscribed, bothPromptsStarted]);
+        releaseQuestion?.();
+        await handlerStarted;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        releaseHandler?.();
+        await Promise.all(calls);
+
+        expect(onQuestion).toHaveBeenCalledTimes(1);
+        expect(mockClient.question.reply).toHaveBeenCalledTimes(1);
+        expect(mockClient.question.reply).toHaveBeenCalledWith({
+          requestID: "question-shared",
+          answers: [["Blue/Green"]],
         });
       });
 

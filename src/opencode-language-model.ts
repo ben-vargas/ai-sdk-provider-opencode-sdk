@@ -83,6 +83,8 @@ interface QuestionClient {
   };
 }
 
+const MAX_HANDLED_QUESTION_REQUESTS = 1_000;
+
 /**
  * Convert OpenCode token usage to the AI SDK v7 usage shape.
  */
@@ -208,6 +210,11 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
   private sessionId: string | undefined;
   private sessionInitPromise: Promise<string> | null = null;
   private repliedApprovalIdsBySession = new Map<string, Set<string>>();
+  // Shared across every generation call on this model so separate event
+  // subscriptions cannot answer the same broadcast question twice.
+  private handledQuestionRequests = new Set<string>();
+  // In-flight requests are excluded from bounded-history pruning.
+  private pendingQuestionRequests = new Set<string>();
   private parsedModelId: ParsedModelId;
 
   constructor(options: {
@@ -911,65 +918,89 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
 
     if (
       questionRequests.has(request.id) ||
+      this.handledQuestionRequests.has(request.id) ||
       (!this.settings.onQuestion && this.settings.questionPolicy === "wait")
     ) {
       return;
     }
 
     questionRequests.add(request.id);
+    this.handledQuestionRequests.add(request.id);
+    this.pendingQuestionRequests.add(request.id);
 
-    let response: OpencodeQuestionResponse;
-    let rejectFallback = false;
+    try {
+      let response: OpencodeQuestionResponse;
+      let rejectFallback = false;
 
-    if (this.settings.onQuestion) {
-      try {
-        response = await this.settings.onQuestion(request);
-      } catch (error) {
+      if (this.settings.onQuestion) {
+        try {
+          response = await this.settings.onQuestion(request);
+        } catch (error) {
+          this.logger.warn(
+            `Question handler failed for ${request.id}: ${extractErrorMessage(error)}. Rejecting the question.`,
+          );
+          response = { type: "reject" };
+          rejectFallback = true;
+        }
+      } else {
         this.logger.warn(
-          `Question handler failed for ${request.id}: ${extractErrorMessage(error)}. Rejecting the question.`,
+          `No onQuestion handler configured; rejecting OpenCode question ${request.id}.`,
         );
         response = { type: "reject" };
         rejectFallback = true;
       }
-    } else {
-      this.logger.warn(
-        `No onQuestion handler configured; rejecting OpenCode question ${request.id}.`,
-      );
-      response = { type: "reject" };
-      rejectFallback = true;
+
+      try {
+        let result: unknown;
+        if (response.type === "answer") {
+          if (typeof client.question?.reply !== "function") {
+            throw new Error("OpenCode question.reply is unavailable");
+          }
+          result = await client.question.reply({
+            requestID: request.id,
+            answers: response.answers,
+            ...(directory ? { directory } : {}),
+          });
+        } else {
+          if (typeof client.question?.reject !== "function") {
+            throw new Error("OpenCode question.reject is unavailable");
+          }
+          result = await client.question.reject({
+            requestID: request.id,
+            ...(directory ? { directory } : {}),
+          });
+        }
+
+        const { error: resultError } = extractSdkResult(result);
+        if (resultError) {
+          throw resultError;
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Failed to ${response.type === "answer" ? "answer" : "reject"} OpenCode question ${request.id}: ${extractErrorMessage(error)}`,
+        );
+        if (rejectFallback) {
+          questionRequests.delete(request.id);
+          this.handledQuestionRequests.delete(request.id);
+        }
+      }
+    } finally {
+      this.pendingQuestionRequests.delete(request.id);
+      this.pruneHandledQuestionRequests();
+    }
+  }
+
+  private pruneHandledQuestionRequests(): void {
+    if (this.handledQuestionRequests.size <= MAX_HANDLED_QUESTION_REQUESTS) {
+      return;
     }
 
-    try {
-      let result: unknown;
-      if (response.type === "answer") {
-        if (typeof client.question?.reply !== "function") {
-          throw new Error("OpenCode question.reply is unavailable");
-        }
-        result = await client.question.reply({
-          requestID: request.id,
-          answers: response.answers,
-          ...(directory ? { directory } : {}),
-        });
-      } else {
-        if (typeof client.question?.reject !== "function") {
-          throw new Error("OpenCode question.reject is unavailable");
-        }
-        result = await client.question.reject({
-          requestID: request.id,
-          ...(directory ? { directory } : {}),
-        });
+    for (const requestId of this.handledQuestionRequests) {
+      if (this.handledQuestionRequests.size <= MAX_HANDLED_QUESTION_REQUESTS) {
+        break;
       }
-
-      const { error: resultError } = extractSdkResult(result);
-      if (resultError) {
-        throw resultError;
-      }
-    } catch (error) {
-      this.logger.warn(
-        `Failed to ${response.type === "answer" ? "answer" : "reject"} OpenCode question ${request.id}: ${extractErrorMessage(error)}`,
-      );
-      if (rejectFallback) {
-        questionRequests.delete(request.id);
+      if (!this.pendingQuestionRequests.has(requestId)) {
+        this.handledQuestionRequests.delete(requestId);
       }
     }
   }

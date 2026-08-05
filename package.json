@@ -51,7 +51,8 @@
     "typecheck": "tsc --noEmit",
     "example:basic": "npm run build && npx tsx examples/basic-usage.ts",
     "example:streaming": "npm run build && npx tsx examples/streaming.ts",
-    "example:client-options": "npm run build && npx tsx examples/client-options.ts"
+    "example:client-options": "npm run build && npx tsx examples/client-options.ts",
+    "example:question-handling": "npm run build && npx tsx examples/question-handling.ts"
   },
   "dependencies": {
     "@ai-sdk/provider": "^4.0.4",

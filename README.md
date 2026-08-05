@@ -293,7 +293,7 @@ Both `streamText` and `generateText` handle questions; the non-streaming path wa
 | Structured output (JSON) | ⚠️ Partial | Native `json_schema`; use prompt+validation fallback for strict reliability |
 | Custom tools             | ❌ None    | Server-side only                                                            |
 | Tool approvals           | ✅ Full    | `tool-approval-request` / `tool-approval-response`                          |
-| Interactive questions    | ✅ Full    | `onQuestion` callback; unhandled questions rejected by default              |
+| Interactive questions    | ✅ Full    | `onQuestion` callback; questions without a handler rejected by default      |
 | File/source streaming    | ✅ Full    | Emits `file` and `source` stream parts                                      |
 | temperature/topP/topK    | ❌ None    | Provider defaults                                                           |
 | maxTokens                | ❌ None    | Agent config                                                                |
@@ -382,7 +382,7 @@ interface OpencodeSettings {
   onQuestion?: (
     request: OpencodeQuestionRequest,
   ) => Promise<OpencodeQuestionResponse> | OpencodeQuestionResponse; // Answer interactive questions
-  questionPolicy?: "reject" | "wait"; // Unhandled questions (default: "reject")
+  questionPolicy?: "reject" | "wait"; // Questions with no handler (default: "reject")
   logger?: Logger | false; // Logging
   verbose?: boolean; // Debug logging
 }
