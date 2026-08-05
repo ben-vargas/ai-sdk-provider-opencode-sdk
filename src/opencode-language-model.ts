@@ -380,6 +380,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
             sessionId,
             eventsResult.stream,
             questionAbortController.signal,
+            options.abortSignal,
           );
         } catch (error) {
           this.logger.warn(
@@ -712,7 +713,12 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
                 await this.respondToQuestion(
                   client,
                   event as EventQuestionAsked,
-                  requestAbortController.signal,
+                  options.abortSignal
+                    ? AbortSignal.any([
+                        requestAbortController.signal,
+                        options.abortSignal,
+                      ])
+                    : requestAbortController.signal,
                 );
               }
 
@@ -907,6 +913,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     sessionId: string,
     eventStream: AsyncIterable<unknown>,
     signal: AbortSignal,
+    abortSignal?: AbortSignal,
   ): Promise<void> {
     try {
       for await (const event of eventStream) {
@@ -925,7 +932,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         await this.respondToQuestion(
           client,
           opencodeEvent as EventQuestionAsked,
-          signal,
+          abortSignal ? AbortSignal.any([signal, abortSignal]) : signal,
         );
       }
     } catch (error) {
@@ -972,6 +979,8 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     // The request is shutting down; skip the API call so no in-flight or
     // pending tracking for this question id can leak past the abort.
     if (signal.aborted) {
+      this.handledQuestionRequests.delete(request.id);
+      this.inFlightQuestionRequests.delete(request.id);
       this.logger.debug?.(
         `Skipping OpenCode question ${request.id}: request aborted.`,
       );
@@ -988,6 +997,8 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       if (handled) {
         this.handledQuestionRequests.add(request.id);
         this.pruneHandledQuestionRequests();
+      } else if (signal.aborted) {
+        this.handledQuestionRequests.delete(request.id);
       }
     } finally {
       if (this.inFlightQuestionRequests.get(request.id) === attempt) {

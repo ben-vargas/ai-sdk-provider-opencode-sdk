@@ -2165,6 +2165,114 @@ describe("opencode-language-model", () => {
       const internalsOf = (questionModel: OpencodeLanguageModel) =>
         questionModel as unknown as QuestionInternals;
 
+      it("should skip the response and clear tracking when the doStream caller aborts while the callback is pending", async () => {
+        const logger = { warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+        let resolveHandlerStarted: (() => void) | undefined;
+        const handlerStarted = new Promise<void>((resolve) => {
+          resolveHandlerStarted = resolve;
+        });
+        let releaseHandler: (() => void) | undefined;
+        const handlerRelease = new Promise<void>((resolve) => {
+          releaseHandler = resolve;
+        });
+        const onQuestion = vi.fn(async () => {
+          resolveHandlerStarted?.();
+          await handlerRelease;
+          return { type: "answer" as const, answers: [["Blue/Green"]] };
+        });
+        const questionModel = createModel({ onQuestion, logger });
+        const internals = internalsOf(questionModel);
+
+        mockClient.event.subscribe.mockResolvedValueOnce(
+          eventStreamOf(questionAskedEvent(), sessionIdleEvent),
+        );
+
+        const abortController = new AbortController();
+        const result = await questionModel.doStream({
+          prompt: basicPrompt,
+          abortSignal: abortController.signal,
+        });
+        const partsPromise = readAllParts(result.stream);
+
+        await handlerStarted;
+        expect(internals.inFlightQuestionRequests.has("question-1")).toBe(true);
+
+        abortController.abort();
+        releaseHandler?.();
+        await partsPromise;
+
+        expect(mockClient.question.reply).not.toHaveBeenCalled();
+        expect(mockClient.question.reject).not.toHaveBeenCalled();
+        expect(internals.inFlightQuestionRequests.has("question-1")).toBe(
+          false,
+        );
+        expect(internals.handledQuestionRequests.has("question-1")).toBe(false);
+      });
+
+      it("should skip the response and clear tracking when the doGenerate caller aborts while the callback is pending", async () => {
+        const logger = { warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+        let resolveHandlerStarted: (() => void) | undefined;
+        const handlerStarted = new Promise<void>((resolve) => {
+          resolveHandlerStarted = resolve;
+        });
+        let releaseHandler: (() => void) | undefined;
+        const handlerRelease = new Promise<void>((resolve) => {
+          releaseHandler = resolve;
+        });
+        const onQuestion = vi.fn(async () => {
+          resolveHandlerStarted?.();
+          await handlerRelease;
+          return { type: "answer" as const, answers: [["Blue/Green"]] };
+        });
+        const questionModel = createModel({ onQuestion, logger });
+        const internals = internalsOf(questionModel);
+
+        mockClient.event.subscribe.mockResolvedValueOnce(
+          eventStreamOf(questionAskedEvent()),
+        );
+
+        let resolvePrompt: ((value: unknown) => void) | undefined;
+        mockClient.session.prompt.mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolvePrompt = resolve;
+            }),
+        );
+
+        const abortController = new AbortController();
+        const generatePromise = questionModel.doGenerate({
+          prompt: basicPrompt,
+          abortSignal: abortController.signal,
+        });
+
+        await handlerStarted;
+        const responseAttempt =
+          internals.inFlightQuestionRequests.get("question-1");
+        expect(responseAttempt).toBeDefined();
+
+        // Keep session.prompt pending after the caller aborts so the internal
+        // question watcher signal cannot mask whether the caller signal is
+        // included in the response attempt.
+        abortController.abort();
+        releaseHandler?.();
+        await responseAttempt;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(mockClient.question.reply).not.toHaveBeenCalled();
+        expect(mockClient.question.reject).not.toHaveBeenCalled();
+        expect(internals.inFlightQuestionRequests.has("question-1")).toBe(
+          false,
+        );
+        expect(internals.handledQuestionRequests.has("question-1")).toBe(false);
+
+        resolvePrompt?.({
+          error: Object.assign(new Error("aborted"), { name: "AbortError" }),
+        });
+        await expect(generatePromise).rejects.toMatchObject({
+          name: "AbortError",
+        });
+      });
+
       it("should skip the API call and leave no in-flight state when the signal is already aborted", async () => {
         const logger = { warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
         const onQuestion = vi.fn();
