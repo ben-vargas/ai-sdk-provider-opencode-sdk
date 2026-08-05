@@ -2150,6 +2150,121 @@ describe("opencode-language-model", () => {
         ).not.toHaveBeenCalled();
       });
     });
+
+    describe("cancellation", () => {
+      type QuestionInternals = {
+        respondToQuestion: (
+          client: unknown,
+          event: unknown,
+          signal: AbortSignal,
+        ) => Promise<void>;
+        inFlightQuestionRequests: Map<string, Promise<boolean>>;
+        handledQuestionRequests: Set<string>;
+      };
+
+      const internalsOf = (questionModel: OpencodeLanguageModel) =>
+        questionModel as unknown as QuestionInternals;
+
+      it("should skip the API call and leave no in-flight state when the signal is already aborted", async () => {
+        const logger = { warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+        const onQuestion = vi.fn();
+        const questionModel = createModel({ onQuestion, logger });
+        const internals = internalsOf(questionModel);
+
+        const controller = new AbortController();
+        controller.abort();
+
+        await internals.respondToQuestion(
+          mockClient,
+          questionAskedEvent(),
+          controller.signal,
+        );
+
+        expect(onQuestion).not.toHaveBeenCalled();
+        expect(mockClient.question.reply).not.toHaveBeenCalled();
+        expect(mockClient.question.reject).not.toHaveBeenCalled();
+        expect(internals.inFlightQuestionRequests.size).toBe(0);
+        expect(internals.handledQuestionRequests.size).toBe(0);
+        expect(logger.debug).toHaveBeenCalledWith(
+          expect.stringContaining(
+            "Skipping OpenCode question question-1: request aborted",
+          ),
+        );
+      });
+
+      it("should skip the API call and clean in-flight state when the signal aborts while the callback is pending", async () => {
+        const logger = { warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+
+        mockClient.event.subscribe.mockResolvedValueOnce(
+          eventStreamOf(questionAskedEvent()),
+        );
+
+        // Emulate the server unblocking the prompt (e.g. an external answer)
+        // while the onQuestion callback is still pending.
+        let resolvePrompt: (() => void) | undefined;
+        mockClient.session.prompt.mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolvePrompt = () =>
+                resolve({
+                  data: {
+                    info: {
+                      id: "msg-1",
+                      sessionID: "session-123",
+                      role: "assistant",
+                      finish: "end_turn",
+                    },
+                    parts: [
+                      { id: "part-1", type: "text", text: "Hello, world!" },
+                    ],
+                  },
+                });
+            }),
+        );
+
+        let resolveHandlerStarted: (() => void) | undefined;
+        const handlerStarted = new Promise<void>((resolve) => {
+          resolveHandlerStarted = resolve;
+        });
+        let releaseHandler: (() => void) | undefined;
+        const handlerRelease = new Promise<void>((resolve) => {
+          releaseHandler = resolve;
+        });
+        const onQuestion = vi.fn(async () => {
+          resolveHandlerStarted?.();
+          await handlerRelease;
+          return { type: "answer" as const, answers: [["Blue/Green"]] };
+        });
+
+        const questionModel = createModel({ onQuestion, logger });
+        const internals = internalsOf(questionModel);
+
+        const generatePromise = questionModel.doGenerate({
+          prompt: basicPrompt,
+        });
+
+        await handlerStarted;
+        expect(internals.inFlightQuestionRequests.size).toBe(1);
+
+        // Resolving the prompt aborts the question watcher's AbortController
+        // while the callback is still pending.
+        resolvePrompt?.();
+        await generatePromise;
+
+        releaseHandler?.();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(mockClient.question.reply).not.toHaveBeenCalled();
+        expect(mockClient.question.reject).not.toHaveBeenCalled();
+        expect(internals.inFlightQuestionRequests.size).toBe(0);
+        expect(internals.handledQuestionRequests.size).toBe(0);
+        expect(logger.debug).toHaveBeenCalledWith(
+          expect.stringContaining(
+            "Skipping answer for OpenCode question question-1: request aborted",
+          ),
+        );
+      });
+    });
   });
 
   describe("getSessionId", () => {

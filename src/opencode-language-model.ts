@@ -83,6 +83,10 @@ interface QuestionClient {
   };
 }
 
+// Deliberate memory-bound trade-off: once this cap is exceeded, the oldest
+// handled question ids are pruned, so a duplicate event arriving 1000+
+// questions later may retrigger a reply. The server refuses that reply as
+// stale (warn-logged), so the cost is a spurious warning, not a bad answer.
 const MAX_HANDLED_QUESTION_REQUESTS = 1_000;
 
 /**
@@ -708,6 +712,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
                 await this.respondToQuestion(
                   client,
                   event as EventQuestionAsked,
+                  requestAbortController.signal,
                 );
               }
 
@@ -920,6 +925,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         await this.respondToQuestion(
           client,
           opencodeEvent as EventQuestionAsked,
+          signal,
         );
       }
     } catch (error) {
@@ -934,6 +940,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
   private async respondToQuestion(
     client: QuestionClient,
     event: EventQuestionAsked,
+    signal: AbortSignal,
   ): Promise<void> {
     const request = getEventPayload(
       event,
@@ -962,7 +969,16 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       return;
     }
 
-    const attempt = this.attemptQuestionResponse(client, request);
+    // The request is shutting down; skip the API call so no in-flight or
+    // pending tracking for this question id can leak past the abort.
+    if (signal.aborted) {
+      this.logger.debug?.(
+        `Skipping OpenCode question ${request.id}: request aborted.`,
+      );
+      return;
+    }
+
+    const attempt = this.attemptQuestionResponse(client, request, signal);
     // Registered synchronously (before any await) so a duplicate arriving in
     // the same tick observes the in-flight attempt rather than racing it.
     this.inFlightQuestionRequests.set(request.id, attempt);
@@ -989,6 +1005,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
   private async attemptQuestionResponse(
     client: QuestionClient,
     request: OpencodeQuestionRequest,
+    signal: AbortSignal,
   ): Promise<boolean> {
     const directory = this.getRequestDirectory();
     let response: OpencodeQuestionResponse;
@@ -1023,6 +1040,17 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     }
 
     const action = response.type === "answer" ? "answer" : "reject";
+
+    // The signal may have aborted while the onQuestion callback was pending;
+    // re-check before the API call so an aborted request never issues a
+    // reply/reject. Returning false keeps the id out of
+    // handledQuestionRequests, and the caller drops the in-flight entry.
+    if (signal.aborted) {
+      this.logger.debug?.(
+        `Skipping ${action} for OpenCode question ${request.id}: request aborted.`,
+      );
+      return false;
+    }
 
     try {
       let result: unknown;
