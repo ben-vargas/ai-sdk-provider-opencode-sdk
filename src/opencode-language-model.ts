@@ -312,32 +312,41 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       );
 
       const questionAbortController = new AbortController();
-      const unregisterQuestionSubscription =
-        this.clientManager.registerEventSubscription(questionAbortController);
+      let unregisterQuestionSubscription = () => {};
       const questionRequests = new Set<string>();
       const directory = this.getRequestDirectory();
 
-      try {
-        const eventsResult = await client.event.subscribe(
-          directory ? { directory } : undefined,
-          { signal: questionAbortController.signal },
-        );
+      // session.prompt blocks server-side while a question is pending, so
+      // watch for question.asked events on a temporary subscription and apply
+      // the callback/policy logic out-of-band. In wait mode without a handler
+      // there is nothing to do, so keep the legacy behavior of no extra
+      // subscription.
+      if (this.settings.onQuestion || this.settings.questionPolicy !== "wait") {
+        unregisterQuestionSubscription =
+          this.clientManager.registerEventSubscription(questionAbortController);
 
-        if (!eventsResult.stream) {
-          throw new Error("Failed to subscribe to events");
+        try {
+          const eventsResult = await client.event.subscribe(
+            directory ? { directory } : undefined,
+            { signal: questionAbortController.signal },
+          );
+
+          if (!eventsResult.stream) {
+            throw new Error("Failed to subscribe to events");
+          }
+
+          void this.watchForQuestions(
+            client,
+            sessionId,
+            eventsResult.stream,
+            questionRequests,
+            questionAbortController.signal,
+          );
+        } catch (error) {
+          this.logger.warn(
+            `Question event subscription failed: ${extractErrorMessage(error)}`,
+          );
         }
-
-        void this.watchForQuestions(
-          client,
-          sessionId,
-          eventsResult.stream,
-          questionRequests,
-          questionAbortController.signal,
-        );
-      } catch (error) {
-        this.logger.warn(
-          `Question event subscription failed: ${extractErrorMessage(error)}`,
-        );
       }
 
       const abortSignal = options.abortSignal;
