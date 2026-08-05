@@ -17,7 +17,7 @@ async function main() {
     console.log("Usage:", result.usage);
     console.log("Finish reason:", result.finishReason);
 
-    const metadata = result.providerMetadata?.opencode;
+    const metadata = result.finalStep.providerMetadata?.opencode;
     if (metadata) {
       console.log("Session ID:", metadata.sessionId);
       console.log("Cost:", metadata.cost);

@@ -1,11 +1,13 @@
 import type {
-  LanguageModelV3Prompt,
-  LanguageModelV3TextPart,
-  LanguageModelV3FilePart,
-  LanguageModelV3ToolCallPart,
-  LanguageModelV3ToolResultPart,
-  LanguageModelV3ReasoningPart,
-  LanguageModelV3ToolApprovalResponsePart,
+  LanguageModelV4Prompt,
+  LanguageModelV4TextPart,
+  LanguageModelV4FilePart,
+  LanguageModelV4ToolCallPart,
+  LanguageModelV4ToolResultPart,
+  LanguageModelV4ReasoningPart,
+  LanguageModelV4ReasoningFilePart,
+  LanguageModelV4CustomPart,
+  LanguageModelV4ToolApprovalResponsePart,
 } from "@ai-sdk/provider";
 import type { Logger } from "./types.js";
 
@@ -44,7 +46,7 @@ export interface ConversionResult {
  * Convert AI SDK prompt to OpenCode format.
  */
 export function convertToOpencodeMessages(
-  prompt: LanguageModelV3Prompt,
+  prompt: LanguageModelV4Prompt,
   options?: {
     logger?: Logger | false;
     mode?: { type: "regular" } | { type: "object-json"; schema?: unknown };
@@ -118,7 +120,7 @@ export function convertToOpencodeMessages(
  * Convert a user message part to OpenCode format.
  */
 function convertUserPart(
-  part: LanguageModelV3TextPart | LanguageModelV3FilePart,
+  part: LanguageModelV4TextPart | LanguageModelV4FilePart,
   warnings: string[],
   logger?: Logger | false,
 ): OpencodePartInput | null {
@@ -149,28 +151,69 @@ function convertUserPart(
  * Convert a file part to OpenCode format.
  */
 function convertFilePart(
-  part: LanguageModelV3FilePart,
+  part: LanguageModelV4FilePart,
   warnings: string[],
   logger?: Logger | false,
-): FilePartInput | null {
-  const { data, mediaType, filename } = part;
+): OpencodePartInput | null {
+  const { mediaType, filename } = part;
 
-  // Handle different data formats
-  if (typeof data === "string") {
-    // Could be base64, data URL, or regular URL
-    if (data.startsWith("data:")) {
-      // Data URL - use as-is
+  switch (part.data.type) {
+    case "data": {
+      // Raw bytes or base64-encoded string.
+      const data = part.data.data;
+
+      if (typeof data === "string") {
+        if (data.startsWith("data:")) {
+          // Data URL - use as-is
+          return {
+            type: "file",
+            mime: mediaType,
+            filename,
+            url: data,
+          };
+        }
+
+        if (data.startsWith("http://") || data.startsWith("https://")) {
+          // Remote URL - not supported by OpenCode
+          const warning = `Remote URLs are not supported for file input: ${data.substring(0, 50)}...`;
+          warnings.push(warning);
+          if (logger) {
+            logger.warn(warning);
+          }
+          return null;
+        }
+
+        // Assume base64 - convert to data URL
+        return {
+          type: "file",
+          mime: mediaType,
+          filename,
+          url: `data:${mediaType};base64,${normalizeBase64(data)}`,
+        };
+      }
+
+      // Binary data - convert to base64 data URL
+      const base64 = uint8ArrayToBase64(data);
       return {
         type: "file",
         mime: mediaType,
         filename,
-        url: data,
+        url: `data:${mediaType};base64,${base64}`,
       };
     }
 
-    if (data.startsWith("http://") || data.startsWith("https://")) {
-      // Remote URL - not supported by OpenCode
-      const warning = `Remote URLs are not supported for file input: ${data.substring(0, 50)}...`;
+    case "url": {
+      const urlString = part.data.url.toString();
+      if (urlString.startsWith("data:")) {
+        return {
+          type: "file",
+          mime: mediaType,
+          filename,
+          url: urlString,
+        };
+      }
+
+      const warning = `Remote URLs are not supported for file input: ${urlString.substring(0, 50)}...`;
       warnings.push(warning);
       if (logger) {
         logger.warn(warning);
@@ -178,52 +221,24 @@ function convertFilePart(
       return null;
     }
 
-    // Assume base64 - convert to data URL
-    return {
-      type: "file",
-      mime: mediaType,
-      filename,
-      url: `data:${mediaType};base64,${normalizeBase64(data)}`,
-    };
-  }
-
-  if (data instanceof Uint8Array) {
-    // Binary data - convert to base64 data URL
-    const base64 = uint8ArrayToBase64(data);
-    return {
-      type: "file",
-      mime: mediaType,
-      filename,
-      url: `data:${mediaType};base64,${base64}`,
-    };
-  }
-
-  // URL object
-  if (data instanceof URL) {
-    const urlString = data.toString();
-    if (urlString.startsWith("data:")) {
+    case "text":
+      // Inline text content - send as a plain text part.
       return {
-        type: "file",
-        mime: mediaType,
-        filename,
-        url: urlString,
+        type: "text",
+        text: part.data.text,
       };
-    }
 
-    const warning = `Remote URLs are not supported for file input: ${urlString.substring(0, 50)}...`;
-    warnings.push(warning);
-    if (logger) {
-      logger.warn(warning);
+    case "reference": {
+      // Provider file references cannot be resolved by OpenCode.
+      const warning =
+        "File references are not supported for file input; the part was skipped.";
+      warnings.push(warning);
+      if (logger) {
+        logger.warn(warning);
+      }
+      return null;
     }
-    return null;
   }
-
-  const warning = `Unsupported file data type: ${typeof data}`;
-  warnings.push(warning);
-  if (logger) {
-    logger.warn(warning);
-  }
-  return null;
 }
 
 /**
@@ -232,11 +247,13 @@ function convertFilePart(
  */
 function convertAssistantContent(
   content: Array<
-    | LanguageModelV3TextPart
-    | LanguageModelV3FilePart
-    | LanguageModelV3ReasoningPart
-    | LanguageModelV3ToolCallPart
-    | LanguageModelV3ToolResultPart
+    | LanguageModelV4TextPart
+    | LanguageModelV4FilePart
+    | LanguageModelV4ReasoningPart
+    | LanguageModelV4ReasoningFilePart
+    | LanguageModelV4ToolCallPart
+    | LanguageModelV4ToolResultPart
+    | LanguageModelV4CustomPart
   >,
   warnings: string[],
   logger?: Logger | false,
@@ -283,6 +300,20 @@ function convertAssistantContent(
         break;
       }
 
+      case "reasoning-file": {
+        // Files produced as part of a reasoning trace - skip for now
+        if (logger) {
+          logger.debug?.(
+            "Reasoning-file parts in assistant messages are not yet supported",
+          );
+        }
+        break;
+      }
+
+      case "custom":
+        // Provider-specific custom parts cannot be represented - skip
+        break;
+
       case "file": {
         // Files from assistant are typically generated - skip for now
         const warning =
@@ -304,7 +335,7 @@ function convertAssistantContent(
  */
 function convertToolResults(
   content: Array<
-    LanguageModelV3ToolResultPart | LanguageModelV3ToolApprovalResponsePart
+    LanguageModelV4ToolResultPart | LanguageModelV4ToolApprovalResponsePart
   >,
   warnings: string[],
   logger?: Logger | false,
@@ -357,7 +388,7 @@ function convertToolResults(
 /**
  * Format a tool result for text representation.
  */
-function formatToolResult(part: LanguageModelV3ToolResultPart): string {
+function formatToolResult(part: LanguageModelV4ToolResultPart): string {
   const output = part.output;
 
   switch (output.type) {
@@ -379,25 +410,10 @@ function formatToolResult(part: LanguageModelV3ToolResultPart): string {
           if (item.type === "text") {
             return item.text;
           }
-          if (item.type === "file-data") {
+          if (item.type === "file") {
             return `[File: ${item.mediaType}]`;
           }
-          if (item.type === "file-url") {
-            return `[File URL: ${item.url}]`;
-          }
-          if (item.type === "file-id") {
-            return "[File ID]";
-          }
-          if (item.type === "image-data") {
-            return `[Image: ${item.mediaType}]`;
-          }
-          if (item.type === "image-url") {
-            return `[Image URL: ${item.url}]`;
-          }
-          if (item.type === "image-file-id") {
-            return "[Image File ID]";
-          }
-          return "[Content]";
+          return "[Custom content]";
         })
         .join("\n");
     case "execution-denied":

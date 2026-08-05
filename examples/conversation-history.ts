@@ -32,7 +32,7 @@ async function main() {
       console.log("---");
     }
 
-    const metadata = lastResult?.providerMetadata?.opencode;
+    const metadata = lastResult?.finalStep.providerMetadata?.opencode;
     if (metadata) {
       console.log("Session ID:", metadata.sessionId);
     }

@@ -75,7 +75,7 @@ async function main() {
     console.log("  - Custom AI SDK tools are not executed by OpenCode.");
     console.log("  - Remote image URLs are not supported as image input.");
     console.log(
-      "  - OpenCode executes its own server-side tools; observe with fullStream.",
+      "  - OpenCode executes its own server-side tools; observe with stream.",
     );
     console.log("  - Tool approvals are surfaced via stream events.\n");
   } catch (error) {

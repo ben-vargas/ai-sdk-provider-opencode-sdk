@@ -3,13 +3,13 @@
   <a href="https://www.npmjs.com/package/ai-sdk-provider-opencode-sdk"><img src="https://img.shields.io/npm/v/ai-sdk-provider-opencode-sdk?color=00A79E" alt="npm version" /></a>
   <a href="https://www.npmjs.com/package/ai-sdk-provider-opencode-sdk"><img src="https://img.shields.io/npm/unpacked-size/ai-sdk-provider-opencode-sdk?color=00A79E" alt="install size" /></a>
   <a href="https://www.npmjs.com/package/ai-sdk-provider-opencode-sdk"><img src="https://img.shields.io/npm/dy/ai-sdk-provider-opencode-sdk.svg?color=00A79E" alt="npm downloads" /></a>
-  <a href="https://nodejs.org/en/about/releases/"><img src="https://img.shields.io/badge/node-%3E%3D18-00A79E" alt="Node.js ≥ 18" /></a>
+  <a href="https://nodejs.org/en/about/releases/"><img src="https://img.shields.io/badge/node-%3E%3D22-00A79E" alt="Node.js ≥ 22" /></a>
   <a href="https://www.npmjs.com/package/ai-sdk-provider-opencode-sdk"><img src="https://img.shields.io/npm/l/ai-sdk-provider-opencode-sdk?color=00A79E" alt="License: MIT" /></a>
 </p>
 
 # AI SDK Provider for OpenCode
 
-> **Latest Release**: Version 3.x supports AI SDK v6. Version 2.x is the previous AI SDK v6 line. For AI SDK v5 support, use the `ai-sdk-v5` tag (0.x.x).
+> **Latest Release**: Version 4.x supports AI SDK v7. Version 3.x moves to maintenance for AI SDK v6 under the `ai-sdk-v6` tag.
 
 A community provider for the [Vercel AI SDK](https://sdk.vercel.ai/docs) that enables using AI models through [OpenCode](https://opencode.ai) and the `@opencode-ai/sdk/v2` APIs. OpenCode is a terminal-based AI coding assistant that supports multiple providers (Anthropic, OpenAI, Google, and more).
 
@@ -19,10 +19,20 @@ This provider enables you to use OpenCode's AI capabilities through the familiar
 
 | Provider Version | AI SDK Version | NPM Tag     | Status      | Branch                                                                                   |
 | ---------------- | -------------- | ----------- | ----------- | ---------------------------------------------------------------------------------------- |
-| 3.x.x            | v6             | `latest`    | Stable      | `main`                                                                                   |
+| 4.x.x            | v7             | `latest`    | Stable      | `main`                                                                                   |
+| 3.x.x            | v6             | `ai-sdk-v6` | Maintenance | [`ai-sdk-v6`](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/tree/ai-sdk-v6) |
 | 2.x.x            | v6             | N/A         | Legacy      | historical                                                                               |
 | 1.x.x            | v6             | N/A         | Legacy      | historical                                                                               |
-| 0.x.x            | v5             | `ai-sdk-v5` | Maintenance | [`ai-sdk-v5`](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/tree/ai-sdk-v5) |
+| 0.x.x            | v5             | `ai-sdk-v5` | Legacy      | [`ai-sdk-v5`](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/tree/ai-sdk-v5) |
+
+## Breaking Changes in 4.0.0
+
+This release upgrades the provider to AI SDK v7 and the V4 provider interfaces:
+
+- **Node.js >= 22**: The package now requires **Node.js >= 22**.
+- **File data parts**: Per AI SDK v7, `reference` file input parts are unsupported and skipped with a warning.
+- **`reasoning` call option**: The `reasoning` model call option is unsupported; it logs a warning and is ignored.
+- **`reasoning-file` parts**: Explicitly a no-op for output conversion (logged at debug level).
 
 ## Breaking Changes in 2.0.0
 
@@ -37,10 +47,16 @@ For production object extraction, use a two-step pattern: try `Output.object(...
 
 ### Installing the Right Version
 
-**For AI SDK v6 (recommended):**
+**For AI SDK v7 (recommended):**
 
 ```bash
-npm install ai-sdk-provider-opencode-sdk ai@^6.0.0
+npm install ai-sdk-provider-opencode-sdk ai@^7.0.0
+```
+
+**For AI SDK v6:**
+
+```bash
+npm install ai-sdk-provider-opencode-sdk@ai-sdk-v6 ai@^6.0.0
 ```
 
 **For AI SDK v5:**
@@ -63,7 +79,7 @@ npm install ai-sdk-provider-opencode-sdk ai zod@^4.1.8
 
 ## Prerequisites
 
-- Node.js >= 18
+- Node.js >= 22
 - [OpenCode CLI](https://opencode.ai) installed (`npm install -g opencode`)
 - Valid API keys configured in OpenCode for your preferred providers
 
@@ -184,7 +200,7 @@ const result1 = await generateText({ model, prompt: "Review this code..." });
 const result2 = await generateText({ model, prompt: "What did you find?" });
 
 // Get session ID from metadata
-const sessionId = result1.providerMetadata?.opencode?.sessionId;
+const sessionId = result1.finalStep.providerMetadata?.opencode?.sessionId;
 
 // Resume a specific session
 const resumeModel = opencode("openai/gpt-5.3-codex-spark", {
@@ -204,7 +220,7 @@ const result = streamText({
   prompt: "List files in the current directory.",
 });
 
-for await (const part of result.fullStream) {
+for await (const part of result.stream) {
   switch (part.type) {
     case "tool-call":
       console.log(`tool-call: ${part.toolName}`);

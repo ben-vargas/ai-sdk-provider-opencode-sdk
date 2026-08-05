@@ -1,9 +1,9 @@
 import type {
   JSONValue,
-  LanguageModelV3StreamPart,
-  LanguageModelV3FinishReason,
-  SharedV3Warning,
-  LanguageModelV3Usage,
+  LanguageModelV4StreamPart,
+  LanguageModelV4FinishReason,
+  SharedV4Warning,
+  LanguageModelV4Usage,
 } from "@ai-sdk/provider";
 import type { Logger, ToolStreamState, StreamingUsage } from "./types.js";
 import { resolveStructuredOutputFinishReason } from "./map-opencode-finish-reason.js";
@@ -19,25 +19,46 @@ export const STRUCTURED_OUTPUT_TOOL = "StructuredOutput" as const;
 
 /**
  * OpenCode event types (from SDK types.gen.ts).
+ *
+ * Both the legacy `{ type, properties }` envelope and the newer
+ * `{ id, type, data }` envelope are tolerated: the payload is resolved from
+ * `properties` first, falling back to `data`.
  */
 export interface EventMessagePartUpdated {
   type: "message.part.updated";
-  properties: {
+  properties?: {
     part: Part;
+    delta?: string;
+  };
+  data?: {
+    sessionID: string;
+    part: Part;
+    time?: number;
     delta?: string;
   };
 }
 
 export interface EventMessageUpdated {
   type: "message.updated";
-  properties: {
+  properties?: {
+    info: Message;
+  };
+  data?: {
+    sessionID: string;
     info: Message;
   };
 }
 
 export interface EventSessionStatus {
   type: "session.status";
-  properties: {
+  properties?: {
+    sessionID: string;
+    status:
+      | { type: "idle" }
+      | { type: "busy" }
+      | { type: "retry"; attempt: number; message: string; next: number };
+  };
+  data?: {
     sessionID: string;
     status:
       | { type: "idle" }
@@ -48,14 +69,29 @@ export interface EventSessionStatus {
 
 export interface EventSessionIdle {
   type: "session.idle";
-  properties: {
+  properties?: {
+    sessionID: string;
+  };
+  data?: {
     sessionID: string;
   };
 }
 
 export interface EventPermissionAsked {
   type: "permission.asked";
-  properties: {
+  properties?: {
+    id: string;
+    sessionID: string;
+    permission: string;
+    patterns: string[];
+    metadata?: Record<string, unknown>;
+    always?: string[];
+    tool?: {
+      messageID: string;
+      callID: string;
+    };
+  };
+  data?: {
     id: string;
     sessionID: string;
     permission: string;
@@ -71,7 +107,25 @@ export interface EventPermissionAsked {
 
 export interface EventQuestionAsked {
   type: "question.asked";
-  properties: {
+  properties?: {
+    id: string;
+    sessionID: string;
+    questions: Array<{
+      header: string;
+      question: string;
+      options: Array<{
+        label: string;
+        description: string;
+      }>;
+      multiple?: boolean;
+      custom?: boolean;
+    }>;
+    tool?: {
+      messageID: string;
+      callID: string;
+    };
+  };
+  data?: {
     id: string;
     sessionID: string;
     questions: Array<{
@@ -93,13 +147,31 @@ export interface EventQuestionAsked {
 
 export interface EventMessagePartDelta {
   type: "message.part.delta";
-  properties: {
+  properties?: {
     sessionID: string;
     messageID: string;
     partID: string;
     field: string;
     delta: string;
   };
+  data?: {
+    sessionID: string;
+    messageID: string;
+    partID: string;
+    field: string;
+    delta: string;
+  };
+}
+
+/**
+ * Resolve the event payload from either the legacy `properties` envelope or
+ * the newer `data` envelope emitted by recent OpenCode versions.
+ */
+export function getEventPayload(event: {
+  properties?: unknown;
+  data?: unknown;
+}): Record<string, unknown> {
+  return (event.properties ?? event.data ?? {}) as Record<string, unknown>;
 }
 
 export type OpencodeEvent =
@@ -318,7 +390,7 @@ function registerToolCall(
   toolName: string,
   inputStr: string,
   streamState: ToolStreamState,
-  parts: LanguageModelV3StreamPart[],
+  parts: LanguageModelV4StreamPart[],
 ): void {
   if (!streamState.inputStarted) {
     parts.push({
@@ -358,7 +430,7 @@ function registerToolCall(
 function flushPendingApproval(
   callID: string,
   state: StreamState,
-  parts: LanguageModelV3StreamPart[],
+  parts: LanguageModelV4StreamPart[],
 ): void {
   const pending = state.pendingApprovals.get(callID);
   if (!pending) {
@@ -393,34 +465,28 @@ export function isEventForSession(
   event: OpencodeEvent,
   sessionId: string,
 ): boolean {
+  const props = getEventPayload(event);
+
   if (
-    "properties" in event &&
-    typeof event.properties === "object" &&
-    event.properties !== null
+    "part" in props &&
+    typeof props.part === "object" &&
+    props.part !== null
   ) {
-    const props = event.properties as Record<string, unknown>;
+    const part = props.part as Record<string, unknown>;
+    return part.sessionID === sessionId;
+  }
 
-    if (
-      "part" in props &&
-      typeof props.part === "object" &&
-      props.part !== null
-    ) {
-      const part = props.part as Record<string, unknown>;
-      return part.sessionID === sessionId;
-    }
+  if (
+    "info" in props &&
+    typeof props.info === "object" &&
+    props.info !== null
+  ) {
+    const info = props.info as Record<string, unknown>;
+    return info.sessionID === sessionId;
+  }
 
-    if (
-      "info" in props &&
-      typeof props.info === "object" &&
-      props.info !== null
-    ) {
-      const info = props.info as Record<string, unknown>;
-      return info.sessionID === sessionId;
-    }
-
-    if ("sessionID" in props) {
-      return props.sessionID === sessionId;
-    }
+  if ("sessionID" in props) {
+    return props.sessionID === sessionId;
   }
 
   return false;
@@ -435,15 +501,17 @@ export function isSessionComplete(
 ): boolean {
   if (event.type === "session.status") {
     const statusEvent = event as EventSessionStatus;
+    const props = getEventPayload(statusEvent);
     return (
-      statusEvent.properties.sessionID === sessionId &&
-      statusEvent.properties.status.type === "idle"
+      props.sessionID === sessionId &&
+      (props.status as { type: string })?.type === "idle"
     );
   }
 
   if (event.type === "session.idle") {
     const idleEvent = event as EventSessionIdle;
-    return idleEvent.properties.sessionID === sessionId;
+    const props = getEventPayload(idleEvent);
+    return props.sessionID === sessionId;
   }
 
   return false;
@@ -456,8 +524,8 @@ export function convertEventToStreamParts(
   event: OpencodeEvent,
   state: StreamState,
   logger?: Logger | false,
-): LanguageModelV3StreamPart[] {
-  const parts: LanguageModelV3StreamPart[] = [];
+): LanguageModelV4StreamPart[] {
+  const parts: LanguageModelV4StreamPart[] = [];
 
   switch (event.type) {
     case "message.part.updated": {
@@ -476,15 +544,17 @@ export function convertEventToStreamParts(
 
     case "message.updated": {
       const messageEvent = event as EventMessageUpdated;
-      const info = messageEvent.properties.info;
+      const props = getEventPayload(messageEvent);
+      const info = props.info as Message;
       state.messageRoles.set(info.id, info.role);
       break;
     }
 
     case "permission.asked": {
       const permissionEvent = event as EventPermissionAsked;
-      const requestId = permissionEvent.properties.id;
-      const callID = permissionEvent.properties.tool?.callID;
+      const props = getEventPayload(permissionEvent);
+      const requestId = props.id as string;
+      const callID = (props.tool as { callID?: string } | undefined)?.callID;
 
       // Already emitted (e.g. a duplicate event) — ignore.
       if (state.permissionRequests.has(requestId)) {
@@ -498,9 +568,9 @@ export function convertEventToStreamParts(
         toolCallId: callID ?? requestId,
         toolName: toolState?.toolName ?? "",
         providerExecuted: true,
-        permission: permissionEvent.properties.permission,
-        patterns: permissionEvent.properties.patterns,
-        sessionId: permissionEvent.properties.sessionID,
+        permission: props.permission as string,
+        patterns: props.patterns as string[],
+        sessionId: props.sessionID as string,
       };
       state.pendingApprovals.set(bufferKey, record);
 
@@ -534,7 +604,8 @@ export function convertEventToStreamParts(
 
     case "question.asked": {
       const questionEvent = event as EventQuestionAsked;
-      const questionId = questionEvent.properties.id;
+      const props = getEventPayload(questionEvent);
+      const questionId = props.id as string;
 
       if (!state.questionRequests.has(questionId)) {
         state.questionRequests.add(questionId);
@@ -586,9 +657,13 @@ function handlePartUpdated(
   event: EventMessagePartUpdated,
   state: StreamState,
   logger?: Logger | false,
-): LanguageModelV3StreamPart[] {
-  const { part, delta } = event.properties;
-  const parts: LanguageModelV3StreamPart[] = [];
+): LanguageModelV4StreamPart[] {
+  const payload = event.properties ?? event.data;
+  if (!payload?.part) {
+    return [];
+  }
+  const { part, delta } = payload;
+  const parts: LanguageModelV4StreamPart[] = [];
 
   const messageRole = state.messageRoles.get(part.messageID);
   if (messageRole === "user") {
@@ -650,9 +725,13 @@ function handlePartUpdated(
 function handlePartDelta(
   event: EventMessagePartDelta,
   state: StreamState,
-): LanguageModelV3StreamPart[] {
-  const parts: LanguageModelV3StreamPart[] = [];
-  const { partID, messageID, field, delta } = event.properties;
+): LanguageModelV4StreamPart[] {
+  const parts: LanguageModelV4StreamPart[] = [];
+  const payload = event.properties ?? event.data;
+  if (!payload) {
+    return parts;
+  }
+  const { partID, messageID, field, delta } = payload;
 
   if (!delta) return parts;
 
@@ -706,8 +785,8 @@ function handleTextPart(
   part: TextPart,
   delta: string | undefined,
   state: StreamState,
-): LanguageModelV3StreamPart[] {
-  const parts: LanguageModelV3StreamPart[] = [];
+): LanguageModelV4StreamPart[] {
+  const parts: LanguageModelV4StreamPart[] = [];
   const partId = part.id;
 
   if (!state.textStarted || state.textPartId !== partId) {
@@ -738,8 +817,8 @@ function handleReasoningPart(
   part: ReasoningPart,
   delta: string | undefined,
   state: StreamState,
-): LanguageModelV3StreamPart[] {
-  const parts: LanguageModelV3StreamPart[] = [];
+): LanguageModelV4StreamPart[] {
+  const parts: LanguageModelV4StreamPart[] = [];
   const partId = part.id;
 
   if (!state.reasoningStarted || state.reasoningPartId !== partId) {
@@ -774,8 +853,8 @@ function handleToolPart(
   part: ToolPart,
   state: StreamState,
   logger?: Logger | false,
-): LanguageModelV3StreamPart[] {
-  const parts: LanguageModelV3StreamPart[] = [];
+): LanguageModelV4StreamPart[] {
+  const parts: LanguageModelV4StreamPart[] = [];
   const { callID, tool, state: toolState } = part;
 
   // OpenCode's StructuredOutput tool carries the structured JSON in its
@@ -977,8 +1056,8 @@ function handleStructuredOutputToolPart(
   toolState: ToolState,
   state: StreamState,
   logger?: Logger | false,
-): LanguageModelV3StreamPart[] {
-  const parts: LanguageModelV3StreamPart[] = [];
+): LanguageModelV4StreamPart[] {
+  const parts: LanguageModelV4StreamPart[] = [];
   const textId = `structured-output-${callID}`;
 
   // We reuse the tool stream state map to track what we've already emitted,
@@ -1095,8 +1174,8 @@ function handleStepFinishPart(part: StepFinishPart, state: StreamState): void {
   state.usage.totalCost += part.cost;
 }
 
-function handleFilePart(part: FilePart): LanguageModelV3StreamPart[] {
-  const parts: LanguageModelV3StreamPart[] = [];
+function handleFilePart(part: FilePart): LanguageModelV4StreamPart[] {
+  const parts: LanguageModelV4StreamPart[] = [];
   const { plan } = planFilePartConversion(part);
   if (!plan) {
     return parts;
@@ -1106,7 +1185,7 @@ function handleFilePart(part: FilePart): LanguageModelV3StreamPart[] {
     parts.push({
       type: "file",
       mediaType: plan.primary.mediaType,
-      data: plan.primary.data,
+      data: { type: "data", data: plan.primary.data },
       ...(plan.sourceMetadata
         ? {
             providerMetadata: {
@@ -1175,16 +1254,16 @@ function handleFilePart(part: FilePart): LanguageModelV3StreamPart[] {
  */
 export function createFinishParts(
   state: StreamState,
-  finishReason: LanguageModelV3FinishReason,
+  finishReason: LanguageModelV4FinishReason,
   sessionId: string,
   messageId?: string,
-): LanguageModelV3StreamPart[] {
-  const parts: LanguageModelV3StreamPart[] = [];
+): LanguageModelV4StreamPart[] {
+  const parts: LanguageModelV4StreamPart[] = [];
   const inputTokensTotal =
     state.usage.inputTokens +
     state.usage.cachedInputTokens +
     state.usage.cachedWriteTokens;
-  const usage: LanguageModelV3Usage = {
+  const usage: LanguageModelV4Usage = {
     inputTokens: {
       total: inputTokensTotal,
       noCache: state.usage.inputTokens,
@@ -1252,8 +1331,8 @@ export function hasCompletedStructuredOutput(parts: Part[]): boolean {
  */
 export function createStreamStartPart(
   warnings: string[],
-): LanguageModelV3StreamPart {
-  const callWarnings: SharedV3Warning[] = warnings.map((warning) => ({
+): LanguageModelV4StreamPart {
+  const callWarnings: SharedV4Warning[] = warnings.map((warning) => ({
     type: "other" as const,
     message: warning,
   }));

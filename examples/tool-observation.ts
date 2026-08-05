@@ -20,7 +20,7 @@ async function main() {
         "List the files in the current directory and tell me how many there are.",
     });
 
-    for await (const part of result.fullStream) {
+    for await (const part of result.stream) {
       switch (part.type) {
         case "tool-call":
           console.log(`tool-call: ${part.toolName}`);

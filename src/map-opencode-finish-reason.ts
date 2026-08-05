@@ -1,4 +1,4 @@
-import type { LanguageModelV3FinishReason } from "@ai-sdk/provider";
+import type { LanguageModelV4FinishReason } from "@ai-sdk/provider";
 import { isAbortError, isOutputLengthError } from "./errors.js";
 
 /**
@@ -17,7 +17,7 @@ export interface MessageInfo {
  */
 export function mapOpencodeFinishReason(
   message: MessageInfo | undefined,
-): LanguageModelV3FinishReason {
+): LanguageModelV4FinishReason {
   if (!message) {
     return { unified: "other", raw: undefined };
   }
@@ -42,7 +42,7 @@ export function mapOpencodeFinishReason(
 function mapErrorToFinishReason(error: {
   name: string;
   data?: unknown;
-}): LanguageModelV3FinishReason {
+}): LanguageModelV4FinishReason {
   const { name } = error;
 
   switch (name) {
@@ -75,7 +75,7 @@ function mapErrorToFinishReason(error: {
 /**
  * Map finish string to finish reason.
  */
-function mapFinishToReason(finish: string): LanguageModelV3FinishReason {
+function mapFinishToReason(finish: string): LanguageModelV4FinishReason {
   const normalizedFinish = finish.toLowerCase();
 
   // Normal completion
@@ -125,7 +125,7 @@ function mapFinishToReason(finish: string): LanguageModelV3FinishReason {
  */
 export function mapErrorToFinishReasonFromUnknown(
   error: unknown,
-): LanguageModelV3FinishReason {
+): LanguageModelV4FinishReason {
   if (isAbortError(error)) {
     return { unified: "stop", raw: "abort" };
   }
@@ -156,9 +156,9 @@ export function hasToolCalls(parts: Array<{ type: string }>): boolean {
  * the structured output and throw NoOutputGeneratedError.
  */
 export function resolveStructuredOutputFinishReason(
-  finishReason: LanguageModelV3FinishReason,
+  finishReason: LanguageModelV4FinishReason,
   structuredOutputCompleted: boolean,
-): LanguageModelV3FinishReason {
+): LanguageModelV4FinishReason {
   if (
     structuredOutputCompleted &&
     (finishReason.unified === "tool-calls" || finishReason.unified === "other")

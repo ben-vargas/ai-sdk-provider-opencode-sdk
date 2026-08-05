@@ -3,14 +3,14 @@ import {
   convertToOpencodeMessages,
   extractTextFromParts,
 } from "./convert-to-opencode-messages.js";
-import type { LanguageModelV3Prompt } from "@ai-sdk/provider";
+import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
 import type { Logger } from "./types.js";
 
 describe("convert-to-opencode-messages", () => {
   describe("convertToOpencodeMessages", () => {
     describe("system messages", () => {
       it("should extract system message as systemPrompt", () => {
-        const prompt: LanguageModelV3Prompt = [
+        const prompt: LanguageModelV4Prompt = [
           { role: "system", content: "You are a helpful assistant." },
         ];
 
@@ -22,7 +22,7 @@ describe("convert-to-opencode-messages", () => {
       });
 
       it("should concatenate multiple system messages", () => {
-        const prompt: LanguageModelV3Prompt = [
+        const prompt: LanguageModelV4Prompt = [
           { role: "system", content: "First instruction." },
           { role: "system", content: "Second instruction." },
         ];
@@ -37,7 +37,7 @@ describe("convert-to-opencode-messages", () => {
 
     describe("user messages", () => {
       it("should convert text parts", () => {
-        const prompt: LanguageModelV3Prompt = [
+        const prompt: LanguageModelV4Prompt = [
           {
             role: "user",
             content: [{ type: "text", text: "Hello, world!" }],
@@ -54,7 +54,7 @@ describe("convert-to-opencode-messages", () => {
       });
 
       it("should convert multiple text parts", () => {
-        const prompt: LanguageModelV3Prompt = [
+        const prompt: LanguageModelV4Prompt = [
           {
             role: "user",
             content: [
@@ -70,13 +70,13 @@ describe("convert-to-opencode-messages", () => {
       });
 
       it("should convert base64 file parts to data URLs", () => {
-        const prompt: LanguageModelV3Prompt = [
+        const prompt: LanguageModelV4Prompt = [
           {
             role: "user",
             content: [
               {
                 type: "file",
-                data: "SGVsbG8gV29ybGQ=",
+                data: { type: "data", data: "SGVsbG8gV29ybGQ=" },
                 mediaType: "image/png",
               },
             ],
@@ -95,13 +95,13 @@ describe("convert-to-opencode-messages", () => {
 
       it("should pass through data URLs unchanged", () => {
         const dataUrl = "data:image/png;base64,SGVsbG8gV29ybGQ=";
-        const prompt: LanguageModelV3Prompt = [
+        const prompt: LanguageModelV4Prompt = [
           {
             role: "user",
             content: [
               {
                 type: "file",
-                data: dataUrl,
+                data: { type: "url", url: new URL(dataUrl) },
                 mediaType: "image/png",
               },
             ],
@@ -117,13 +117,16 @@ describe("convert-to-opencode-messages", () => {
       });
 
       it("should warn about remote URLs", () => {
-        const prompt: LanguageModelV3Prompt = [
+        const prompt: LanguageModelV4Prompt = [
           {
             role: "user",
             content: [
               {
                 type: "file",
-                data: "https://example.com/image.png",
+                data: {
+                  type: "url",
+                  url: new URL("https://example.com/image.png"),
+                },
                 mediaType: "image/png",
               },
             ],
@@ -140,13 +143,13 @@ describe("convert-to-opencode-messages", () => {
 
       it("should convert Uint8Array to base64 data URL", () => {
         const data = new Uint8Array([72, 101, 108, 108, 111]); // "Hello"
-        const prompt: LanguageModelV3Prompt = [
+        const prompt: LanguageModelV4Prompt = [
           {
             role: "user",
             content: [
               {
                 type: "file",
-                data,
+                data: { type: "data", data },
                 mediaType: "image/png",
               },
             ],
@@ -166,13 +169,13 @@ describe("convert-to-opencode-messages", () => {
       });
 
       it("should include filename when provided", () => {
-        const prompt: LanguageModelV3Prompt = [
+        const prompt: LanguageModelV4Prompt = [
           {
             role: "user",
             content: [
               {
                 type: "file",
-                data: "SGVsbG8=",
+                data: { type: "data", data: "SGVsbG8=" },
                 mediaType: "image/png",
                 filename: "test.png",
               },
@@ -188,7 +191,7 @@ describe("convert-to-opencode-messages", () => {
       });
 
       it("should warn about unknown part types", () => {
-        const prompt: LanguageModelV3Prompt = [
+        const prompt: LanguageModelV4Prompt = [
           {
             role: "user",
             content: [{ type: "unknown" as "text", text: "test" }],
@@ -203,7 +206,7 @@ describe("convert-to-opencode-messages", () => {
 
     describe("assistant messages", () => {
       it("should convert assistant text as synthetic context", () => {
-        const prompt: LanguageModelV3Prompt = [
+        const prompt: LanguageModelV4Prompt = [
           {
             role: "assistant",
             content: [{ type: "text", text: "I can help with that." }],
@@ -221,7 +224,7 @@ describe("convert-to-opencode-messages", () => {
       });
 
       it("should convert reasoning parts as synthetic context", () => {
-        const prompt: LanguageModelV3Prompt = [
+        const prompt: LanguageModelV4Prompt = [
           {
             role: "assistant",
             content: [
@@ -244,7 +247,7 @@ describe("convert-to-opencode-messages", () => {
       });
 
       it("should convert tool calls as synthetic context", () => {
-        const prompt: LanguageModelV3Prompt = [
+        const prompt: LanguageModelV4Prompt = [
           {
             role: "assistant",
             content: [
@@ -271,13 +274,13 @@ describe("convert-to-opencode-messages", () => {
       });
 
       it("should warn about file parts in assistant messages", () => {
-        const prompt: LanguageModelV3Prompt = [
+        const prompt: LanguageModelV4Prompt = [
           {
             role: "assistant",
             content: [
               {
                 type: "file",
-                data: "test",
+                data: { type: "data", data: "test" },
                 mediaType: "image/png",
               },
             ],
@@ -294,7 +297,7 @@ describe("convert-to-opencode-messages", () => {
 
     describe("tool messages", () => {
       it("should convert tool results as synthetic context", () => {
-        const prompt: LanguageModelV3Prompt = [
+        const prompt: LanguageModelV4Prompt = [
           {
             role: "tool",
             content: [
@@ -324,7 +327,7 @@ describe("convert-to-opencode-messages", () => {
       });
 
       it("should format JSON tool results", () => {
-        const prompt: LanguageModelV3Prompt = [
+        const prompt: LanguageModelV4Prompt = [
           {
             role: "tool",
             content: [
@@ -344,7 +347,7 @@ describe("convert-to-opencode-messages", () => {
       });
 
       it("should format error tool results", () => {
-        const prompt: LanguageModelV3Prompt = [
+        const prompt: LanguageModelV4Prompt = [
           {
             role: "tool",
             content: [
@@ -364,7 +367,7 @@ describe("convert-to-opencode-messages", () => {
       });
 
       it("should skip tool approval responses by default", () => {
-        const prompt: LanguageModelV3Prompt = [
+        const prompt: LanguageModelV4Prompt = [
           {
             role: "tool",
             content: [
@@ -384,7 +387,7 @@ describe("convert-to-opencode-messages", () => {
 
     describe("JSON mode", () => {
       it("should add JSON mode instruction", () => {
-        const prompt: LanguageModelV3Prompt = [
+        const prompt: LanguageModelV4Prompt = [
           {
             role: "user",
             content: [{ type: "text", text: "Give me data" }],
@@ -409,7 +412,7 @@ describe("convert-to-opencode-messages", () => {
           },
         };
 
-        const prompt: LanguageModelV3Prompt = [
+        const prompt: LanguageModelV4Prompt = [
           {
             role: "user",
             content: [{ type: "text", text: "Give me data" }],
@@ -432,13 +435,16 @@ describe("convert-to-opencode-messages", () => {
           error: vi.fn(),
         };
 
-        const prompt: LanguageModelV3Prompt = [
+        const prompt: LanguageModelV4Prompt = [
           {
             role: "user",
             content: [
               {
                 type: "file",
-                data: "https://example.com/image.png",
+                data: {
+                  type: "url",
+                  url: new URL("https://example.com/image.png"),
+                },
                 mediaType: "image/png",
               },
             ],
@@ -451,13 +457,16 @@ describe("convert-to-opencode-messages", () => {
       });
 
       it("should not log when logger is false", () => {
-        const prompt: LanguageModelV3Prompt = [
+        const prompt: LanguageModelV4Prompt = [
           {
             role: "user",
             content: [
               {
                 type: "file",
-                data: "https://example.com/image.png",
+                data: {
+                  type: "url",
+                  url: new URL("https://example.com/image.png"),
+                },
                 mediaType: "image/png",
               },
             ],

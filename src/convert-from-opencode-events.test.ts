@@ -188,6 +188,148 @@ describe("convert-from-opencode-events", () => {
     });
   });
 
+  describe("data envelope tolerance", () => {
+    it("should match sessions from data-envelope part events", () => {
+      const event: EventMessagePartUpdated = {
+        type: "message.part.updated",
+        data: {
+          sessionID: "session-123",
+          part: {
+            id: "part-1",
+            sessionID: "session-123",
+            messageID: "msg-1",
+            type: "text",
+            text: "Hello",
+          } as TextPart,
+        },
+      };
+
+      expect(isEventForSession(event, "session-123")).toBe(true);
+      expect(isEventForSession(event, "session-other")).toBe(false);
+    });
+
+    it("should match sessions from data-envelope session.status events", () => {
+      const event = {
+        type: "session.status",
+        data: {
+          sessionID: "session-123",
+          status: { type: "idle" },
+        },
+      };
+
+      expect(
+        isSessionComplete(event as EventSessionStatus, "session-123"),
+      ).toBe(true);
+    });
+
+    it("should complete sessions from data-envelope session.idle events", () => {
+      const event: EventSessionIdle = {
+        type: "session.idle",
+        data: {
+          sessionID: "session-123",
+        },
+      };
+
+      expect(isSessionComplete(event, "session-123")).toBe(true);
+    });
+
+    it("should emit text parts from data-envelope message.part.updated events", () => {
+      const state = createStreamState();
+      const event: EventMessagePartUpdated = {
+        type: "message.part.updated",
+        data: {
+          sessionID: "session-123",
+          part: {
+            id: "part-1",
+            sessionID: "session-123",
+            messageID: "msg-1",
+            type: "text",
+            text: "Hello",
+          } as TextPart,
+          time: 1234,
+        },
+      };
+
+      const parts = convertEventToStreamParts(event, state);
+      expect(parts).toEqual([
+        { type: "text-start", id: "part-1" },
+        { type: "text-delta", id: "part-1", delta: "Hello" },
+      ]);
+    });
+
+    it("should emit text deltas from data-envelope message.part.delta events", () => {
+      const state = createStreamState();
+      state.reasoningPartId = undefined;
+      state.textPartId = undefined;
+      state.messageRoles.set("msg-1", "assistant");
+      const event: EventMessagePartDelta = {
+        type: "message.part.delta",
+        data: {
+          sessionID: "session-123",
+          messageID: "msg-1",
+          partID: "part-1",
+          field: "text",
+          delta: " world",
+        },
+      };
+
+      const parts = convertEventToStreamParts(event, state);
+      expect(parts).toContainEqual({
+        type: "text-delta",
+        id: "part-1",
+        delta: " world",
+      });
+    });
+
+    it("should track message roles from data-envelope message.updated events", () => {
+      const state = createStreamState();
+      const event: EventMessageUpdated = {
+        type: "message.updated",
+        data: {
+          sessionID: "session-123",
+          info: {
+            id: "msg-1",
+            sessionID: "session-123",
+            role: "assistant",
+          },
+        },
+      };
+
+      convertEventToStreamParts(event, state);
+
+      expect(state.messageRoles.get("msg-1")).toBe("assistant");
+    });
+
+    it("should emit approval requests from data-envelope permission.asked events", () => {
+      const state = createStreamState();
+      const event: EventPermissionAsked = {
+        type: "permission.asked",
+        data: {
+          id: "approval-1",
+          sessionID: "session-123",
+          permission: "bash",
+          patterns: ["npm test"],
+        },
+      };
+
+      const parts = convertEventToStreamParts(event, state);
+      expect(parts).toEqual([
+        {
+          type: "tool-approval-request",
+          approvalId: "approval-1",
+          toolCallId: "approval-1",
+          providerMetadata: {
+            opencode: {
+              sessionId: "session-123",
+              permission: "bash",
+              patterns: ["npm test"],
+            },
+          },
+        },
+      ]);
+    });
+  });
+
   describe("convertEventToStreamParts", () => {
     describe("text parts", () => {
       it("should emit text-start and text-delta for new text", () => {
@@ -1686,7 +1828,7 @@ describe("convert-from-opencode-events", () => {
           {
             type: "file",
             mediaType: "text/plain",
-            data: "SGVsbG8=",
+            data: { type: "data", data: "SGVsbG8=" },
           },
         ]);
       });
@@ -1732,7 +1874,7 @@ describe("convert-from-opencode-events", () => {
           {
             type: "file",
             mediaType: "text/plain",
-            data: "SGVsbG8=",
+            data: { type: "data", data: "SGVsbG8=" },
           },
         ]);
       });

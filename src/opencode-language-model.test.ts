@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { OpencodeLanguageModel } from "./opencode-language-model.js";
 import { OpencodeClientManager } from "./opencode-client-manager.js";
-import type { LanguageModelV3Prompt } from "@ai-sdk/provider";
+import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
 
 // Mock the client manager
 const mockClient = {
@@ -97,8 +97,8 @@ describe("opencode-language-model", () => {
       expect(model.provider).toBe("opencode");
     });
 
-    it("should have specificationVersion v3", () => {
-      expect(model.specificationVersion).toBe("v3");
+    it("should have specificationVersion v4", () => {
+      expect(model.specificationVersion).toBe("v4");
     });
 
     it("should have empty supportedUrls", () => {
@@ -135,7 +135,7 @@ describe("opencode-language-model", () => {
   });
 
   describe("doGenerate", () => {
-    const basicPrompt: LanguageModelV3Prompt = [
+    const basicPrompt: LanguageModelV4Prompt = [
       {
         role: "user",
         content: [{ type: "text", text: "Hello" }],
@@ -264,7 +264,7 @@ describe("opencode-language-model", () => {
     });
 
     it("should handle system messages", async () => {
-      const promptWithSystem: LanguageModelV3Prompt = [
+      const promptWithSystem: LanguageModelV4Prompt = [
         { role: "system", content: "You are helpful." },
         { role: "user", content: [{ type: "text", text: "Hello" }] },
       ];
@@ -539,7 +539,7 @@ describe("opencode-language-model", () => {
     });
 
     it("should apply tool approval responses before prompting", async () => {
-      const promptWithApproval: LanguageModelV3Prompt = [
+      const promptWithApproval: LanguageModelV4Prompt = [
         {
           role: "user",
           content: [{ type: "text", text: "Continue after approval." }],
@@ -571,7 +571,7 @@ describe("opencode-language-model", () => {
     });
 
     it("should not replay already-applied approval responses across turns", async () => {
-      const promptWithApproval: LanguageModelV3Prompt = [
+      const promptWithApproval: LanguageModelV4Prompt = [
         {
           role: "user",
           content: [{ type: "text", text: "Continue after approval." }],
@@ -600,7 +600,7 @@ describe("opencode-language-model", () => {
     });
 
     it("should dedupe duplicate approval responses in a single prompt", async () => {
-      const promptWithDuplicateApprovals: LanguageModelV3Prompt = [
+      const promptWithDuplicateApprovals: LanguageModelV4Prompt = [
         {
           role: "user",
           content: [{ type: "text", text: "Continue after approval." }],
@@ -644,7 +644,7 @@ describe("opencode-language-model", () => {
         settings: { logger },
         clientManager: mockClientManager as unknown as OpencodeClientManager,
       });
-      const promptWithApproval: LanguageModelV3Prompt = [
+      const promptWithApproval: LanguageModelV4Prompt = [
         {
           role: "user",
           content: [{ type: "text", text: "Continue after approval." }],
@@ -722,7 +722,7 @@ describe("opencode-language-model", () => {
   });
 
   describe("doStream", () => {
-    const basicPrompt: LanguageModelV3Prompt = [
+    const basicPrompt: LanguageModelV4Prompt = [
       {
         role: "user",
         content: [{ type: "text", text: "Hello" }],
@@ -958,7 +958,7 @@ describe("opencode-language-model", () => {
     });
 
     it("should subscribe before applying tool approval responses", async () => {
-      const promptWithApproval: LanguageModelV3Prompt = [
+      const promptWithApproval: LanguageModelV4Prompt = [
         {
           role: "user",
           content: [{ type: "text", text: "Continue after approval." }],
@@ -995,7 +995,7 @@ describe("opencode-language-model", () => {
     });
 
     it("should dedupe duplicate approval responses in stream requests", async () => {
-      const promptWithDuplicateApprovals: LanguageModelV3Prompt = [
+      const promptWithDuplicateApprovals: LanguageModelV4Prompt = [
         {
           role: "user",
           content: [{ type: "text", text: "Continue after approval." }],

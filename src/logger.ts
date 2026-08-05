@@ -122,6 +122,7 @@ export function logUnsupportedCallOptions(
     stopSequences?: string[];
     seed?: number;
     maxTokens?: number;
+    reasoning?: string;
   },
 ): string[] {
   const warnings: string[] = [];
@@ -135,6 +136,7 @@ export function logUnsupportedCallOptions(
     { name: "stopSequences", value: options.stopSequences },
     { name: "seed", value: options.seed },
     { name: "maxTokens", value: options.maxTokens },
+    { name: "reasoning", value: options.reasoning },
   ];
 
   for (const param of unsupportedParams) {

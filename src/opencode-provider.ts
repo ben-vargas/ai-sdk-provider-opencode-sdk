@@ -1,4 +1,4 @@
-import type { LanguageModelV3 } from "@ai-sdk/provider";
+import type { LanguageModelV4 } from "@ai-sdk/provider";
 import { NoSuchModelError } from "@ai-sdk/provider";
 import type {
   OpencodeModelId,
@@ -54,7 +54,7 @@ export function createOpencode(
   const createModel = (
     modelId: OpencodeModelId,
     settings?: OpencodeSettings,
-  ): LanguageModelV3 => {
+  ): LanguageModelV4 => {
     // Merge default settings with provided settings
     const mergedSettings = mergeSettings(options?.defaultSettings, settings);
 
@@ -71,7 +71,7 @@ export function createOpencode(
     (
       modelId: OpencodeModelId,
       settings?: OpencodeSettings,
-    ): LanguageModelV3 => {
+    ): LanguageModelV4 => {
       return createModel(modelId, settings);
     },
     {
@@ -79,7 +79,7 @@ export function createOpencode(
       languageModel: (
         modelId: OpencodeModelId,
         settings?: OpencodeSettings,
-      ): LanguageModelV3 => {
+      ): LanguageModelV4 => {
         return createModel(modelId, settings);
       },
 
@@ -87,15 +87,15 @@ export function createOpencode(
       chat: (
         modelId: OpencodeModelId,
         settings?: OpencodeSettings,
-      ): LanguageModelV3 => {
+      ): LanguageModelV4 => {
         return createModel(modelId, settings);
       },
 
       // Provider info
       provider: "opencode" as const,
-      specificationVersion: "v3" as const,
+      specificationVersion: "v4" as const,
 
-      // Required ProviderV3 methods that are not supported
+      // Required ProviderV4 methods that are not supported
       embeddingModel: (modelId: string): never => {
         throw new NoSuchModelError({ modelId, modelType: "embeddingModel" });
       },

@@ -1,13 +1,13 @@
 import type {
   JSONValue,
-  LanguageModelV3,
-  LanguageModelV3CallOptions,
-  LanguageModelV3Content,
-  LanguageModelV3Prompt,
-  LanguageModelV3StreamPart,
-  LanguageModelV3ToolApprovalResponsePart,
-  LanguageModelV3Usage,
-  SharedV3Warning,
+  LanguageModelV4,
+  LanguageModelV4CallOptions,
+  LanguageModelV4Content,
+  LanguageModelV4Prompt,
+  LanguageModelV4StreamPart,
+  LanguageModelV4ToolApprovalResponsePart,
+  LanguageModelV4Usage,
+  SharedV4Warning,
 } from "@ai-sdk/provider";
 import { InvalidArgumentError } from "@ai-sdk/provider";
 import type {
@@ -65,9 +65,9 @@ interface ApprovalClient {
 }
 
 /**
- * Convert OpenCode token usage to the AI SDK v6 usage shape.
+ * Convert OpenCode token usage to the AI SDK v7 usage shape.
  */
-function convertUsage(usage: StreamingUsage): LanguageModelV3Usage {
+function convertUsage(usage: StreamingUsage): LanguageModelV4Usage {
   const inputTokensTotal =
     usage.inputTokens + usage.cachedInputTokens + usage.cachedWriteTokens;
 
@@ -116,7 +116,7 @@ function extractSdkResult(result: unknown): {
 }
 
 function getMessageIDFromProviderOptions(
-  options: LanguageModelV3CallOptions,
+  options: LanguageModelV4CallOptions,
 ): string | undefined {
   const messageID = options.providerOptions?.opencode?.messageID;
 
@@ -142,7 +142,7 @@ function getMessageIDFromProviderOptions(
 }
 
 function extractToolApprovalResponses(
-  prompt: LanguageModelV3Prompt,
+  prompt: LanguageModelV4Prompt,
 ): ToolApprovalResponse[] {
   const responses: ToolApprovalResponse[] = [];
 
@@ -156,7 +156,7 @@ function extractToolApprovalResponses(
         continue;
       }
 
-      const response = part as LanguageModelV3ToolApprovalResponsePart;
+      const response = part as LanguageModelV4ToolApprovalResponsePart;
       responses.push({
         approvalId: response.approvalId,
         approved: response.approved,
@@ -169,10 +169,10 @@ function extractToolApprovalResponses(
 }
 
 /**
- * OpenCode Language Model implementation of LanguageModelV3.
+ * OpenCode Language Model implementation of LanguageModelV4.
  */
-export class OpencodeLanguageModel implements LanguageModelV3 {
-  readonly specificationVersion = "v3" as const;
+export class OpencodeLanguageModel implements LanguageModelV4 {
+  readonly specificationVersion = "v4" as const;
 
   readonly modelId: string;
   readonly provider = "opencode";
@@ -217,8 +217,8 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
   /**
    * Non-streaming generation.
    */
-  async doGenerate(options: LanguageModelV3CallOptions) {
-    const warnings: SharedV3Warning[] = [];
+  async doGenerate(options: LanguageModelV4CallOptions) {
+    const warnings: SharedV4Warning[] = [];
 
     const unsupportedWarnings = logUnsupportedCallOptions(this.logger, {
       temperature: options.temperature,
@@ -229,6 +229,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
       stopSequences: options.stopSequences,
       seed: options.seed,
       maxTokens: options.maxOutputTokens,
+      reasoning: options.reasoning,
     });
 
     for (const warning of unsupportedWarnings) {
@@ -381,8 +382,8 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
   /**
    * Streaming generation.
    */
-  async doStream(options: LanguageModelV3CallOptions): Promise<{
-    stream: ReadableStream<LanguageModelV3StreamPart>;
+  async doStream(options: LanguageModelV4CallOptions): Promise<{
+    stream: ReadableStream<LanguageModelV4StreamPart>;
     request?: { body?: unknown };
     response?: { headers?: Record<string, string> };
   }> {
@@ -397,6 +398,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
       stopSequences: options.stopSequences,
       seed: options.seed,
       maxTokens: options.maxOutputTokens,
+      reasoning: options.reasoning,
     });
     warnings.push(...unsupportedWarnings);
 
@@ -438,7 +440,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
     const directory = this.getRequestDirectory();
     const logger = this.logger;
 
-    const stream = new ReadableStream<LanguageModelV3StreamPart>({
+    const stream = new ReadableStream<LanguageModelV4StreamPart>({
       start: async (controller) => {
         const streamWarnings = [...warnings];
         let streamStartEmitted = false;
@@ -612,9 +614,14 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
               }
 
               if (event.type === "message.updated") {
-                const messageEvent = event as { properties: { info: Message } };
-                if (messageEvent.properties.info.role === "assistant") {
-                  lastMessageInfo = messageEvent.properties.info;
+                const messageEvent = event as {
+                  properties?: { info: Message };
+                  data?: { info: Message };
+                };
+                const messageInfo =
+                  messageEvent.properties?.info ?? messageEvent.data?.info;
+                if (messageInfo?.role === "assistant") {
+                  lastMessageInfo = messageInfo;
                 }
               }
 
@@ -668,7 +675,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
     return this.settings.directory ?? this.settings.cwd;
   }
 
-  private getResponseFormat(options: LanguageModelV3CallOptions):
+  private getResponseFormat(options: LanguageModelV4CallOptions):
     | {
         type: "json_schema";
         schema: Record<string, unknown>;
@@ -698,7 +705,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
       | { type: "file"; mime: string; url: string; filename?: string }
     >,
     systemPrompt: string | undefined,
-    options: LanguageModelV3CallOptions,
+    options: LanguageModelV4CallOptions,
     messageID: string | undefined,
   ) {
     const format = this.getResponseFormat(options);
@@ -872,8 +879,8 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
   /**
    * Extract content in AI SDK format from OpenCode parts.
    */
-  private extractContentFromParts(parts: Part[]): LanguageModelV3Content[] {
-    const content: LanguageModelV3Content[] = [];
+  private extractContentFromParts(parts: Part[]): LanguageModelV4Content[] {
+    const content: LanguageModelV4Content[] = [];
 
     for (const part of parts) {
       if (
@@ -917,8 +924,8 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
     return content;
   }
 
-  private extractToolParts(part: Part): LanguageModelV3Content[] {
-    const toolParts: LanguageModelV3Content[] = [];
+  private extractToolParts(part: Part): LanguageModelV4Content[] {
+    const toolParts: LanguageModelV4Content[] = [];
     const toolPart = part as {
       callID: string;
       tool: string;
@@ -1013,7 +1020,7 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
     return toolParts;
   }
 
-  private convertFilePartToContent(part: Part): LanguageModelV3Content[] {
+  private convertFilePartToContent(part: Part): LanguageModelV4Content[] {
     const filePart = part as {
       id?: string;
       mime?: string;
@@ -1039,13 +1046,13 @@ export class OpencodeLanguageModel implements LanguageModelV3 {
       return [];
     }
 
-    const content: LanguageModelV3Content[] = [];
+    const content: LanguageModelV4Content[] = [];
 
     if (plan.primary.type === "file") {
       content.push({
         type: "file",
         mediaType: plan.primary.mediaType,
-        data: plan.primary.data,
+        data: { type: "data", data: plan.primary.data },
         ...(plan.sourceMetadata
           ? {
               providerMetadata: {

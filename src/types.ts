@@ -1,4 +1,4 @@
-import type { LanguageModelV3, ProviderV3 } from "@ai-sdk/provider";
+import type { LanguageModelV4, ProviderV4 } from "@ai-sdk/provider";
 
 /**
  * Model ID format for OpenCode provider.
@@ -208,13 +208,13 @@ export interface OpencodeProviderSettings {
 /**
  * Provider interface for OpenCode.
  */
-export interface OpencodeProvider extends ProviderV3 {
+export interface OpencodeProvider extends ProviderV4 {
   /**
    * Create a language model instance.
    * @param modelId - Model ID in format "providerID/modelID" or "modelID"
    * @param settings - Optional settings for this model instance
    */
-  (modelId: OpencodeModelId, settings?: OpencodeSettings): LanguageModelV3;
+  (modelId: OpencodeModelId, settings?: OpencodeSettings): LanguageModelV4;
 
   /**
    * Create a language model instance.
@@ -224,14 +224,14 @@ export interface OpencodeProvider extends ProviderV3 {
   languageModel(
     modelId: OpencodeModelId,
     settings?: OpencodeSettings,
-  ): LanguageModelV3;
+  ): LanguageModelV4;
 
   /**
    * Alias for languageModel().
    * @param modelId - Model ID in format "providerID/modelID" or "modelID"
    * @param settings - Optional settings for this model instance
    */
-  chat(modelId: OpencodeModelId, settings?: OpencodeSettings): LanguageModelV3;
+  chat(modelId: OpencodeModelId, settings?: OpencodeSettings): LanguageModelV4;
 
   /**
    * Dispose provider resources (for example managed OpenCode server processes).
