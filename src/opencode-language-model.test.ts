@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { OpencodeLanguageModel } from "./opencode-language-model.js";
 import { OpencodeClientManager } from "./opencode-client-manager.js";
+import type { OpencodeSettings } from "./types.js";
 import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
 
 // Mock the client manager
@@ -67,6 +68,14 @@ const mockClient = {
   },
   permission: {
     reply: vi.fn().mockResolvedValue({
+      data: true,
+    }),
+  },
+  question: {
+    reply: vi.fn().mockResolvedValue({
+      data: true,
+    }),
+    reject: vi.fn().mockResolvedValue({
       data: true,
     }),
   },
@@ -1443,6 +1452,461 @@ describe("opencode-language-model", () => {
         | undefined;
       expect(promptOptions?.signal).toBeInstanceOf(AbortSignal);
       expect(promptOptions?.signal?.aborted).toBe(true);
+    });
+  });
+
+  describe("question handling", () => {
+    const basicPrompt: LanguageModelV4Prompt = [
+      {
+        role: "user",
+        content: [{ type: "text", text: "Hello" }],
+      },
+    ];
+
+    const questionPayload = {
+      id: "question-1",
+      sessionID: "session-123",
+      questions: [
+        {
+          header: "Deploy",
+          question: "Pick deployment strategy",
+          options: [
+            { label: "Blue/Green", description: "Safer rollout" },
+            { label: "In-place", description: "Faster" },
+          ],
+        },
+      ],
+      tool: { messageID: "msg-1", callID: "call-1" },
+    };
+
+    const questionAskedEvent = (overrides: Record<string, unknown> = {}) => ({
+      type: "question.asked",
+      properties: { ...questionPayload, ...overrides },
+    });
+
+    const sessionIdleEvent = {
+      type: "session.idle",
+      properties: { sessionID: "session-123" },
+    };
+
+    const eventStreamOf = (...events: unknown[]) => ({
+      stream: (async function* () {
+        for (const event of events) {
+          yield event;
+        }
+      })(),
+    });
+
+    const createModel = (settings: OpencodeSettings) =>
+      new OpencodeLanguageModel({
+        modelId: "anthropic/claude-3-5-sonnet-20241022",
+        settings,
+        clientManager: mockClientManager as unknown as OpencodeClientManager,
+      });
+
+    const readAllParts = async (stream: ReadableStream<unknown>) => {
+      const parts: unknown[] = [];
+      const reader = stream.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        parts.push(value);
+      }
+      return parts;
+    };
+
+    describe("doStream", () => {
+      it("should reply with callback answers for question.asked events", async () => {
+        const onQuestion = vi.fn().mockResolvedValue({
+          type: "answer",
+          answers: [["Blue/Green"]],
+        });
+        const questionModel = createModel({
+          onQuestion,
+          directory: "/workspace",
+        });
+
+        mockClient.event.subscribe.mockResolvedValueOnce(
+          eventStreamOf(questionAskedEvent(), sessionIdleEvent),
+        );
+
+        const result = await questionModel.doStream({ prompt: basicPrompt });
+        const parts = await readAllParts(result.stream);
+
+        expect(onQuestion).toHaveBeenCalledWith(
+          expect.objectContaining({
+            id: "question-1",
+            sessionID: "session-123",
+            questions: questionPayload.questions,
+            tool: questionPayload.tool,
+          }),
+        );
+        expect(mockClient.question.reply).toHaveBeenCalledWith({
+          requestID: "question-1",
+          answers: [["Blue/Green"]],
+          directory: "/workspace",
+        });
+        expect(mockClient.question.reject).not.toHaveBeenCalled();
+        expect(parts.some((part: any) => part.type === "error")).toBe(false);
+        expect(parts.some((part: any) => part.type === "finish")).toBe(true);
+      });
+
+      it("should reject the question when the callback returns a rejection", async () => {
+        const onQuestion = vi.fn().mockResolvedValue({ type: "reject" });
+        const questionModel = createModel({ onQuestion });
+
+        mockClient.event.subscribe.mockResolvedValueOnce(
+          eventStreamOf(questionAskedEvent(), sessionIdleEvent),
+        );
+
+        const result = await questionModel.doStream({ prompt: basicPrompt });
+        await readAllParts(result.stream);
+
+        expect(mockClient.question.reject).toHaveBeenCalledWith({
+          requestID: "question-1",
+        });
+        expect(mockClient.question.reply).not.toHaveBeenCalled();
+      });
+
+      it("should fall back to rejecting when the callback throws", async () => {
+        const logger = { warn: vi.fn(), error: vi.fn() };
+        const onQuestion = vi
+          .fn()
+          .mockRejectedValue(new Error("handler exploded"));
+        const questionModel = createModel({ onQuestion, logger });
+
+        mockClient.event.subscribe.mockResolvedValueOnce(
+          eventStreamOf(questionAskedEvent(), sessionIdleEvent),
+        );
+
+        const result = await questionModel.doStream({ prompt: basicPrompt });
+        const parts = await readAllParts(result.stream);
+
+        expect(logger.warn).toHaveBeenCalledWith(
+          expect.stringContaining(
+            "Question handler failed for question-1: handler exploded",
+          ),
+        );
+        expect(mockClient.question.reject).toHaveBeenCalledWith({
+          requestID: "question-1",
+        });
+        expect(mockClient.question.reply).not.toHaveBeenCalled();
+        expect(parts.some((part: any) => part.type === "error")).toBe(false);
+      });
+
+      it("should reject questions by default when no handler is configured", async () => {
+        const logger = { warn: vi.fn(), error: vi.fn() };
+        const questionModel = createModel({ logger });
+
+        mockClient.event.subscribe.mockResolvedValueOnce(
+          eventStreamOf(questionAskedEvent(), sessionIdleEvent),
+        );
+
+        const result = await questionModel.doStream({ prompt: basicPrompt });
+        const parts = await readAllParts(result.stream);
+
+        expect(logger.warn).toHaveBeenCalledWith(
+          expect.stringContaining(
+            "No onQuestion handler configured; rejecting OpenCode question question-1",
+          ),
+        );
+        expect(mockClient.question.reject).toHaveBeenCalledWith({
+          requestID: "question-1",
+        });
+        expect(parts.some((part: any) => part.type === "error")).toBe(false);
+        expect(parts.some((part: any) => part.type === "finish")).toBe(true);
+      });
+
+      it('should keep the legacy stream error behavior with questionPolicy "wait"', async () => {
+        const questionModel = createModel({ questionPolicy: "wait" });
+
+        mockClient.event.subscribe.mockResolvedValueOnce(
+          eventStreamOf(questionAskedEvent(), sessionIdleEvent),
+        );
+
+        const result = await questionModel.doStream({ prompt: basicPrompt });
+        const parts = await readAllParts(result.stream);
+
+        expect(mockClient.question.reply).not.toHaveBeenCalled();
+        expect(mockClient.question.reject).not.toHaveBeenCalled();
+
+        const errorPart = parts.find((part: any) => part.type === "error") as
+          | { error?: unknown }
+          | undefined;
+        expect(errorPart).toBeDefined();
+        expect(String(errorPart?.error)).toContain(
+          "cannot answer interactive questions automatically",
+        );
+        expect(String(errorPart?.error)).toContain("question-1");
+      });
+
+      it("should warn and continue when question.reply resolves a fields-style { error } result", async () => {
+        const logger = { warn: vi.fn(), error: vi.fn() };
+        const onQuestion = vi.fn().mockResolvedValue({
+          type: "answer",
+          answers: [["Blue/Green"]],
+        });
+        const questionModel = createModel({ onQuestion, logger });
+
+        mockClient.question.reply.mockResolvedValueOnce({
+          error: { message: "unknown question request" },
+        });
+        mockClient.event.subscribe.mockResolvedValueOnce(
+          eventStreamOf(questionAskedEvent(), sessionIdleEvent),
+        );
+
+        const result = await questionModel.doStream({ prompt: basicPrompt });
+        const parts = await readAllParts(result.stream);
+
+        expect(logger.warn).toHaveBeenCalledWith(
+          expect.stringContaining(
+            "Failed to answer OpenCode question question-1: unknown question request",
+          ),
+        );
+        // The stream must keep going despite the failed reply.
+        expect(parts.some((part: any) => part.type === "finish")).toBe(true);
+      });
+
+      it("should retry a failed rejection when a duplicate event arrives", async () => {
+        const logger = { warn: vi.fn(), error: vi.fn() };
+        const questionModel = createModel({ logger });
+
+        mockClient.question.reject.mockResolvedValueOnce({
+          error: { message: "temporarily unavailable" },
+        });
+        mockClient.event.subscribe.mockResolvedValueOnce(
+          eventStreamOf(
+            questionAskedEvent(),
+            questionAskedEvent(),
+            sessionIdleEvent,
+          ),
+        );
+
+        const result = await questionModel.doStream({ prompt: basicPrompt });
+        await readAllParts(result.stream);
+
+        expect(logger.warn).toHaveBeenCalledWith(
+          expect.stringContaining(
+            "Failed to reject OpenCode question question-1: temporarily unavailable",
+          ),
+        );
+        // The failed rejection must not mark the question as handled, so the
+        // duplicate event retries it.
+        expect(mockClient.question.reject).toHaveBeenCalledTimes(2);
+      });
+
+      it("should dedupe duplicate question.asked events", async () => {
+        const onQuestion = vi.fn().mockResolvedValue({
+          type: "answer",
+          answers: [["Blue/Green"]],
+        });
+        const questionModel = createModel({ onQuestion });
+
+        mockClient.event.subscribe.mockResolvedValueOnce(
+          eventStreamOf(
+            questionAskedEvent(),
+            questionAskedEvent(),
+            sessionIdleEvent,
+          ),
+        );
+
+        const result = await questionModel.doStream({ prompt: basicPrompt });
+        await readAllParts(result.stream);
+
+        expect(onQuestion).toHaveBeenCalledTimes(1);
+        expect(mockClient.question.reply).toHaveBeenCalledTimes(1);
+      });
+
+      it("should handle question payloads in the data envelope", async () => {
+        const onQuestion = vi.fn().mockResolvedValue({
+          type: "answer",
+          answers: [["In-place"]],
+        });
+        const questionModel = createModel({ onQuestion });
+
+        mockClient.event.subscribe.mockResolvedValueOnce(
+          eventStreamOf(
+            { type: "question.asked", data: { ...questionPayload } },
+            { type: "session.idle", data: { sessionID: "session-123" } },
+          ),
+        );
+
+        const result = await questionModel.doStream({ prompt: basicPrompt });
+        await readAllParts(result.stream);
+
+        expect(onQuestion).toHaveBeenCalledWith(
+          expect.objectContaining({ id: "question-1" }),
+        );
+        expect(mockClient.question.reply).toHaveBeenCalledWith({
+          requestID: "question-1",
+          answers: [["In-place"]],
+        });
+      });
+
+      it("should ignore questions for other sessions", async () => {
+        const onQuestion = vi.fn();
+        const questionModel = createModel({ onQuestion });
+
+        mockClient.event.subscribe.mockResolvedValueOnce(
+          eventStreamOf(
+            questionAskedEvent({
+              id: "question-other",
+              sessionID: "other-session",
+            }),
+            sessionIdleEvent,
+          ),
+        );
+
+        const result = await questionModel.doStream({ prompt: basicPrompt });
+        await readAllParts(result.stream);
+
+        expect(onQuestion).not.toHaveBeenCalled();
+        expect(mockClient.question.reply).not.toHaveBeenCalled();
+        expect(mockClient.question.reject).not.toHaveBeenCalled();
+      });
+    });
+
+    describe("doGenerate", () => {
+      const promptResult = {
+        data: {
+          info: {
+            id: "msg-1",
+            sessionID: "session-123",
+            role: "assistant",
+            finish: "end_turn",
+          },
+          parts: [{ id: "part-1", type: "text", text: "Hello, world!" }],
+        },
+      };
+
+      it("should answer questions from the event subscription while the prompt is blocked", async () => {
+        const onQuestion = vi.fn().mockResolvedValue({
+          type: "answer",
+          answers: [["Blue/Green"]],
+        });
+        const questionModel = createModel({ onQuestion });
+
+        mockClient.event.subscribe.mockResolvedValueOnce(
+          eventStreamOf(questionAskedEvent()),
+        );
+
+        // Emulate the server: session.prompt blocks until the question is
+        // answered.
+        let resolvePrompt: (() => void) | undefined;
+        mockClient.session.prompt.mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolvePrompt = () => resolve(promptResult);
+            }),
+        );
+        mockClient.question.reply.mockImplementationOnce(() => {
+          resolvePrompt?.();
+          return Promise.resolve({ data: true });
+        });
+
+        const result = await questionModel.doGenerate({ prompt: basicPrompt });
+
+        expect(onQuestion).toHaveBeenCalledWith(
+          expect.objectContaining({ id: "question-1" }),
+        );
+        expect(mockClient.question.reply).toHaveBeenCalledWith({
+          requestID: "question-1",
+          answers: [["Blue/Green"]],
+        });
+        expect(result.content[0]).toMatchObject({
+          type: "text",
+          text: "Hello, world!",
+        });
+      });
+
+      it("should reject questions by default on the doGenerate path", async () => {
+        const logger = { warn: vi.fn(), error: vi.fn() };
+        const questionModel = createModel({ logger });
+
+        mockClient.event.subscribe.mockResolvedValueOnce(
+          eventStreamOf(questionAskedEvent()),
+        );
+
+        let resolvePrompt: (() => void) | undefined;
+        mockClient.session.prompt.mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolvePrompt = () => resolve(promptResult);
+            }),
+        );
+        mockClient.question.reject.mockImplementationOnce(() => {
+          resolvePrompt?.();
+          return Promise.resolve({ data: true });
+        });
+
+        const result = await questionModel.doGenerate({ prompt: basicPrompt });
+
+        expect(logger.warn).toHaveBeenCalledWith(
+          expect.stringContaining(
+            "No onQuestion handler configured; rejecting OpenCode question question-1",
+          ),
+        );
+        expect(mockClient.question.reject).toHaveBeenCalledWith({
+          requestID: "question-1",
+        });
+        expect(result.content[0]).toMatchObject({
+          type: "text",
+          text: "Hello, world!",
+        });
+      });
+
+      it("should proceed when the question subscription fails", async () => {
+        const logger = { warn: vi.fn(), error: vi.fn() };
+        const questionModel = createModel({ logger });
+
+        mockClient.event.subscribe.mockRejectedValueOnce(
+          new Error("subscribe failed"),
+        );
+
+        const result = await questionModel.doGenerate({ prompt: basicPrompt });
+
+        expect(logger.warn).toHaveBeenCalledWith(
+          expect.stringContaining(
+            "Question event subscription failed: subscribe failed",
+          ),
+        );
+        expect(result.content[0]).toMatchObject({
+          type: "text",
+          text: "Hello, world!",
+        });
+      });
+
+      it("should abort the question subscription when the prompt settles", async () => {
+        let subscribeSignal: AbortSignal | undefined;
+        mockClient.event.subscribe.mockImplementationOnce(
+          (_params: unknown, options?: { signal?: AbortSignal }) => {
+            subscribeSignal = options?.signal;
+            return Promise.resolve(eventStreamOf());
+          },
+        );
+        const unregister = vi.fn();
+        mockClientManager.registerEventSubscription.mockReturnValueOnce(
+          unregister,
+        );
+
+        const questionModel = createModel({});
+        await questionModel.doGenerate({ prompt: basicPrompt });
+
+        expect(subscribeSignal).toBeInstanceOf(AbortSignal);
+        expect(subscribeSignal?.aborted).toBe(true);
+        expect(unregister).toHaveBeenCalled();
+      });
+
+      it('should not subscribe to events in "wait" mode without a handler', async () => {
+        const questionModel = createModel({ questionPolicy: "wait" });
+
+        await questionModel.doGenerate({ prompt: basicPrompt });
+
+        expect(mockClient.event.subscribe).not.toHaveBeenCalled();
+        expect(
+          mockClientManager.registerEventSubscription,
+        ).not.toHaveBeenCalled();
+      });
     });
   });
 

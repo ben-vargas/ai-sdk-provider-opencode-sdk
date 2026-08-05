@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Interactive question handling** ([#15](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/issues/15)) - New `onQuestion` model setting: when OpenCode's question tool fires a `question.asked` event, the provider invokes the callback with the question request (`id`, `sessionID`, `questions`, `tool`) and forwards the returned `{ type: "answer", answers }` via `question.reply` (one `string[]` per question) or `{ type: "reject" }` via `question.reject`, passing the configured `directory` like other client calls. A new `questionPolicy` setting (`"reject"` default, `"wait"`) controls what happens when no handler is set. The `OpencodeQuestionRequest` / `OpencodeQuestionResponse` types are exported, and duplicate `question.asked` events are deduped by question id. `doGenerate` watches for questions on a temporary event subscription while `session.prompt` is in flight, so non-streaming calls no longer deadlock on questions. New example: `examples/question-handling.ts`.
+
+### Changed
+
+- **Unanswered questions are rejected by default** (fixes [#15](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/issues/15)) - Previously a `question.asked` event only produced a stream `error` part ("cannot answer interactive questions automatically") and generation hung until the question was answered in OpenCode directly. With no `onQuestion` handler the provider now rejects the question so the session unblocks; set `questionPolicy: "wait"` to restore the legacy behavior. Callback failures fall back to rejection with a warning, reply/reject API errors (including fields-style `{ error }` results) are logged without crashing the stream, and a failed rejection is not marked as handled so a duplicate event retries it.
+
 ## [4.0.0] - 2026-08-04
 
 ### Changed

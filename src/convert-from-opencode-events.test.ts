@@ -1804,6 +1804,90 @@ describe("convert-from-opencode-events", () => {
         const parts2 = convertEventToStreamParts(event, state, logger);
         expect(parts2).toHaveLength(0);
       });
+
+      it('should emit the legacy error in "wait" question handling mode', () => {
+        const state = createStreamState("wait");
+
+        const event: EventQuestionAsked = {
+          type: "question.asked",
+          properties: {
+            id: "question-1",
+            sessionID: "session-123",
+            questions: [
+              {
+                header: "Deploy",
+                question: "Pick deployment strategy",
+                options: [{ label: "Blue/Green", description: "Safer" }],
+              },
+            ],
+          },
+        };
+
+        const parts = convertEventToStreamParts(event, state);
+        expect(parts).toHaveLength(1);
+        expect(parts[0]).toMatchObject({ type: "error" });
+        expect(String((parts[0] as { error: unknown }).error)).toContain(
+          "question-1",
+        );
+      });
+
+      it('should emit nothing in "external" question handling mode', () => {
+        const state = createStreamState("external");
+        const logger: Logger = {
+          warn: vi.fn(),
+          error: vi.fn(),
+          debug: vi.fn(),
+        };
+
+        const event: EventQuestionAsked = {
+          type: "question.asked",
+          properties: {
+            id: "question-1",
+            sessionID: "session-123",
+            questions: [
+              {
+                header: "Deploy",
+                question: "Pick deployment strategy",
+                options: [{ label: "Blue/Green", description: "Safer" }],
+              },
+            ],
+          },
+        };
+
+        // The language model layer replies out-of-band; the converter must
+        // stay silent and leave dedupe to the caller.
+        const parts = convertEventToStreamParts(event, state, logger);
+        expect(parts).toHaveLength(0);
+        expect(logger.warn).not.toHaveBeenCalled();
+        expect(state.questionRequests.size).toBe(0);
+      });
+
+      it("should read question payloads from the data envelope", () => {
+        const state = createStreamState();
+
+        const event: EventQuestionAsked = {
+          type: "question.asked",
+          data: {
+            id: "question-1",
+            sessionID: "session-123",
+            questions: [
+              {
+                header: "Deploy",
+                question: "Pick deployment strategy",
+                options: [{ label: "Blue/Green", description: "Safer" }],
+              },
+            ],
+          },
+        };
+
+        const parts = convertEventToStreamParts(event, state);
+        expect(parts).toHaveLength(1);
+        expect(parts[0]).toMatchObject({ type: "error" });
+        expect(String((parts[0] as { error: unknown }).error)).toContain(
+          "question-1",
+        );
+        expect(state.questionRequests.has("question-1")).toBe(true);
+      });
     });
 
     describe("file parts", () => {
