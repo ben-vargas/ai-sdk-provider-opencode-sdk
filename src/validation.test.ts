@@ -6,7 +6,7 @@ import {
   isValidSessionId,
   mergeSettings,
 } from "./validation.js";
-import type { Logger } from "./types.js";
+import type { Logger, OpencodeSettings } from "./types.js";
 
 describe("validation", () => {
   describe("validateSettings", () => {
@@ -67,6 +67,37 @@ describe("validation", () => {
 
       validateSettings(settings, logger);
       expect(logger.warn).toHaveBeenCalled();
+    });
+
+    it("should accept onQuestion and questionPolicy settings", () => {
+      const settings: OpencodeSettings = {
+        onQuestion: () => ({ type: "reject" }),
+        questionPolicy: "wait",
+      };
+
+      const result = validateSettings(settings);
+      expect(result.value).toEqual(settings);
+      expect(result.warnings).toHaveLength(0);
+    });
+
+    it("should warn about invalid questionPolicy values", () => {
+      const settings = {
+        questionPolicy: "ignore",
+      } as unknown as OpencodeSettings;
+
+      const result = validateSettings(settings);
+      expect(result.warnings.some((w) => w.includes("questionPolicy"))).toBe(
+        true,
+      );
+    });
+
+    it("should warn about non-function onQuestion values", () => {
+      const settings = {
+        onQuestion: "not a function",
+      } as unknown as OpencodeSettings;
+
+      const result = validateSettings(settings);
+      expect(result.warnings.some((w) => w.includes("onQuestion"))).toBe(true);
     });
   });
 

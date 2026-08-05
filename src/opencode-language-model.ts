@@ -12,6 +12,8 @@ import type {
 import { InvalidArgumentError } from "@ai-sdk/provider";
 import type {
   Logger,
+  OpencodeQuestionRequest,
+  OpencodeQuestionResponse,
   OpencodeSettings,
   ParsedModelId,
   StreamingUsage,
@@ -24,10 +26,13 @@ import {
   createFinishParts,
   createStreamStartPart,
   hasCompletedStructuredOutput,
+  getEventPayload,
   isEventForSession,
   isSessionComplete,
   STRUCTURED_OUTPUT_TOOL,
+  type EventQuestionAsked,
   type Message,
+  type OpencodeEvent,
   type Part,
 } from "./convert-from-opencode-events.js";
 import {
@@ -62,6 +67,52 @@ interface ApprovalClient {
       directory?: string;
     }) => Promise<unknown> | unknown;
   };
+}
+
+interface QuestionClient {
+  question?: {
+    reply?: (parameters: {
+      requestID: string;
+      answers: string[][];
+      directory?: string;
+    }) => Promise<unknown> | unknown;
+    reject?: (parameters: {
+      requestID: string;
+      directory?: string;
+    }) => Promise<unknown> | unknown;
+  };
+}
+
+// Deliberate memory-bound trade-off: once this cap is exceeded, the oldest
+// handled question ids are pruned, so a duplicate event arriving 1000+
+// questions later may retrigger a reply. The server refuses that reply as
+// stale (warn-logged), so the cost is a spurious warning, not a bad answer.
+const MAX_HANDLED_QUESTION_REQUESTS = 1_000;
+
+/**
+ * Validate an onQuestion callback result at runtime. Plain-JS callers can
+ * return undefined or a malformed object; treating that like a handler throw
+ * (warn + reject fallback) keeps the stream alive.
+ */
+function isQuestionResponse(value: unknown): value is OpencodeQuestionResponse {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const candidate = value as { type?: unknown; answers?: unknown };
+  if (candidate.type === "reject") {
+    return true;
+  }
+
+  return (
+    candidate.type === "answer" &&
+    Array.isArray(candidate.answers) &&
+    candidate.answers.every(
+      (answer) =>
+        Array.isArray(answer) &&
+        answer.every((entry) => typeof entry === "string"),
+    )
+  );
 }
 
 /**
@@ -189,6 +240,15 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
   private sessionId: string | undefined;
   private sessionInitPromise: Promise<string> | null = null;
   private repliedApprovalIdsBySession = new Map<string, Set<string>>();
+  // Shared across every generation call on this model so separate event
+  // subscriptions cannot answer the same broadcast question twice. Only
+  // terminally handled questions are recorded here; retryable failures are
+  // never marked so a duplicate event can retry.
+  private handledQuestionRequests = new Set<string>();
+  // In-flight response attempts keyed by question id. Duplicate events await
+  // the active attempt and retry themselves when it resolves false (a
+  // retryable reject-fallback failure).
+  private inFlightQuestionRequests = new Map<string, Promise<boolean>>();
   private parsedModelId: ParsedModelId;
 
   constructor(options: {
@@ -292,9 +352,87 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         messageID,
       );
 
+      const questionAbortController = new AbortController();
+      let unregisterQuestionSubscription = () => {};
+      const directory = this.getRequestDirectory();
+
+      // session.prompt blocks server-side while a question is pending, so
+      // watch for question.asked events on a temporary subscription and apply
+      // the callback/policy logic out-of-band. In wait mode without a handler
+      // there is nothing to do, so keep the legacy behavior of no extra
+      // subscription.
+      if (this.settings.onQuestion || this.settings.questionPolicy !== "wait") {
+        unregisterQuestionSubscription =
+          this.clientManager.registerEventSubscription(questionAbortController);
+
+        // A caller abort must always win during subscription setup: pass a
+        // combined signal to the subscribe call and race the await against
+        // the caller's abort so a stalled subscribe cannot hang doGenerate.
+        const callerAbortSignal = options.abortSignal;
+        const subscribeSignal = callerAbortSignal
+          ? AbortSignal.any([questionAbortController.signal, callerAbortSignal])
+          : questionAbortController.signal;
+        let removeSetupAbortListener = () => {};
+
+        try {
+          const subscribePromise = client.event.subscribe(
+            directory ? { directory } : undefined,
+            { signal: subscribeSignal },
+          );
+
+          const eventsResult = callerAbortSignal
+            ? await Promise.race([
+                subscribePromise,
+                new Promise<never>((_, reject) => {
+                  const onAbort = () => {
+                    const abortError = new Error("Request aborted");
+                    abortError.name = "AbortError";
+                    reject(abortError);
+                  };
+                  if (callerAbortSignal.aborted) {
+                    onAbort();
+                    return;
+                  }
+                  callerAbortSignal.addEventListener("abort", onAbort, {
+                    once: true,
+                  });
+                  removeSetupAbortListener = () =>
+                    callerAbortSignal.removeEventListener("abort", onAbort);
+                }),
+              ])
+            : await subscribePromise;
+
+          if (!eventsResult.stream) {
+            throw new Error("Failed to subscribe to events");
+          }
+
+          void this.watchForQuestions(
+            client,
+            sessionId,
+            eventsResult.stream,
+            questionAbortController.signal,
+            options.abortSignal,
+          );
+        } catch (error) {
+          // Setup aborted by the caller: surface AbortError like the prompt
+          // path instead of proceeding into a doomed prompt.
+          if (callerAbortSignal?.aborted) {
+            questionAbortController.abort();
+            unregisterQuestionSubscription();
+            const abortError = new Error("Request aborted");
+            abortError.name = "AbortError";
+            throw abortError;
+          }
+          this.logger.warn(
+            `Question event subscription failed: ${extractErrorMessage(error)}`,
+          );
+        } finally {
+          removeSetupAbortListener();
+        }
+      }
+
       const abortSignal = options.abortSignal;
       const abortServerSession = async () => {
-        const directory = this.getRequestDirectory();
         try {
           await client.session.abort({
             sessionID: sessionId,
@@ -307,16 +445,21 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
 
       let result: unknown;
       try {
-        result = abortSignal
-          ? await client.session.prompt(requestBody, { signal: abortSignal })
-          : await client.session.prompt(requestBody);
-      } catch (error) {
-        // Clients configured with throwOnError reject on fetch abort instead
-        // of resolving { error }; still stop server-side generation.
-        if (isAbortError(error) || abortSignal?.aborted) {
-          await abortServerSession();
+        try {
+          result = abortSignal
+            ? await client.session.prompt(requestBody, { signal: abortSignal })
+            : await client.session.prompt(requestBody);
+        } catch (error) {
+          // Clients configured with throwOnError reject on fetch abort instead
+          // of resolving { error }; still stop server-side generation.
+          if (isAbortError(error) || abortSignal?.aborted) {
+            await abortServerSession();
+          }
+          throw error;
         }
-        throw error;
+      } finally {
+        questionAbortController.abort();
+        unregisterQuestionSubscription();
       }
 
       const { data, error: responseError } = extractSdkResult(result);
@@ -540,7 +683,11 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
               },
             );
 
-          const state = createStreamState();
+          const state = createStreamState(
+            !this.settings.onQuestion && this.settings.questionPolicy === "wait"
+              ? "wait"
+              : "external",
+          );
           let lastMessageInfo: Message | undefined;
           const iterator = eventStream[Symbol.asyncIterator]();
           let iteratorClosed = false;
@@ -602,6 +749,34 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
 
               if (!isEventForSession(event, sessionId)) {
                 continue;
+              }
+
+              if (event.type === "question.asked") {
+                // Cancellation must win: never let a slow onQuestion handler
+                // block this loop from observing abort or prompt failure. The
+                // response task carries the combined abort signal, so once the
+                // caller aborts it skips the reply/reject call and clears its
+                // own tracking; racing (instead of awaiting) keeps the normal
+                // path identical while letting abort unblock immediately.
+                const respondTask = this.respondToQuestion(
+                  client,
+                  event as EventQuestionAsked,
+                  options.abortSignal
+                    ? AbortSignal.any([
+                        requestAbortController.signal,
+                        options.abortSignal,
+                      ])
+                    : requestAbortController.signal,
+                ).catch((error) => {
+                  logger.debug?.(
+                    `Question response task failed: ${extractErrorMessage(error)}`,
+                  );
+                });
+                await Promise.race([
+                  respondTask,
+                  promptFailed.then(() => undefined),
+                  abortRequested.then(() => undefined),
+                ]);
               }
 
               const streamParts = convertEventToStreamParts(
@@ -788,6 +963,206 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     }
 
     return warnings;
+  }
+
+  private async watchForQuestions(
+    client: QuestionClient,
+    sessionId: string,
+    eventStream: AsyncIterable<unknown>,
+    signal: AbortSignal,
+    abortSignal?: AbortSignal,
+  ): Promise<void> {
+    try {
+      for await (const event of eventStream) {
+        if (signal.aborted) {
+          break;
+        }
+
+        const opencodeEvent = event as OpencodeEvent;
+        if (
+          opencodeEvent.type !== "question.asked" ||
+          !isEventForSession(opencodeEvent, sessionId)
+        ) {
+          continue;
+        }
+
+        await this.respondToQuestion(
+          client,
+          opencodeEvent as EventQuestionAsked,
+          abortSignal ? AbortSignal.any([signal, abortSignal]) : signal,
+        );
+      }
+    } catch (error) {
+      if (!signal.aborted && !isAbortError(error)) {
+        this.logger.warn(
+          `Question event subscription failed: ${extractErrorMessage(error)}`,
+        );
+      }
+    }
+  }
+
+  private async respondToQuestion(
+    client: QuestionClient,
+    event: EventQuestionAsked,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const request = getEventPayload(
+      event,
+    ) as unknown as OpencodeQuestionRequest;
+
+    if (!this.settings.onQuestion && this.settings.questionPolicy === "wait") {
+      return;
+    }
+
+    // Duplicate events (same stream or a concurrent subscription) wait for
+    // the in-flight attempt instead of returning early. A false result means
+    // the attempt failed in a retryable way (reject fallback), so this event
+    // performs its own retry. Only a terminal attempt records the id in
+    // handledQuestionRequests.
+    while (!this.handledQuestionRequests.has(request.id)) {
+      const inFlight = this.inFlightQuestionRequests.get(request.id);
+      if (!inFlight) {
+        break;
+      }
+      if (await inFlight) {
+        return;
+      }
+    }
+
+    if (this.handledQuestionRequests.has(request.id)) {
+      return;
+    }
+
+    // The request is shutting down; skip the API call so no in-flight or
+    // pending tracking for this question id can leak past the abort.
+    if (signal.aborted) {
+      this.handledQuestionRequests.delete(request.id);
+      this.inFlightQuestionRequests.delete(request.id);
+      this.logger.debug?.(
+        `Skipping OpenCode question ${request.id}: request aborted.`,
+      );
+      return;
+    }
+
+    const attempt = this.attemptQuestionResponse(client, request, signal);
+    // Registered synchronously (before any await) so a duplicate arriving in
+    // the same tick observes the in-flight attempt rather than racing it.
+    this.inFlightQuestionRequests.set(request.id, attempt);
+
+    try {
+      const handled = await attempt;
+      if (handled) {
+        this.handledQuestionRequests.add(request.id);
+        this.pruneHandledQuestionRequests();
+      } else if (signal.aborted) {
+        this.handledQuestionRequests.delete(request.id);
+      }
+    } finally {
+      if (this.inFlightQuestionRequests.get(request.id) === attempt) {
+        this.inFlightQuestionRequests.delete(request.id);
+      }
+    }
+  }
+
+  /**
+   * Runs the onQuestion callback (or default policy) and sends the resulting
+   * reply/reject to OpenCode. Resolves true when the question is terminally
+   * handled and false when the attempt failed (or was aborted) and a
+   * duplicate event should retry. Never rejects.
+   */
+  private async attemptQuestionResponse(
+    client: QuestionClient,
+    request: OpencodeQuestionRequest,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    const directory = this.getRequestDirectory();
+    let response: OpencodeQuestionResponse;
+    if (this.settings.onQuestion) {
+      try {
+        const handlerResponse: unknown =
+          await this.settings.onQuestion(request);
+        if (isQuestionResponse(handlerResponse)) {
+          response = handlerResponse;
+        } else {
+          this.logger.warn(
+            `Question handler returned an invalid response for ${request.id}. Rejecting the question.`,
+          );
+          response = { type: "reject" };
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Question handler failed for ${request.id}: ${extractErrorMessage(error)}. Rejecting the question.`,
+        );
+        response = { type: "reject" };
+      }
+    } else {
+      this.logger.warn(
+        `No onQuestion handler configured; rejecting OpenCode question ${request.id}.`,
+      );
+      response = { type: "reject" };
+    }
+
+    const action = response.type === "answer" ? "answer" : "reject";
+
+    // The signal may have aborted while the onQuestion callback was pending;
+    // re-check before the API call so an aborted request never issues a
+    // reply/reject. Returning false keeps the id out of
+    // handledQuestionRequests, and the caller drops the in-flight entry.
+    if (signal.aborted) {
+      this.logger.debug?.(
+        `Skipping ${action} for OpenCode question ${request.id}: request aborted.`,
+      );
+      return false;
+    }
+
+    try {
+      let result: unknown;
+      if (response.type === "answer") {
+        if (typeof client.question?.reply !== "function") {
+          throw new Error("OpenCode question.reply is unavailable");
+        }
+        result = await client.question.reply({
+          requestID: request.id,
+          answers: response.answers,
+          ...(directory ? { directory } : {}),
+        });
+      } else {
+        if (typeof client.question?.reject !== "function") {
+          throw new Error("OpenCode question.reject is unavailable");
+        }
+        result = await client.question.reject({
+          requestID: request.id,
+          ...(directory ? { directory } : {}),
+        });
+      }
+
+      const { error: resultError } = extractSdkResult(result);
+      if (resultError) {
+        throw resultError;
+      }
+      return true;
+    } catch (error) {
+      this.logger.warn(
+        `Failed to ${action} OpenCode question ${request.id}: ${extractErrorMessage(error)}`,
+      );
+      // Any failed attempt must stay retryable: the server-side prompt is
+      // still blocked on the unanswered question, so marking it handled would
+      // ignore duplicate events and hang the session. For explicit handler
+      // responses a retry re-invokes onQuestion; that is preferable to a
+      // silent hang.
+      return false;
+    }
+  }
+
+  private pruneHandledQuestionRequests(): void {
+    // Only terminally handled ids live in this set (in-flight attempts are
+    // tracked separately), so pruning oldest-first is always safe.
+    for (const requestId of this.handledQuestionRequests) {
+      if (this.handledQuestionRequests.size <= MAX_HANDLED_QUESTION_REQUESTS) {
+        break;
+      }
+      this.handledQuestionRequests.delete(requestId);
+    }
   }
 
   private getPendingApprovalResponses(

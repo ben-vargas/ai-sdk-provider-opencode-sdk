@@ -250,6 +250,32 @@ for await (const part of result.stream) {
 }
 ```
 
+### Interactive Questions
+
+OpenCode's question tool can ask the user to pick between options mid-generation (a `question.asked` event). The session blocks server-side until the question is answered or rejected. Provide an `onQuestion` callback to answer questions programmatically:
+
+```typescript
+const model = opencode("openai/gpt-5.3-codex-spark", {
+  onQuestion: (request) => {
+    // request.questions: [{ header, question, options: [{ label, description }], multiple?, custom? }]
+    return {
+      type: "answer",
+      // One string[] per question; multiple selections -> multiple strings.
+      answers: request.questions.map((q) => [q.options[0]?.label ?? ""]),
+    };
+  },
+});
+```
+
+Return `{ type: "reject" }` to decline a question. If the callback throws, the provider logs a warning and rejects the question so generation can continue.
+
+Without a handler, behavior is controlled by `questionPolicy`:
+
+- `"reject"` (default) - the provider rejects the question (`question.reject`) so the session unblocks. Previously the provider emitted a stream error and generation hung until the question was answered in OpenCode directly.
+- `"wait"` - legacy behavior: the provider emits a stream `error` part and waits for the question to be answered externally (e.g. in the OpenCode TUI).
+
+Both `streamText` and `generateText` handle questions; the non-streaming path watches for `question.asked` events on a temporary event subscription while the prompt is in flight. See `examples/question-handling.ts` for a full example.
+
 ## Feature Support
 
 | Feature                  | Support    | Notes                                                                       |
@@ -267,6 +293,7 @@ for await (const part of result.stream) {
 | Structured output (JSON) | ⚠️ Partial | Native `json_schema`; use prompt+validation fallback for strict reliability |
 | Custom tools             | ❌ None    | Server-side only                                                            |
 | Tool approvals           | ✅ Full    | `tool-approval-request` / `tool-approval-response`                          |
+| Interactive questions    | ✅ Full    | `onQuestion` callback; questions without a handler rejected by default      |
 | File/source streaming    | ✅ Full    | Emits `file` and `source` stream parts                                      |
 | temperature/topP/topK    | ❌ None    | Provider defaults                                                           |
 | maxTokens                | ❌ None    | Agent config                                                                |
@@ -279,6 +306,7 @@ for await (const part of result.stream) {
 - `examples/generate-object.ts` - Native object mode with robust JSON fallback.
 - `examples/stream-object.ts` - Streaming structured output with fallback parsing.
 - `examples/tool-observation.ts` - Observe tool calls, results, approvals, files, and sources.
+- `examples/question-handling.ts` - Answer OpenCode's interactive questions with `onQuestion`.
 - `examples/abort-signal.ts` - Cancellation patterns for generate and stream calls.
 - `examples/image-input.ts` - File/image input using base64 or data URLs.
 - `examples/custom-config.ts` - Provider/model configuration and reliability controls.
@@ -351,6 +379,10 @@ interface OpencodeSettings {
   directory?: string; // Per-request directory
   cwd?: string; // Legacy working directory alias
   outputFormatRetryCount?: number; // JSON schema retry count
+  onQuestion?: (
+    request: OpencodeQuestionRequest,
+  ) => Promise<OpencodeQuestionResponse> | OpencodeQuestionResponse; // Answer interactive questions
+  questionPolicy?: "reject" | "wait"; // Questions with no handler (default: "reject")
   logger?: Logger | false; // Logging
   verbose?: boolean; // Debug logging
 }
