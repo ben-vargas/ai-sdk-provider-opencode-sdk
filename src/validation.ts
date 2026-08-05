@@ -44,6 +44,8 @@ export const opcodeSettingsSchema = z.object({
   cwd: z.string().optional(),
   directory: z.string().optional(),
   outputFormatRetryCount: z.number().int().nonnegative().optional(),
+  onQuestion: z.function().optional(),
+  questionPolicy: z.enum(["reject", "wait"]).optional(),
   logger: z.union([loggerSchema, z.literal(false)]).optional(),
   verbose: z.boolean().optional(),
 });

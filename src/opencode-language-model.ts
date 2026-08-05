@@ -12,6 +12,8 @@ import type {
 import { InvalidArgumentError } from "@ai-sdk/provider";
 import type {
   Logger,
+  OpencodeQuestionRequest,
+  OpencodeQuestionResponse,
   OpencodeSettings,
   ParsedModelId,
   StreamingUsage,
@@ -24,10 +26,13 @@ import {
   createFinishParts,
   createStreamStartPart,
   hasCompletedStructuredOutput,
+  getEventPayload,
   isEventForSession,
   isSessionComplete,
   STRUCTURED_OUTPUT_TOOL,
+  type EventQuestionAsked,
   type Message,
+  type OpencodeEvent,
   type Part,
 } from "./convert-from-opencode-events.js";
 import {
@@ -59,6 +64,20 @@ interface ApprovalClient {
       requestID: string;
       reply: "once" | "always" | "reject";
       message?: string;
+      directory?: string;
+    }) => Promise<unknown> | unknown;
+  };
+}
+
+interface QuestionClient {
+  question?: {
+    reply?: (parameters: {
+      requestID: string;
+      answers: string[][];
+      directory?: string;
+    }) => Promise<unknown> | unknown;
+    reject?: (parameters: {
+      requestID: string;
       directory?: string;
     }) => Promise<unknown> | unknown;
   };
@@ -292,9 +311,37 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         messageID,
       );
 
+      const questionAbortController = new AbortController();
+      const unregisterQuestionSubscription =
+        this.clientManager.registerEventSubscription(questionAbortController);
+      const questionRequests = new Set<string>();
+      const directory = this.getRequestDirectory();
+
+      try {
+        const eventsResult = await client.event.subscribe(
+          directory ? { directory } : undefined,
+          { signal: questionAbortController.signal },
+        );
+
+        if (!eventsResult.stream) {
+          throw new Error("Failed to subscribe to events");
+        }
+
+        void this.watchForQuestions(
+          client,
+          sessionId,
+          eventsResult.stream,
+          questionRequests,
+          questionAbortController.signal,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Question event subscription failed: ${extractErrorMessage(error)}`,
+        );
+      }
+
       const abortSignal = options.abortSignal;
       const abortServerSession = async () => {
-        const directory = this.getRequestDirectory();
         try {
           await client.session.abort({
             sessionID: sessionId,
@@ -307,16 +354,21 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
 
       let result: unknown;
       try {
-        result = abortSignal
-          ? await client.session.prompt(requestBody, { signal: abortSignal })
-          : await client.session.prompt(requestBody);
-      } catch (error) {
-        // Clients configured with throwOnError reject on fetch abort instead
-        // of resolving { error }; still stop server-side generation.
-        if (isAbortError(error) || abortSignal?.aborted) {
-          await abortServerSession();
+        try {
+          result = abortSignal
+            ? await client.session.prompt(requestBody, { signal: abortSignal })
+            : await client.session.prompt(requestBody);
+        } catch (error) {
+          // Clients configured with throwOnError reject on fetch abort instead
+          // of resolving { error }; still stop server-side generation.
+          if (isAbortError(error) || abortSignal?.aborted) {
+            await abortServerSession();
+          }
+          throw error;
         }
-        throw error;
+      } finally {
+        questionAbortController.abort();
+        unregisterQuestionSubscription();
       }
 
       const { data, error: responseError } = extractSdkResult(result);
@@ -540,7 +592,11 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
               },
             );
 
-          const state = createStreamState();
+          const state = createStreamState(
+            !this.settings.onQuestion && this.settings.questionPolicy === "wait"
+              ? "wait"
+              : "external",
+          );
           let lastMessageInfo: Message | undefined;
           const iterator = eventStream[Symbol.asyncIterator]();
           let iteratorClosed = false;
@@ -602,6 +658,14 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
 
               if (!isEventForSession(event, sessionId)) {
                 continue;
+              }
+
+              if (event.type === "question.asked") {
+                await this.respondToQuestion(
+                  client,
+                  event as EventQuestionAsked,
+                  state.questionRequests,
+                );
               }
 
               const streamParts = convertEventToStreamParts(
@@ -788,6 +852,117 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     }
 
     return warnings;
+  }
+
+  private async watchForQuestions(
+    client: QuestionClient,
+    sessionId: string,
+    eventStream: AsyncIterable<unknown>,
+    questionRequests: Set<string>,
+    signal: AbortSignal,
+  ): Promise<void> {
+    try {
+      for await (const event of eventStream) {
+        if (signal.aborted) {
+          break;
+        }
+
+        const opencodeEvent = event as OpencodeEvent;
+        if (
+          opencodeEvent.type !== "question.asked" ||
+          !isEventForSession(opencodeEvent, sessionId)
+        ) {
+          continue;
+        }
+
+        await this.respondToQuestion(
+          client,
+          opencodeEvent as EventQuestionAsked,
+          questionRequests,
+        );
+      }
+    } catch (error) {
+      if (!signal.aborted && !isAbortError(error)) {
+        this.logger.warn(
+          `Question event subscription failed: ${extractErrorMessage(error)}`,
+        );
+      }
+    }
+  }
+
+  private async respondToQuestion(
+    client: QuestionClient,
+    event: EventQuestionAsked,
+    questionRequests: Set<string>,
+  ): Promise<void> {
+    const request = getEventPayload(
+      event,
+    ) as unknown as OpencodeQuestionRequest;
+    const directory = this.getRequestDirectory();
+
+    if (
+      questionRequests.has(request.id) ||
+      (!this.settings.onQuestion && this.settings.questionPolicy === "wait")
+    ) {
+      return;
+    }
+
+    questionRequests.add(request.id);
+
+    let response: OpencodeQuestionResponse;
+    let rejectFallback = false;
+
+    if (this.settings.onQuestion) {
+      try {
+        response = await this.settings.onQuestion(request);
+      } catch (error) {
+        this.logger.warn(
+          `Question handler failed for ${request.id}: ${extractErrorMessage(error)}. Rejecting the question.`,
+        );
+        response = { type: "reject" };
+        rejectFallback = true;
+      }
+    } else {
+      this.logger.warn(
+        `No onQuestion handler configured; rejecting OpenCode question ${request.id}.`,
+      );
+      response = { type: "reject" };
+      rejectFallback = true;
+    }
+
+    try {
+      let result: unknown;
+      if (response.type === "answer") {
+        if (typeof client.question?.reply !== "function") {
+          throw new Error("OpenCode question.reply is unavailable");
+        }
+        result = await client.question.reply({
+          requestID: request.id,
+          answers: response.answers,
+          ...(directory ? { directory } : {}),
+        });
+      } else {
+        if (typeof client.question?.reject !== "function") {
+          throw new Error("OpenCode question.reject is unavailable");
+        }
+        result = await client.question.reject({
+          requestID: request.id,
+          ...(directory ? { directory } : {}),
+        });
+      }
+
+      const { error: resultError } = extractSdkResult(result);
+      if (resultError) {
+        throw resultError;
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to ${response.type === "answer" ? "answer" : "reject"} OpenCode question ${request.id}: ${extractErrorMessage(error)}`,
+      );
+      if (rejectFallback) {
+        questionRequests.delete(request.id);
+      }
+    }
   }
 
   private getPendingApprovalResponses(

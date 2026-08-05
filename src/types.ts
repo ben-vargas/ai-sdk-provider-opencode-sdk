@@ -58,6 +58,35 @@ export interface OpencodePermissionRule {
 export type OpencodePermissionRuleset = OpencodePermissionRule[];
 
 /**
+ * An interactive question request emitted by OpenCode.
+ */
+export interface OpencodeQuestionRequest {
+  id: string;
+  sessionID: string;
+  questions: Array<{
+    header: string;
+    question: string;
+    options: Array<{
+      label: string;
+      description: string;
+    }>;
+    multiple?: boolean;
+    custom?: boolean;
+  }>;
+  tool?: {
+    messageID: string;
+    callID: string;
+  };
+}
+
+/**
+ * Response to an interactive OpenCode question request.
+ */
+export type OpencodeQuestionResponse =
+  | { type: "answer"; answers: string[][] }
+  | { type: "reject" };
+
+/**
  * Settings for individual model instances.
  */
 export interface OpencodeSettings {
@@ -127,6 +156,22 @@ export interface OpencodeSettings {
    * Number of OpenCode retries for JSON schema output formatting.
    */
   outputFormatRetryCount?: number;
+
+  /**
+   * Called when OpenCode asks an interactive question.
+   * Return answers or a rejection.
+   */
+  onQuestion?: (
+    request: OpencodeQuestionRequest,
+  ) => Promise<OpencodeQuestionResponse> | OpencodeQuestionResponse;
+
+  /**
+   * What to do when an interactive question has no handler or the handler
+   * throws. Rejecting unblocks the session; waiting preserves the legacy
+   * behavior so an external client can answer.
+   * @default "reject"
+   */
+  questionPolicy?: "reject" | "wait";
 
   /**
    * Logger instance or false to disable logging.

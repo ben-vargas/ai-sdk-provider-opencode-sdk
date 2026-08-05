@@ -336,6 +336,11 @@ export interface StreamState {
   permissionRequests: Set<string>;
   questionRequests: Set<string>;
   /**
+   * Whether question events are handled externally by the language model or
+   * should emit the legacy stream error while awaiting an external answer.
+   */
+  questionHandling?: "external" | "wait";
+  /**
    * Tool-approval-requests buffered (keyed by tool callID) until the
    * correlated tool call has been registered. Flushed the instant the
    * tool call reaches `tool-input-available`.
@@ -353,7 +358,9 @@ export interface StreamState {
 /**
  * Create initial stream state.
  */
-export function createStreamState(): StreamState {
+export function createStreamState(
+  questionHandling?: StreamState["questionHandling"],
+): StreamState {
   return {
     textPartId: undefined,
     textStarted: false,
@@ -373,6 +380,7 @@ export function createStreamState(): StreamState {
     messageRoles: new Map(),
     permissionRequests: new Set(),
     questionRequests: new Set(),
+    ...(questionHandling ? { questionHandling } : {}),
     pendingApprovals: new Map(),
     structuredOutputCompleted: false,
   };
@@ -603,6 +611,10 @@ export function convertEventToStreamParts(
     }
 
     case "question.asked": {
+      if (state.questionHandling === "external") {
+        break;
+      }
+
       const questionEvent = event as EventQuestionAsked;
       const props = getEventPayload(questionEvent);
       const questionId = props.id as string;
