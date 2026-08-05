@@ -1699,6 +1699,63 @@ describe("opencode-language-model", () => {
         expect(mockClient.question.reject).toHaveBeenCalledTimes(2);
       });
 
+      it("should reject gracefully when the callback returns a malformed response", async () => {
+        const logger = { warn: vi.fn(), error: vi.fn() };
+        const onQuestion = vi.fn().mockResolvedValue(undefined);
+        const questionModel = createModel({
+          onQuestion: onQuestion as unknown as OpencodeSettings["onQuestion"],
+          logger,
+        });
+
+        mockClient.event.subscribe.mockResolvedValueOnce(
+          eventStreamOf(questionAskedEvent(), sessionIdleEvent),
+        );
+
+        const result = await questionModel.doStream({ prompt: basicPrompt });
+        const parts = await readAllParts(result.stream);
+
+        expect(logger.warn).toHaveBeenCalledWith(
+          expect.stringContaining(
+            "Question handler returned an invalid response for question-1",
+          ),
+        );
+        expect(mockClient.question.reject).toHaveBeenCalledWith({
+          requestID: "question-1",
+        });
+        expect(mockClient.question.reply).not.toHaveBeenCalled();
+        expect(
+          parts.some((part) => (part as { type?: string }).type === "error"),
+        ).toBe(false);
+      });
+
+      it("should treat an answer response without a valid answers array as malformed", async () => {
+        const logger = { warn: vi.fn(), error: vi.fn() };
+        const onQuestion = vi
+          .fn()
+          .mockResolvedValue({ type: "answer", answers: "Blue/Green" });
+        const questionModel = createModel({
+          onQuestion: onQuestion as unknown as OpencodeSettings["onQuestion"],
+          logger,
+        });
+
+        mockClient.event.subscribe.mockResolvedValueOnce(
+          eventStreamOf(questionAskedEvent(), sessionIdleEvent),
+        );
+
+        const result = await questionModel.doStream({ prompt: basicPrompt });
+        await readAllParts(result.stream);
+
+        expect(logger.warn).toHaveBeenCalledWith(
+          expect.stringContaining(
+            "Question handler returned an invalid response for question-1",
+          ),
+        );
+        expect(mockClient.question.reject).toHaveBeenCalledWith({
+          requestID: "question-1",
+        });
+        expect(mockClient.question.reply).not.toHaveBeenCalled();
+      });
+
       it("should dedupe duplicate question.asked events", async () => {
         const onQuestion = vi.fn().mockResolvedValue({
           type: "answer",
@@ -1909,6 +1966,99 @@ describe("opencode-language-model", () => {
           requestID: "question-shared",
           answers: [["Blue/Green"]],
         });
+      });
+
+      it("should let a concurrent duplicate retry when the reject fallback fails", async () => {
+        const logger = { warn: vi.fn(), error: vi.fn() };
+        let releaseQuestion: (() => void) | undefined;
+        const questionBroadcast = new Promise<void>((resolve) => {
+          releaseQuestion = resolve;
+        });
+        let subscriptionCount = 0;
+        let resolveBothSubscribed: (() => void) | undefined;
+        const bothSubscribed = new Promise<void>((resolve) => {
+          resolveBothSubscribed = resolve;
+        });
+
+        const concurrentSubscribe = () => {
+          subscriptionCount += 1;
+          if (subscriptionCount === 2) {
+            resolveBothSubscribed?.();
+          }
+          return Promise.resolve({
+            stream: (async function* () {
+              await questionBroadcast;
+              yield questionAskedEvent({ id: "question-shared" });
+            })(),
+          });
+        };
+        mockClient.event.subscribe
+          .mockImplementationOnce(concurrentSubscribe)
+          .mockImplementationOnce(concurrentSubscribe);
+
+        const promptResolvers: Array<(value: typeof promptResult) => void> = [];
+        let resolveBothPromptsStarted: (() => void) | undefined;
+        const bothPromptsStarted = new Promise<void>((resolve) => {
+          resolveBothPromptsStarted = resolve;
+        });
+        const concurrentPrompt = () =>
+          new Promise<typeof promptResult>((resolve) => {
+            promptResolvers.push(resolve);
+            if (promptResolvers.length === 2) {
+              resolveBothPromptsStarted?.();
+            }
+          });
+        mockClient.session.prompt
+          .mockImplementationOnce(concurrentPrompt)
+          .mockImplementationOnce(concurrentPrompt);
+
+        let resolveFirstRejectStarted: (() => void) | undefined;
+        const firstRejectStarted = new Promise<void>((resolve) => {
+          resolveFirstRejectStarted = resolve;
+        });
+        let releaseFirstReject: (() => void) | undefined;
+        const firstRejectRelease = new Promise<void>((resolve) => {
+          releaseFirstReject = resolve;
+        });
+
+        // The first reject attempt fails with a fields-style { error } result
+        // while the duplicate event from the second subscription is already
+        // waiting on it. The duplicate must then retry (second reject), which
+        // succeeds and unblocks both prompts.
+        mockClient.question.reject
+          .mockImplementationOnce(async () => {
+            resolveFirstRejectStarted?.();
+            await firstRejectRelease;
+            return { error: { message: "temporarily unavailable" } };
+          })
+          .mockImplementationOnce(() => {
+            for (const resolvePrompt of promptResolvers) {
+              resolvePrompt(promptResult);
+            }
+            return Promise.resolve({ data: true });
+          });
+
+        const questionModel = createModel({ logger });
+
+        const calls = [
+          questionModel.doGenerate({ prompt: basicPrompt }),
+          questionModel.doGenerate({ prompt: basicPrompt }),
+        ];
+
+        await Promise.all([bothSubscribed, bothPromptsStarted]);
+        releaseQuestion?.();
+        await firstRejectStarted;
+        // Give the duplicate event time to observe the in-flight attempt.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        releaseFirstReject?.();
+        await Promise.all(calls);
+
+        expect(mockClient.question.reject).toHaveBeenCalledTimes(2);
+        expect(logger.warn).toHaveBeenCalledWith(
+          expect.stringContaining(
+            "Failed to reject OpenCode question question-shared: temporarily unavailable",
+          ),
+        );
       });
 
       it("should reject questions by default on the doGenerate path", async () => {

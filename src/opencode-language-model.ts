@@ -86,6 +86,34 @@ interface QuestionClient {
 const MAX_HANDLED_QUESTION_REQUESTS = 1_000;
 
 /**
+ * Validate an onQuestion callback result at runtime. Plain-JS callers can
+ * return undefined or a malformed object; treating that like a handler throw
+ * (warn + reject fallback) keeps the stream alive.
+ */
+function isQuestionResponse(
+  value: unknown,
+): value is OpencodeQuestionResponse {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const candidate = value as { type?: unknown; answers?: unknown };
+  if (candidate.type === "reject") {
+    return true;
+  }
+
+  return (
+    candidate.type === "answer" &&
+    Array.isArray(candidate.answers) &&
+    candidate.answers.every(
+      (answer) =>
+        Array.isArray(answer) &&
+        answer.every((entry) => typeof entry === "string"),
+    )
+  );
+}
+
+/**
  * Convert OpenCode token usage to the AI SDK v7 usage shape.
  */
 function convertUsage(usage: StreamingUsage): LanguageModelV4Usage {
@@ -211,10 +239,14 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
   private sessionInitPromise: Promise<string> | null = null;
   private repliedApprovalIdsBySession = new Map<string, Set<string>>();
   // Shared across every generation call on this model so separate event
-  // subscriptions cannot answer the same broadcast question twice.
+  // subscriptions cannot answer the same broadcast question twice. Only
+  // terminally handled questions are recorded here; retryable failures are
+  // never marked so a duplicate event can retry.
   private handledQuestionRequests = new Set<string>();
-  // In-flight requests are excluded from bounded-history pruning.
-  private pendingQuestionRequests = new Set<string>();
+  // In-flight response attempts keyed by question id. Duplicate events await
+  // the active attempt and retry themselves when it resolves false (a
+  // retryable reject-fallback failure).
+  private inFlightQuestionRequests = new Map<string, Promise<boolean>>();
   private parsedModelId: ParsedModelId;
 
   constructor(options: {
@@ -320,7 +352,6 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
 
       const questionAbortController = new AbortController();
       let unregisterQuestionSubscription = () => {};
-      const questionRequests = new Set<string>();
       const directory = this.getRequestDirectory();
 
       // session.prompt blocks server-side while a question is pending, so
@@ -346,7 +377,6 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
             client,
             sessionId,
             eventsResult.stream,
-            questionRequests,
             questionAbortController.signal,
           );
         } catch (error) {
@@ -680,7 +710,6 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
                 await this.respondToQuestion(
                   client,
                   event as EventQuestionAsked,
-                  state.questionRequests,
                 );
               }
 
@@ -874,7 +903,6 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     client: QuestionClient,
     sessionId: string,
     eventStream: AsyncIterable<unknown>,
-    questionRequests: Set<string>,
     signal: AbortSignal,
   ): Promise<void> {
     try {
@@ -894,7 +922,6 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         await this.respondToQuestion(
           client,
           opencodeEvent as EventQuestionAsked,
-          questionRequests,
         );
       }
     } catch (error) {
@@ -909,99 +936,142 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
   private async respondToQuestion(
     client: QuestionClient,
     event: EventQuestionAsked,
-    questionRequests: Set<string>,
   ): Promise<void> {
     const request = getEventPayload(
       event,
     ) as unknown as OpencodeQuestionRequest;
-    const directory = this.getRequestDirectory();
 
-    if (
-      questionRequests.has(request.id) ||
-      this.handledQuestionRequests.has(request.id) ||
-      (!this.settings.onQuestion && this.settings.questionPolicy === "wait")
-    ) {
+    if (!this.settings.onQuestion && this.settings.questionPolicy === "wait") {
       return;
     }
 
-    questionRequests.add(request.id);
-    this.handledQuestionRequests.add(request.id);
-    this.pendingQuestionRequests.add(request.id);
+    // Duplicate events (same stream or a concurrent subscription) wait for
+    // the in-flight attempt instead of returning early. A false result means
+    // the attempt failed in a retryable way (reject fallback), so this event
+    // performs its own retry. Only a terminal attempt records the id in
+    // handledQuestionRequests.
+    while (!this.handledQuestionRequests.has(request.id)) {
+      const inFlight = this.inFlightQuestionRequests.get(request.id);
+      if (!inFlight) {
+        break;
+      }
+      if (await inFlight) {
+        return;
+      }
+    }
+
+    if (this.handledQuestionRequests.has(request.id)) {
+      return;
+    }
+
+    const attempt = this.attemptQuestionResponse(client, request);
+    // Registered synchronously (before any await) so a duplicate arriving in
+    // the same tick observes the in-flight attempt rather than racing it.
+    this.inFlightQuestionRequests.set(request.id, attempt);
 
     try {
-      let response: OpencodeQuestionResponse;
-      let rejectFallback = false;
+      const handled = await attempt;
+      if (handled) {
+        this.handledQuestionRequests.add(request.id);
+        this.pruneHandledQuestionRequests();
+      }
+    } finally {
+      if (this.inFlightQuestionRequests.get(request.id) === attempt) {
+        this.inFlightQuestionRequests.delete(request.id);
+      }
+    }
+  }
 
-      if (this.settings.onQuestion) {
-        try {
-          response = await this.settings.onQuestion(request);
-        } catch (error) {
+  /**
+   * Runs the onQuestion callback (or default policy) and sends the resulting
+   * reply/reject to OpenCode. Resolves true when the question is terminally
+   * handled and false when a reject fallback failed and a duplicate event
+   * should retry. Never rejects.
+   */
+  private async attemptQuestionResponse(
+    client: QuestionClient,
+    request: OpencodeQuestionRequest,
+  ): Promise<boolean> {
+    const directory = this.getRequestDirectory();
+    let response: OpencodeQuestionResponse;
+    let rejectFallback = false;
+
+    if (this.settings.onQuestion) {
+      try {
+        const handlerResponse: unknown = await this.settings.onQuestion(
+          request,
+        );
+        if (isQuestionResponse(handlerResponse)) {
+          response = handlerResponse;
+        } else {
           this.logger.warn(
-            `Question handler failed for ${request.id}: ${extractErrorMessage(error)}. Rejecting the question.`,
+            `Question handler returned an invalid response for ${request.id}. Rejecting the question.`,
           );
           response = { type: "reject" };
           rejectFallback = true;
         }
-      } else {
+      } catch (error) {
         this.logger.warn(
-          `No onQuestion handler configured; rejecting OpenCode question ${request.id}.`,
+          `Question handler failed for ${request.id}: ${extractErrorMessage(error)}. Rejecting the question.`,
         );
         response = { type: "reject" };
         rejectFallback = true;
       }
+    } else {
+      this.logger.warn(
+        `No onQuestion handler configured; rejecting OpenCode question ${request.id}.`,
+      );
+      response = { type: "reject" };
+      rejectFallback = true;
+    }
 
-      try {
-        let result: unknown;
-        if (response.type === "answer") {
-          if (typeof client.question?.reply !== "function") {
-            throw new Error("OpenCode question.reply is unavailable");
-          }
-          result = await client.question.reply({
-            requestID: request.id,
-            answers: response.answers,
-            ...(directory ? { directory } : {}),
-          });
-        } else {
-          if (typeof client.question?.reject !== "function") {
-            throw new Error("OpenCode question.reject is unavailable");
-          }
-          result = await client.question.reject({
-            requestID: request.id,
-            ...(directory ? { directory } : {}),
-          });
-        }
+    const action = response.type === "answer" ? "answer" : "reject";
 
-        const { error: resultError } = extractSdkResult(result);
-        if (resultError) {
-          throw resultError;
+    try {
+      let result: unknown;
+      if (response.type === "answer") {
+        if (typeof client.question?.reply !== "function") {
+          throw new Error("OpenCode question.reply is unavailable");
         }
-      } catch (error) {
-        this.logger.warn(
-          `Failed to ${response.type === "answer" ? "answer" : "reject"} OpenCode question ${request.id}: ${extractErrorMessage(error)}`,
-        );
-        if (rejectFallback) {
-          questionRequests.delete(request.id);
-          this.handledQuestionRequests.delete(request.id);
+        result = await client.question.reply({
+          requestID: request.id,
+          answers: response.answers,
+          ...(directory ? { directory } : {}),
+        });
+      } else {
+        if (typeof client.question?.reject !== "function") {
+          throw new Error("OpenCode question.reject is unavailable");
         }
+        result = await client.question.reject({
+          requestID: request.id,
+          ...(directory ? { directory } : {}),
+        });
       }
-    } finally {
-      this.pendingQuestionRequests.delete(request.id);
-      this.pruneHandledQuestionRequests();
+
+      const { error: resultError } = extractSdkResult(result);
+      if (resultError) {
+        throw resultError;
+      }
+      return true;
+    } catch (error) {
+      this.logger.warn(
+        `Failed to ${action} OpenCode question ${request.id}: ${extractErrorMessage(error)}`,
+      );
+      // A failed reject fallback must stay retryable so a duplicate event can
+      // still unblock the pending question. Explicit handler responses whose
+      // API call failed remain marked handled (the handler already ran).
+      return !rejectFallback;
     }
   }
 
   private pruneHandledQuestionRequests(): void {
-    if (this.handledQuestionRequests.size <= MAX_HANDLED_QUESTION_REQUESTS) {
-      return;
-    }
-
+    // Only terminally handled ids live in this set (in-flight attempts are
+    // tracked separately), so pruning oldest-first is always safe.
     for (const requestId of this.handledQuestionRequests) {
       if (this.handledQuestionRequests.size <= MAX_HANDLED_QUESTION_REQUESTS) {
         break;
       }
-      if (!this.pendingQuestionRequests.has(requestId)) {
-        this.handledQuestionRequests.delete(requestId);
-      }
+      this.handledQuestionRequests.delete(requestId);
     }
   }
 
