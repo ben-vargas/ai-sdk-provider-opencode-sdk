@@ -1699,6 +1699,46 @@ describe("opencode-language-model", () => {
         expect(mockClient.question.reject).toHaveBeenCalledTimes(2);
       });
 
+      it("should retry a failed answer reply when a duplicate event arrives", async () => {
+        const logger = { warn: vi.fn(), error: vi.fn() };
+        const onQuestion = vi.fn().mockResolvedValue({
+          type: "answer",
+          answers: [["Blue/Green"]],
+        });
+        const questionModel = createModel({ onQuestion, logger });
+        const internals = questionModel as unknown as {
+          handledQuestionRequests: Set<string>;
+        };
+
+        mockClient.question.reply
+          .mockResolvedValueOnce({
+            error: { message: "temporarily unavailable" },
+          })
+          .mockResolvedValueOnce({ data: true });
+        mockClient.event.subscribe.mockResolvedValueOnce(
+          eventStreamOf(
+            questionAskedEvent(),
+            questionAskedEvent(),
+            sessionIdleEvent,
+          ),
+        );
+
+        const result = await questionModel.doStream({ prompt: basicPrompt });
+        await readAllParts(result.stream);
+
+        expect(logger.warn).toHaveBeenCalledWith(
+          expect.stringContaining(
+            "Failed to answer OpenCode question question-1: temporarily unavailable",
+          ),
+        );
+        // A failed explicit answer must not mark the question as handled: the
+        // server-side prompt is still blocked, so the duplicate event must
+        // re-invoke the handler and retry the reply.
+        expect(onQuestion).toHaveBeenCalledTimes(2);
+        expect(mockClient.question.reply).toHaveBeenCalledTimes(2);
+        expect(internals.handledQuestionRequests.has("question-1")).toBe(true);
+      });
+
       it("should reject gracefully when the callback returns a malformed response", async () => {
         const logger = { warn: vi.fn(), error: vi.fn() };
         const onQuestion = vi.fn().mockResolvedValue(undefined);

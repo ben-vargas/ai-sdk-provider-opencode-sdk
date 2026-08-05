@@ -1067,8 +1067,8 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
   /**
    * Runs the onQuestion callback (or default policy) and sends the resulting
    * reply/reject to OpenCode. Resolves true when the question is terminally
-   * handled and false when a reject fallback failed and a duplicate event
-   * should retry. Never rejects.
+   * handled and false when the attempt failed (or was aborted) and a
+   * duplicate event should retry. Never rejects.
    */
   private async attemptQuestionResponse(
     client: QuestionClient,
@@ -1077,8 +1077,6 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
   ): Promise<boolean> {
     const directory = this.getRequestDirectory();
     let response: OpencodeQuestionResponse;
-    let rejectFallback = false;
-
     if (this.settings.onQuestion) {
       try {
         const handlerResponse: unknown =
@@ -1090,21 +1088,18 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
             `Question handler returned an invalid response for ${request.id}. Rejecting the question.`,
           );
           response = { type: "reject" };
-          rejectFallback = true;
         }
       } catch (error) {
         this.logger.warn(
           `Question handler failed for ${request.id}: ${extractErrorMessage(error)}. Rejecting the question.`,
         );
         response = { type: "reject" };
-        rejectFallback = true;
       }
     } else {
       this.logger.warn(
         `No onQuestion handler configured; rejecting OpenCode question ${request.id}.`,
       );
       response = { type: "reject" };
-      rejectFallback = true;
     }
 
     const action = response.type === "answer" ? "answer" : "reject";
@@ -1150,10 +1145,12 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       this.logger.warn(
         `Failed to ${action} OpenCode question ${request.id}: ${extractErrorMessage(error)}`,
       );
-      // A failed reject fallback must stay retryable so a duplicate event can
-      // still unblock the pending question. Explicit handler responses whose
-      // API call failed remain marked handled (the handler already ran).
-      return !rejectFallback;
+      // Any failed attempt must stay retryable: the server-side prompt is
+      // still blocked on the unanswered question, so marking it handled would
+      // ignore duplicate events and hang the session. For explicit handler
+      // responses a retry re-invokes onQuestion; that is preferable to a
+      // silent hang.
+      return false;
     }
   }
 
