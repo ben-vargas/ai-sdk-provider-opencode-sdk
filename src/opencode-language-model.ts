@@ -752,7 +752,13 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
               }
 
               if (event.type === "question.asked") {
-                await this.respondToQuestion(
+                // Cancellation must win: never let a slow onQuestion handler
+                // block this loop from observing abort or prompt failure. The
+                // response task carries the combined abort signal, so once the
+                // caller aborts it skips the reply/reject call and clears its
+                // own tracking; racing (instead of awaiting) keeps the normal
+                // path identical while letting abort unblock immediately.
+                const respondTask = this.respondToQuestion(
                   client,
                   event as EventQuestionAsked,
                   options.abortSignal
@@ -761,7 +767,16 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
                         options.abortSignal,
                       ])
                     : requestAbortController.signal,
-                );
+                ).catch((error) => {
+                  logger.debug?.(
+                    `Question response task failed: ${extractErrorMessage(error)}`,
+                  );
+                });
+                await Promise.race([
+                  respondTask,
+                  promptFailed.then(() => undefined),
+                  abortRequested.then(() => undefined),
+                ]);
               }
 
               const streamParts = convertEventToStreamParts(

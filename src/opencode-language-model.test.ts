@@ -2237,6 +2237,58 @@ describe("opencode-language-model", () => {
         expect(internals.handledQuestionRequests.has("question-1")).toBe(false);
       });
 
+      it("should close the doStream on caller abort even if the question callback never settles", async () => {
+        const logger = { warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+        let resolveHandlerStarted: (() => void) | undefined;
+        const handlerStarted = new Promise<void>((resolve) => {
+          resolveHandlerStarted = resolve;
+        });
+        let releaseHandler: (() => void) | undefined;
+        const handlerRelease = new Promise<void>((resolve) => {
+          releaseHandler = resolve;
+        });
+        const onQuestion = vi.fn(async () => {
+          resolveHandlerStarted?.();
+          // Simulates a handler waiting on external input (e.g. human UI)
+          // that is never provided.
+          await handlerRelease;
+          return { type: "answer" as const, answers: [["Blue/Green"]] };
+        });
+        const questionModel = createModel({ onQuestion, logger });
+        const internals = internalsOf(questionModel);
+
+        mockClient.event.subscribe.mockResolvedValueOnce(
+          eventStreamOf(questionAskedEvent(), sessionIdleEvent),
+        );
+
+        const abortController = new AbortController();
+        const result = await questionModel.doStream({
+          prompt: basicPrompt,
+          abortSignal: abortController.signal,
+        });
+        const partsPromise = readAllParts(result.stream);
+
+        await handlerStarted;
+        abortController.abort();
+
+        // The stream must terminate WITHOUT the handler ever settling.
+        await partsPromise;
+        expect(mockClient.session.abort).toHaveBeenCalled();
+        expect(mockClient.question.reply).not.toHaveBeenCalled();
+        expect(mockClient.question.reject).not.toHaveBeenCalled();
+
+        // Late handler resolution after the stream closed stays inert and
+        // cleans up its tracking.
+        releaseHandler?.();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(mockClient.question.reply).not.toHaveBeenCalled();
+        expect(mockClient.question.reject).not.toHaveBeenCalled();
+        expect(internals.inFlightQuestionRequests.has("question-1")).toBe(
+          false,
+        );
+        expect(internals.handledQuestionRequests.has("question-1")).toBe(false);
+      });
+
       it("should skip the response and clear tracking when the doGenerate caller aborts while the callback is pending", async () => {
         const logger = { warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
         let resolveHandlerStarted: (() => void) | undefined;
