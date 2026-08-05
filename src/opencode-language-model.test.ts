@@ -2118,6 +2118,34 @@ describe("opencode-language-model", () => {
         });
       });
 
+      it("should settle with AbortError when the caller aborts during a stalled subscription setup", async () => {
+        const unregister = vi.fn();
+        mockClientManager.registerEventSubscription.mockReturnValueOnce(
+          unregister,
+        );
+        // event.subscribe never settles, even after its signal aborts.
+        mockClient.event.subscribe.mockImplementationOnce(
+          () => new Promise(() => {}),
+        );
+
+        const abortController = new AbortController();
+        const questionModel = createModel({});
+        const generatePromise = questionModel.doGenerate({
+          prompt: basicPrompt,
+          abortSignal: abortController.signal,
+        });
+
+        // Let doGenerate reach the stalled subscribe call, then abort.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        abortController.abort();
+
+        await expect(generatePromise).rejects.toMatchObject({
+          name: "AbortError",
+        });
+        expect(unregister).toHaveBeenCalled();
+        expect(mockClient.session.prompt).not.toHaveBeenCalled();
+      });
+
       it("should abort the question subscription when the prompt settles", async () => {
         let subscribeSignal: AbortSignal | undefined;
         mockClient.event.subscribe.mockImplementationOnce(

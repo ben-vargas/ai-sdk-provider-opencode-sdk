@@ -365,11 +365,42 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         unregisterQuestionSubscription =
           this.clientManager.registerEventSubscription(questionAbortController);
 
+        // A caller abort must always win during subscription setup: pass a
+        // combined signal to the subscribe call and race the await against
+        // the caller's abort so a stalled subscribe cannot hang doGenerate.
+        const callerAbortSignal = options.abortSignal;
+        const subscribeSignal = callerAbortSignal
+          ? AbortSignal.any([questionAbortController.signal, callerAbortSignal])
+          : questionAbortController.signal;
+        let removeSetupAbortListener = () => {};
+
         try {
-          const eventsResult = await client.event.subscribe(
+          const subscribePromise = client.event.subscribe(
             directory ? { directory } : undefined,
-            { signal: questionAbortController.signal },
+            { signal: subscribeSignal },
           );
+
+          const eventsResult = callerAbortSignal
+            ? await Promise.race([
+                subscribePromise,
+                new Promise<never>((_, reject) => {
+                  const onAbort = () => {
+                    const abortError = new Error("Request aborted");
+                    abortError.name = "AbortError";
+                    reject(abortError);
+                  };
+                  if (callerAbortSignal.aborted) {
+                    onAbort();
+                    return;
+                  }
+                  callerAbortSignal.addEventListener("abort", onAbort, {
+                    once: true,
+                  });
+                  removeSetupAbortListener = () =>
+                    callerAbortSignal.removeEventListener("abort", onAbort);
+                }),
+              ])
+            : await subscribePromise;
 
           if (!eventsResult.stream) {
             throw new Error("Failed to subscribe to events");
@@ -383,9 +414,20 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
             options.abortSignal,
           );
         } catch (error) {
+          // Setup aborted by the caller: surface AbortError like the prompt
+          // path instead of proceeding into a doomed prompt.
+          if (callerAbortSignal?.aborted) {
+            questionAbortController.abort();
+            unregisterQuestionSubscription();
+            const abortError = new Error("Request aborted");
+            abortError.name = "AbortError";
+            throw abortError;
+          }
           this.logger.warn(
             `Question event subscription failed: ${extractErrorMessage(error)}`,
           );
+        } finally {
+          removeSetupAbortListener();
         }
       }
 
