@@ -16,6 +16,8 @@ import type {
 import type {
   EventLogSynced,
   FormCreated,
+  SessionMessageAssistantRetry,
+  SessionRetryScheduled,
   PermissionAsked,
   PermissionReplied,
   PermissionReply,
@@ -419,6 +421,20 @@ export function eventFactory(sessionId: string = SESSION_ID) {
       };
     },
 
+    retryScheduled(
+      assistantMessageID: string,
+      attempt: number,
+      at: number,
+      error: SessionStructuredError,
+    ): SessionRetryScheduled {
+      return {
+        ...envelope(),
+        type: "session.retry.scheduled",
+        durable: durable(1),
+        data: { sessionID: sessionId, assistantMessageID, attempt, at, error },
+      };
+    },
+
     sessionIdle(): SessionIdle {
       return {
         ...envelope(),
@@ -518,6 +534,7 @@ export function finishPart(options: {
   interruptReason?: "user" | "shutdown" | "superseded";
   finish?: string;
   rawFinish?: string;
+  retry?: SessionMessageAssistantRetry;
   error?: SessionStructuredError;
 }): LanguageModelV4StreamPart {
   return {
@@ -545,6 +562,9 @@ export function finishPart(options: {
         ...(options.finish ? { finish: options.finish } : {}),
         ...(options.rawFinish !== undefined
           ? { rawFinish: options.rawFinish }
+          : {}),
+        ...(options.retry
+          ? { retry: options.retry as unknown as JSONValue }
           : {}),
         ...(options.error
           ? { error: options.error as unknown as JSONValue }
