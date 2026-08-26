@@ -40,8 +40,11 @@ export function mapOpencodeFinishReason(
   finish: string | undefined,
   rawFinish?: string,
 ): LanguageModelV4FinishReason {
+  // Own-property check: `in` would also match inherited Object.prototype
+  // names ("toString", "constructor", ...), returning a function as the
+  // unified reason for such arbitrary inputs.
   const unified =
-    finish !== undefined && finish in FINISH_TABLE
+    finish !== undefined && Object.hasOwn(FINISH_TABLE, finish)
       ? FINISH_TABLE[finish as OpencodeV2Finish]
       : "other";
   return { unified, raw: rawFinish ?? finish };

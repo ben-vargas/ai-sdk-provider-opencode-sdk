@@ -43,6 +43,16 @@ describe("mapOpencodeFinishReason", () => {
       raw: undefined,
     });
   });
+
+  it.each(["toString", "constructor", "__proto__", "hasOwnProperty"])(
+    "maps inherited Object.prototype name %s to other",
+    (name) => {
+      expect(mapOpencodeFinishReason(name)).toEqual({
+        unified: "other",
+        raw: name,
+      });
+    },
+  );
 });
 
 describe("mapStructuredErrorToFinishReason", () => {
