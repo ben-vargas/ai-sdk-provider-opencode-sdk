@@ -301,7 +301,10 @@ function classifyUnknown(error: unknown): ErrorClassification {
  * path) into an AI SDK error, applying the phase rule.
  *
  * - Abort errors (caller signal) pass through unchanged.
- * - Already-wrapped AI SDK errors pass through unchanged.
+ * - Already-wrapped AI SDK errors pass through unchanged — EXCEPT a
+ *   retryable `APICallError` post-dispatch, which is demoted to
+ *   non-retryable with `data.reconcile: true` (the universal phase rule
+ *   admits no bypass).
  * - `UnauthorizedError`/`ForbiddenError` → `LoadAPIKeyError`.
  * - Everything else → `APICallError` with `isRetryable` true ONLY for
  *   transient-class failures pre-dispatch; post-dispatch transient-class
@@ -316,8 +319,55 @@ export function wrapError(
       ? error
       : new Error(extractErrorMessage(error));
   }
-  if (APICallError.isInstance(error) || LoadAPIKeyError.isInstance(error)) {
+  if (LoadAPIKeyError.isInstance(error)) {
     return error;
+  }
+  if (APICallError.isInstance(error)) {
+    // The universal phase rule applies to already-wrapped errors too: a
+    // retryable APICallError must not surface post-dispatch. Its retryable
+    // classification means it was transient-class, so demote it to
+    // non-retryable with the reconciliation marker.
+    if (options.phase === "pre-dispatch" || !error.isRetryable) {
+      return error;
+    }
+    const prior =
+      error.data && typeof error.data === "object"
+        ? (error.data as Partial<OpencodeErrorData>)
+        : {};
+    const demotedData: OpencodeErrorData = {
+      ...prior,
+      phase: "post-dispatch",
+      reconcile: true,
+      ...(prior.operation === undefined && options.operation
+        ? { operation: options.operation }
+        : {}),
+      ...(prior.sessionId === undefined && options.sessionId
+        ? { sessionId: options.sessionId }
+        : {}),
+      ...(prior.messageId === undefined && options.messageId
+        ? { messageId: options.messageId }
+        : {}),
+      ...(prior.modelId === undefined && options.modelId
+        ? { modelId: options.modelId }
+        : {}),
+    };
+    return new APICallError({
+      message: error.message,
+      url: error.url,
+      requestBodyValues: error.requestBodyValues,
+      ...(error.statusCode !== undefined
+        ? { statusCode: error.statusCode }
+        : {}),
+      ...(error.responseHeaders !== undefined
+        ? { responseHeaders: error.responseHeaders }
+        : {}),
+      ...(error.responseBody !== undefined
+        ? { responseBody: error.responseBody }
+        : {}),
+      isRetryable: false,
+      data: demotedData,
+      cause: error,
+    });
   }
 
   const classification = isClientError(error)

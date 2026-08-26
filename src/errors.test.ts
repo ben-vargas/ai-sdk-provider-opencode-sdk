@@ -294,6 +294,51 @@ describe("passthrough", () => {
     const auth = new LoadAPIKeyError({ message: "y" });
     expect(wrapError(api, { phase: "post-dispatch" })).toBe(api);
     expect(wrapError(auth, { phase: "pre-dispatch" })).toBe(auth);
+    expect(wrapError(auth, { phase: "post-dispatch" })).toBe(auth);
+  });
+
+  it("returns a retryable APICallError unchanged pre-dispatch", () => {
+    const api = new APICallError({
+      message: "x",
+      url: "opencode://request",
+      requestBodyValues: {},
+      isRetryable: true,
+    });
+    expect(wrapError(api, { phase: "pre-dispatch" })).toBe(api);
+  });
+
+  it("demotes a retryable APICallError post-dispatch (universal rule)", () => {
+    const api = new APICallError({
+      message: "transient upstream failure",
+      url: "opencode://session.wait",
+      requestBodyValues: {},
+      statusCode: 503,
+      isRetryable: true,
+      data: { phase: "pre-dispatch", reconcile: false, operation: "inner.op" },
+    });
+
+    const wrapped = wrapError(api, {
+      phase: "post-dispatch",
+      operation: "session.prompt",
+      sessionId: "ses_1",
+    });
+
+    expect(wrapped).not.toBe(api);
+    expect(APICallError.isInstance(wrapped)).toBe(true);
+    const demoted = wrapped as APICallError;
+    expect(demoted.isRetryable).toBe(false);
+    expect(demoted.message).toBe(api.message);
+    expect(demoted.url).toBe(api.url);
+    expect(demoted.statusCode).toBe(503);
+    expect(demoted.cause).toBe(api);
+    expect(needsSessionReconciliation(demoted)).toBe(true);
+
+    const errorData = data(demoted);
+    expect(errorData.phase).toBe("post-dispatch");
+    expect(errorData.reconcile).toBe(true);
+    // Prior context wins; wrap-site context only fills gaps.
+    expect(errorData.operation).toBe("inner.op");
+    expect(errorData.sessionId).toBe("ses_1");
   });
 });
 
