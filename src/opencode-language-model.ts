@@ -160,6 +160,10 @@ function createEventReader(iterable: AsyncIterable<V2Event>): EventReader {
         clearTimeout(timer);
         if (result === "timeout") {
           pending = promise;
+          // The stashed promise may never be re-read (the turn finalizes and
+          // the subscription is aborted, rejecting it): subscribe a no-op
+          // handler so teardown never fires an unhandled rejection.
+          promise.catch(() => undefined);
         }
         return result;
       });
