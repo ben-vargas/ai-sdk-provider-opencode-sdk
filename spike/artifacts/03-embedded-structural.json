@@ -1,0 +1,203 @@
+{
+  "session": {
+    "label": "session.create",
+    "ok": true,
+    "ms": 49,
+    "value": {
+      "id": "ses_fc0417633ffef4tcKKO6JQuwBx",
+      "projectID": "0d3425c598e03c4a14956072904534f96eaa159d",
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "time": {
+        "created": 1787775846907,
+        "updated": 1787775846907
+      },
+      "title": "spike-03-structural",
+      "location": {
+        "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+      },
+      "subpath": "spike/sandbox/workdir"
+    }
+  },
+  "promptNoModel": {
+    "label": "prompt-no-model",
+    "ok": false,
+    "ms": 1,
+    "error": {
+      "__error": true,
+      "name": "ClientError",
+      "message": "UnexpectedStatus",
+      "reason": "UnexpectedStatus",
+      "cause": {
+        "status": 500,
+        "body": ""
+      }
+    }
+  },
+  "waitIdle": {
+    "label": "wait-idle",
+    "ok": false,
+    "ms": 1,
+    "error": {
+      "__error": true,
+      "name": "ClientError",
+      "message": "UnexpectedStatus",
+      "reason": "UnexpectedStatus",
+      "cause": {
+        "status": 500,
+        "body": ""
+      }
+    }
+  },
+  "instructionsPut": {
+    "label": "instructions.put",
+    "ok": false,
+    "ms": 0,
+    "error": {
+      "__error": true,
+      "name": "ClientError",
+      "message": "UnexpectedStatus",
+      "reason": "UnexpectedStatus",
+      "cause": {
+        "status": 500,
+        "body": ""
+      }
+    }
+  },
+  "instructionsList": {
+    "label": "instructions.list",
+    "ok": false,
+    "ms": 0,
+    "error": {
+      "__error": true,
+      "name": "ClientError",
+      "message": "UnexpectedStatus",
+      "reason": "UnexpectedStatus",
+      "cause": {
+        "status": 500,
+        "body": ""
+      }
+    }
+  },
+  "formCreate": {
+    "label": "form.create",
+    "ok": false,
+    "ms": 1,
+    "error": {
+      "__error": true,
+      "name": "ClientError",
+      "message": "UnexpectedStatus",
+      "reason": "UnexpectedStatus",
+      "cause": {
+        "status": 500,
+        "body": ""
+      }
+    }
+  },
+  "formList": {
+    "label": "form.list",
+    "ok": false,
+    "ms": 0,
+    "error": {
+      "__error": true,
+      "name": "ClientError",
+      "message": "UnexpectedStatus",
+      "reason": "UnexpectedStatus",
+      "cause": {
+        "status": 500,
+        "body": ""
+      }
+    }
+  },
+  "inbox": {
+    "label": "inbox.list",
+    "ok": true,
+    "ms": 1,
+    "value": []
+  },
+  "log": {
+    "label": "session.log",
+    "ok": true,
+    "ms": 2,
+    "value": [
+      {
+        "type": "log.synced",
+        "aggregateID": "ses_fc0417633ffef4tcKKO6JQuwBx",
+        "seq": 0
+      }
+    ]
+  },
+  "events": [
+    {
+      "receivedAt": 1787775846860,
+      "id": "evt_03fbe89c4001xuS60QmDv9RDSQ",
+      "type": "server.connected",
+      "data": {}
+    },
+    {
+      "receivedAt": 1787775846906,
+      "id": "evt_03fbe89f7001FDj50xDXx9i086",
+      "created": 1787775846903,
+      "type": "worktree.resolved",
+      "data": {
+        "projectID": "0d3425c598e03c4a14956072904534f96eaa159d",
+        "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk",
+        "previous": "14068fc35b8b02907a2c61cda30dc84185d3ba38"
+      },
+      "durable": {
+        "aggregateID": "0d3425c598e03c4a14956072904534f96eaa159d",
+        "seq": 0,
+        "version": 1
+      }
+    },
+    {
+      "receivedAt": 1787775846915,
+      "id": "evt_03fbe89fa001dkL5CUGNXktLE9",
+      "created": 1787775846906,
+      "type": "worktree.resolved",
+      "data": {
+        "projectID": "0d3425c598e03c4a14956072904534f96eaa159d",
+        "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5",
+        "previous": "14068fc35b8b02907a2c61cda30dc84185d3ba38"
+      },
+      "durable": {
+        "aggregateID": "0d3425c598e03c4a14956072904534f96eaa159d",
+        "seq": 1,
+        "version": 1
+      }
+    },
+    {
+      "receivedAt": 1787775846915,
+      "id": "evt_03fbe89fb001MwcVoA5vV9IOcD",
+      "created": 1787775846907,
+      "type": "session.created",
+      "location": {
+        "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+      },
+      "data": {
+        "sessionID": "ses_fc0417633ffef4tcKKO6JQuwBx",
+        "slug": "shiny-cabin",
+        "version": "unknown",
+        "projectID": "0d3425c598e03c4a14956072904534f96eaa159d",
+        "location": {
+          "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+        },
+        "subpath": "spike/sandbox/workdir",
+        "title": "spike-03-structural"
+      },
+      "durable": {
+        "aggregateID": "ses_fc0417633ffef4tcKKO6JQuwBx",
+        "seq": 0,
+        "version": 1
+      }
+    }
+  ]
+}

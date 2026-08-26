@@ -1,0 +1,277 @@
+{
+  "create": {
+    "label": "OpenCode.create",
+    "ok": true,
+    "ms": 702,
+    "value": [
+      "health",
+      "server",
+      "location",
+      "agent",
+      "plugin",
+      "session",
+      "message",
+      "model",
+      "generate",
+      "provider",
+      "integration",
+      "mcp",
+      "credential",
+      "project",
+      "form",
+      "permission",
+      "file",
+      "command",
+      "skill",
+      "event",
+      "pty",
+      "experimental",
+      "shell",
+      "reference",
+      "worktree",
+      "workspace",
+      "vcs",
+      "debug",
+      "migration",
+      "websearch",
+      "config",
+      "sessions",
+      "events",
+      "close"
+    ]
+  },
+  "health": {
+    "label": "health.get",
+    "ok": true,
+    "ms": 5,
+    "value": {
+      "healthy": true,
+      "version": "unknown",
+      "pid": 19678
+    }
+  },
+  "server": {
+    "label": "server.get",
+    "ok": true,
+    "ms": 1,
+    "value": {
+      "urls": []
+    }
+  },
+  "migration": {
+    "label": "migration.v1.status",
+    "ok": true,
+    "ms": 0,
+    "value": {
+      "status": "completed"
+    }
+  },
+  "modelDefault": {
+    "label": "model.default",
+    "ok": false,
+    "ms": 2,
+    "error": {
+      "__error": true,
+      "name": "ClientError",
+      "message": "UnexpectedStatus",
+      "reason": "UnexpectedStatus",
+      "cause": {
+        "status": 500
+      }
+    }
+  },
+  "modelList": {
+    "label": "model.list",
+    "ok": false,
+    "ms": 0,
+    "error": {
+      "__error": true,
+      "name": "ClientError",
+      "message": "UnexpectedStatus",
+      "reason": "UnexpectedStatus",
+      "cause": {
+        "status": 500
+      }
+    }
+  },
+  "firstEvent": {
+    "id": "evt_03fbb985e001aBbS8ffxhx6LWF",
+    "type": "server.connected",
+    "data": {}
+  },
+  "session": {
+    "label": "session.create",
+    "ok": true,
+    "ms": 63,
+    "value": {
+      "id": "ses_fc0446798ffettrXWntnrBGypK",
+      "projectID": "0d3425c598e03c4a14956072904534f96eaa159d",
+      "model": {
+        "id": "nemotron-3.5-lightning-free",
+        "providerID": "opencode",
+        "variant": "default"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "time": {
+        "created": 1787775654051,
+        "updated": 1787775654051
+      },
+      "title": "spike-02-embedded",
+      "location": {
+        "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+      },
+      "subpath": "spike/sandbox/workdir"
+    }
+  },
+  "receipt": {
+    "label": "session.prompt",
+    "ok": false,
+    "ms": 1,
+    "error": {
+      "__error": true,
+      "name": "ClientError",
+      "message": "UnexpectedStatus",
+      "reason": "UnexpectedStatus",
+      "cause": {
+        "status": 500
+      }
+    }
+  },
+  "wait": {
+    "label": "session.wait",
+    "ok": false,
+    "ms": 0,
+    "error": {
+      "__error": true,
+      "name": "ClientError",
+      "message": "UnexpectedStatus",
+      "reason": "UnexpectedStatus",
+      "cause": {
+        "status": 500
+      }
+    }
+  },
+  "messages": {
+    "label": "message.list",
+    "ok": true,
+    "ms": 9,
+    "value": {
+      "data": [],
+      "cursor": {
+        "previous": null,
+        "next": null
+      }
+    }
+  },
+  "sessionAfter": {
+    "label": "session.get",
+    "ok": true,
+    "ms": 4,
+    "value": {
+      "id": "ses_fc0446798ffettrXWntnrBGypK",
+      "projectID": "0d3425c598e03c4a14956072904534f96eaa159d",
+      "model": {
+        "id": "nemotron-3.5-lightning-free",
+        "providerID": "opencode",
+        "variant": "default"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "time": {
+        "created": 1787775654051,
+        "updated": 1787775654051
+      },
+      "title": "spike-02-embedded",
+      "location": {
+        "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+      },
+      "subpath": "spike/sandbox/workdir"
+    }
+  },
+  "events": [
+    {
+      "receivedAt": 1787775653990,
+      "id": "evt_03fbb985e001aBbS8ffxhx6LWF",
+      "type": "server.connected",
+      "data": {}
+    },
+    {
+      "receivedAt": 1787775654051,
+      "id": "evt_03fbb98a0001sCHl94NlQHqcxn",
+      "created": 1787775654048,
+      "type": "worktree.resolved",
+      "data": {
+        "projectID": "0d3425c598e03c4a14956072904534f96eaa159d",
+        "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk",
+        "previous": "14068fc35b8b02907a2c61cda30dc84185d3ba38"
+      },
+      "durable": {
+        "aggregateID": "0d3425c598e03c4a14956072904534f96eaa159d",
+        "seq": 0,
+        "version": 1
+      }
+    },
+    {
+      "receivedAt": 1787775654054,
+      "id": "evt_03fbb98a3001SMZXKgxh8QLCpd",
+      "created": 1787775654051,
+      "type": "worktree.resolved",
+      "data": {
+        "projectID": "0d3425c598e03c4a14956072904534f96eaa159d",
+        "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5",
+        "previous": "14068fc35b8b02907a2c61cda30dc84185d3ba38"
+      },
+      "durable": {
+        "aggregateID": "0d3425c598e03c4a14956072904534f96eaa159d",
+        "seq": 1,
+        "version": 1
+      }
+    },
+    {
+      "receivedAt": 1787775654054,
+      "id": "evt_03fbb98a3002J5UjTEcKk3ZkH5",
+      "created": 1787775654051,
+      "type": "session.created",
+      "location": {
+        "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+      },
+      "data": {
+        "sessionID": "ses_fc0446798ffettrXWntnrBGypK",
+        "slug": "gentle-circuit",
+        "version": "unknown",
+        "projectID": "0d3425c598e03c4a14956072904534f96eaa159d",
+        "location": {
+          "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+        },
+        "subpath": "spike/sandbox/workdir",
+        "title": "spike-02-embedded",
+        "model": {
+          "id": "nemotron-3.5-lightning-free",
+          "providerID": "opencode"
+        }
+      },
+      "durable": {
+        "aggregateID": "ses_fc0446798ffettrXWntnrBGypK",
+        "seq": 0,
+        "version": 1
+      }
+    }
+  ]
+}

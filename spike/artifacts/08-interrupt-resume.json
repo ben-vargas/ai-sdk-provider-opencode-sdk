@@ -1,0 +1,263 @@
+{
+  "interruptFlowing": true,
+  "interrupt": {
+    "label": "interrupt",
+    "ok": true,
+    "ms": 9,
+    "value": {
+      "status": 204,
+      "contentType": "",
+      "body": ""
+    }
+  },
+  "messagesAfterInterrupt": [
+    {
+      "type": "assistant",
+      "finish": "error",
+      "error": {
+        "type": "unknown",
+        "message": "Provider turn interrupted"
+      },
+      "text": "The water cycle,"
+    },
+    {
+      "type": "user",
+      "text": "Explain the water cycle in about 400 words. Output plain chat text only; do NOT "
+    }
+  ],
+  "sessionAfterInterrupt": {
+    "label": "session.get",
+    "ok": true,
+    "ms": 6,
+    "value": {
+      "id": "ses_fc0385233ffePc4xrsVy1w1J7j",
+      "projectID": "0d3425c598e03c4a14956072904534f96eaa159d",
+      "model": {
+        "id": "nemotron-3.5-lightning-free",
+        "providerID": "opencode",
+        "variant": "default"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "time": {
+        "created": 1787776445936,
+        "updated": 1787776445936
+      },
+      "title": "New session - 2026-08-26T20:34:05.936Z",
+      "location": {
+        "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+      },
+      "subpath": "spike/sandbox/workdir"
+    }
+  },
+  "resumeReceipt": {
+    "label": "prompt-resume",
+    "ok": true,
+    "ms": 17,
+    "value": {
+      "admittedSeq": 7,
+      "id": "msg_03fc84a30001nAXLnbj7dlNvKd",
+      "sessionID": "ses_fc0385233ffePc4xrsVy1w1J7j",
+      "prompt": {
+        "text": "continue"
+      },
+      "delivery": "steer",
+      "timeCreated": 1787776485937
+    }
+  },
+  "messagesAfterResume": [
+    {
+      "type": "assistant",
+      "finish": "stop",
+      "text": "The water cycle, also known as the hydrologic cycle, describes the continuous mo"
+    },
+    {
+      "type": "user",
+      "text": "continue"
+    },
+    {
+      "type": "assistant",
+      "finish": "error",
+      "text": "The water cycle,"
+    },
+    {
+      "type": "user",
+      "text": "Explain the water cycle in about 400 words. Output plain chat text only; do NOT "
+    }
+  ],
+  "interruptEvents": [
+    {
+      "t": "session.next.prompt.admitted",
+      "keys": [
+        "timestamp",
+        "sessionID",
+        "messageID",
+        "prompt",
+        "delivery"
+      ]
+    },
+    {
+      "t": "session.next.prompted",
+      "keys": [
+        "timestamp",
+        "sessionID",
+        "messageID",
+        "prompt",
+        "delivery"
+      ]
+    },
+    {
+      "t": "session.next.step.started",
+      "keys": [
+        "timestamp",
+        "sessionID",
+        "assistantMessageID",
+        "agent",
+        "model",
+        "snapshot"
+      ]
+    },
+    {
+      "t": "session.next.text.started",
+      "keys": [
+        "timestamp",
+        "sessionID",
+        "assistantMessageID",
+        "textID"
+      ]
+    },
+    {
+      "t": "session.next.text.ended",
+      "keys": [
+        "timestamp",
+        "sessionID",
+        "assistantMessageID",
+        "textID",
+        "text"
+      ]
+    },
+    {
+      "t": "session.next.step.failed",
+      "keys": [
+        "timestamp",
+        "sessionID",
+        "assistantMessageID",
+        "error"
+      ]
+    },
+    {
+      "t": "session.next.prompt.admitted",
+      "keys": [
+        "timestamp",
+        "sessionID",
+        "messageID",
+        "prompt",
+        "delivery"
+      ]
+    },
+    {
+      "t": "session.next.prompted",
+      "keys": [
+        "timestamp",
+        "sessionID",
+        "messageID",
+        "prompt",
+        "delivery"
+      ]
+    },
+    {
+      "t": "session.next.step.started",
+      "keys": [
+        "timestamp",
+        "sessionID",
+        "assistantMessageID",
+        "agent",
+        "model",
+        "snapshot"
+      ]
+    },
+    {
+      "t": "session.next.text.started",
+      "keys": [
+        "timestamp",
+        "sessionID",
+        "assistantMessageID",
+        "textID"
+      ]
+    },
+    {
+      "t": "session.next.text.ended",
+      "keys": [
+        "timestamp",
+        "sessionID",
+        "assistantMessageID",
+        "textID",
+        "text"
+      ]
+    },
+    {
+      "t": "session.next.step.ended",
+      "finish": "stop",
+      "keys": [
+        "timestamp",
+        "sessionID",
+        "assistantMessageID",
+        "finish",
+        "cost",
+        "tokens",
+        "snapshot",
+        "files"
+      ]
+    }
+  ],
+  "continueFlowing": true,
+  "interruptContinue": {
+    "label": "interrupt-continue",
+    "ok": true,
+    "ms": 12,
+    "value": {
+      "status": 204,
+      "contentType": "",
+      "body": ""
+    }
+  },
+  "continueEvents": [
+    {
+      "t": "session.next.prompt.admitted"
+    },
+    {
+      "t": "session.next.prompted"
+    },
+    {
+      "t": "session.next.step.started"
+    },
+    {
+      "t": "session.next.text.started"
+    },
+    {
+      "t": "session.next.text.ended"
+    },
+    {
+      "t": "session.next.step.failed"
+    }
+  ],
+  "messagesAfterContinue": [
+    {
+      "type": "assistant",
+      "finish": "error",
+      "text": "The water cycle, also known as the hydrologic cycle, describes the continuous mo"
+    },
+    {
+      "type": "user",
+      "text": "Explain the water cycle in about 400 words. Output plain chat text only; do NOT "
+    }
+  ]
+}

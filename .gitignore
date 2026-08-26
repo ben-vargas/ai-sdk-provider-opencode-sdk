@@ -28,3 +28,8 @@ npm-debug.log*
 
 # TypeScript cache
 *.tsbuildinfo
+
+# Stage-0 spike: isolated server sandbox (contains copied credentials) and
+# separately-installed beta CLI
+spike/sandbox/
+spike/beta-cli/

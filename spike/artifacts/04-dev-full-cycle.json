@@ -1,0 +1,364 @@
+{
+  "firstEvent": {
+    "id": "evt_03fbf49b8001paCWMU7hwtFwdr",
+    "type": "server.connected",
+    "data": {}
+  },
+  "session": {
+    "label": "session.create",
+    "ok": true,
+    "ms": 57,
+    "value": {
+      "id": "ses_fc040b642ffeK1Kifqvc6Ed8Q2",
+      "projectID": "0d3425c598e03c4a14956072904534f96eaa159d",
+      "model": {
+        "id": "nemotron-3.5-lightning-free",
+        "providerID": "opencode",
+        "variant": "default"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "time": {
+        "created": 1787775896049,
+        "updated": 1787775896049
+      },
+      "title": "New session - 2026-08-26T20:24:56.049Z",
+      "location": {
+        "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+      },
+      "subpath": "spike/sandbox/workdir"
+    }
+  },
+  "receipt": {
+    "label": "rawPrompt",
+    "ok": true,
+    "ms": 6,
+    "value": {
+      "admittedSeq": 1,
+      "id": "msg_03fbf49f6001yZXruMHNNPwvKR",
+      "sessionID": "ses_fc040b642ffeK1Kifqvc6Ed8Q2",
+      "prompt": {
+        "text": "Reply with exactly one word: hello"
+      },
+      "delivery": "steer",
+      "timeCreated": 1787775896054
+    }
+  },
+  "waitRaw": {
+    "label": "wait-raw",
+    "ok": true,
+    "ms": 6,
+    "value": {
+      "status": 503,
+      "contentType": "application/json",
+      "body": {
+        "_tag": "ServiceUnavailableError",
+        "message": "Session wait is not available yet",
+        "service": "session.wait"
+      }
+    }
+  },
+  "messages": {
+    "status": 200,
+    "contentType": "application/json",
+    "body": {
+      "data": [
+        {
+          "id": "msg_03fbf64c1001dAufow5etbKTdS",
+          "time": {
+            "created": 1787775902913,
+            "completed": 1787775903056
+          },
+          "type": "assistant",
+          "agent": "build",
+          "model": {
+            "id": "nemotron-3.5-lightning-free",
+            "providerID": "opencode",
+            "variant": "default"
+          },
+          "content": [
+            {
+              "type": "text",
+              "id": "text-0",
+              "text": "hello"
+            }
+          ],
+          "snapshot": {
+            "start": "755e521ca52d2665672ed5af707c10fec12e0722",
+            "end": "755e521ca52d2665672ed5af707c10fec12e0722",
+            "files": []
+          },
+          "finish": "stop",
+          "cost": 0,
+          "tokens": {
+            "input": 3609,
+            "output": 1,
+            "reasoning": 39,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          }
+        },
+        {
+          "id": "msg_03fbf49f6001yZXruMHNNPwvKR",
+          "time": {
+            "created": 1787775896054
+          },
+          "text": "Reply with exactly one word: hello",
+          "type": "user"
+        }
+      ],
+      "cursor": {
+        "previous": "eyJpZCI6Im1zZ18wM2ZiZjY0YzEwMDFkQXVmb3c1ZXRiS1RkUyIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6InByZXZpb3VzIn0",
+        "next": "eyJpZCI6Im1zZ18wM2ZiZjQ5ZjYwMDF5WlhydU1ITk5Qd3ZLUiIsIm9yZGVyIjoiZGVzYyIsImRpcmVjdGlvbiI6Im5leHQifQ"
+      }
+    }
+  },
+  "events": [
+    {
+      "receivedAt": 1787775895995,
+      "id": "evt_03fbf49b8001paCWMU7hwtFwdr",
+      "type": "server.connected",
+      "data": {}
+    },
+    {
+      "receivedAt": 1787775896053,
+      "id": "evt_03fbf49f1001veDHmOXrjkMt3G",
+      "type": "session.created",
+      "durable": {
+        "aggregateID": "ses_fc040b642ffeK1Kifqvc6Ed8Q2",
+        "seq": 0,
+        "version": 1
+      },
+      "location": {
+        "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+      },
+      "data": {
+        "sessionID": "ses_fc040b642ffeK1Kifqvc6Ed8Q2",
+        "info": {
+          "id": "ses_fc040b642ffeK1Kifqvc6Ed8Q2",
+          "slug": "crisp-rocket",
+          "projectID": "0d3425c598e03c4a14956072904534f96eaa159d",
+          "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir",
+          "path": "spike/sandbox/workdir",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "New session - 2026-08-26T20:24:56.049Z",
+          "model": {
+            "id": "nemotron-3.5-lightning-free",
+            "providerID": "opencode"
+          },
+          "version": "0.0.0-dev-202608261632",
+          "time": {
+            "created": 1787775896049,
+            "updated": 1787775896049
+          }
+        }
+      }
+    },
+    {
+      "receivedAt": 1787775896058,
+      "id": "evt_03fbf49f6002ssDdDAS9Kfu1kL",
+      "type": "session.next.prompt.admitted",
+      "durable": {
+        "aggregateID": "ses_fc040b642ffeK1Kifqvc6Ed8Q2",
+        "seq": 1,
+        "version": 1
+      },
+      "location": {
+        "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+      },
+      "data": {
+        "timestamp": 1787775896054,
+        "sessionID": "ses_fc040b642ffeK1Kifqvc6Ed8Q2",
+        "messageID": "msg_03fbf49f6001yZXruMHNNPwvKR",
+        "prompt": {
+          "text": "Reply with exactly one word: hello"
+        },
+        "delivery": "steer"
+      }
+    },
+    {
+      "receivedAt": 1787775896149,
+      "id": "evt_03fbf4a01001MdBq1LbT77bChe",
+      "type": "session.next.prompted",
+      "durable": {
+        "aggregateID": "ses_fc040b642ffeK1Kifqvc6Ed8Q2",
+        "seq": 2,
+        "version": 1
+      },
+      "location": {
+        "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+      },
+      "data": {
+        "timestamp": 1787775896054,
+        "sessionID": "ses_fc040b642ffeK1Kifqvc6Ed8Q2",
+        "messageID": "msg_03fbf49f6001yZXruMHNNPwvKR",
+        "prompt": {
+          "text": "Reply with exactly one word: hello"
+        },
+        "delivery": "steer"
+      }
+    },
+    {
+      "receivedAt": 1787775902926,
+      "id": "evt_03fbf64c1002zLjKVchCnZzcvu",
+      "type": "session.next.step.started",
+      "durable": {
+        "aggregateID": "ses_fc040b642ffeK1Kifqvc6Ed8Q2",
+        "seq": 3,
+        "version": 1
+      },
+      "location": {
+        "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+      },
+      "data": {
+        "timestamp": 1787775902913,
+        "sessionID": "ses_fc040b642ffeK1Kifqvc6Ed8Q2",
+        "assistantMessageID": "msg_03fbf64c1001dAufow5etbKTdS",
+        "agent": "build",
+        "model": {
+          "id": "nemotron-3.5-lightning-free",
+          "providerID": "opencode",
+          "variant": "default"
+        },
+        "snapshot": "755e521ca52d2665672ed5af707c10fec12e0722"
+      }
+    },
+    {
+      "receivedAt": 1787775902926,
+      "id": "evt_03fbf64c6001qftdQ4RlC42UiL",
+      "type": "session.next.text.started",
+      "durable": {
+        "aggregateID": "ses_fc040b642ffeK1Kifqvc6Ed8Q2",
+        "seq": 4,
+        "version": 1
+      },
+      "location": {
+        "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+      },
+      "data": {
+        "timestamp": 1787775902918,
+        "sessionID": "ses_fc040b642ffeK1Kifqvc6Ed8Q2",
+        "assistantMessageID": "msg_03fbf64c1001dAufow5etbKTdS",
+        "textID": "text-0"
+      }
+    },
+    {
+      "receivedAt": 1787775902926,
+      "id": "evt_03fbf64cc0013Py4QecUxP1z6A",
+      "type": "session.next.text.delta",
+      "location": {
+        "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+      },
+      "data": {
+        "timestamp": 1787775902924,
+        "sessionID": "ses_fc040b642ffeK1Kifqvc6Ed8Q2",
+        "assistantMessageID": "msg_03fbf64c1001dAufow5etbKTdS",
+        "textID": "text-0",
+        "delta": "hello"
+      }
+    },
+    {
+      "receivedAt": 1787775902995,
+      "id": "evt_03fbf650c001CZyiv7Aj8u24ZT",
+      "type": "session.next.text.ended",
+      "durable": {
+        "aggregateID": "ses_fc040b642ffeK1Kifqvc6Ed8Q2",
+        "seq": 5,
+        "version": 1
+      },
+      "location": {
+        "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+      },
+      "data": {
+        "timestamp": 1787775902988,
+        "sessionID": "ses_fc040b642ffeK1Kifqvc6Ed8Q2",
+        "assistantMessageID": "msg_03fbf64c1001dAufow5etbKTdS",
+        "textID": "text-0",
+        "text": "hello"
+      }
+    },
+    {
+      "receivedAt": 1787775903058,
+      "id": "evt_03fbf6550001Y5pI75z8aE6dM4",
+      "type": "session.next.step.ended",
+      "durable": {
+        "aggregateID": "ses_fc040b642ffeK1Kifqvc6Ed8Q2",
+        "seq": 6,
+        "version": 2
+      },
+      "location": {
+        "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+      },
+      "data": {
+        "timestamp": 1787775903056,
+        "sessionID": "ses_fc040b642ffeK1Kifqvc6Ed8Q2",
+        "assistantMessageID": "msg_03fbf64c1001dAufow5etbKTdS",
+        "finish": "stop",
+        "cost": 0,
+        "tokens": {
+          "input": 3609,
+          "output": 1,
+          "reasoning": 39,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "snapshot": "755e521ca52d2665672ed5af707c10fec12e0722",
+        "files": []
+      }
+    }
+  ],
+  "sessionAfter": {
+    "label": "session.get",
+    "ok": true,
+    "ms": 7,
+    "value": {
+      "id": "ses_fc040b642ffeK1Kifqvc6Ed8Q2",
+      "projectID": "0d3425c598e03c4a14956072904534f96eaa159d",
+      "model": {
+        "id": "nemotron-3.5-lightning-free",
+        "providerID": "opencode",
+        "variant": "default"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "time": {
+        "created": 1787775896049,
+        "updated": 1787775896049
+      },
+      "title": "New session - 2026-08-26T20:24:56.049Z",
+      "location": {
+        "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+      },
+      "subpath": "spike/sandbox/workdir"
+    }
+  }
+}

@@ -1,0 +1,511 @@
+{
+  "data-uri": {
+    "uri": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEklEQVR4nGP4z8CAFWEXHbQSACj/P8Fu7N9hAAAAAElFTkSuQmCC",
+    "session": {
+      "label": "session.create",
+      "ok": true,
+      "ms": 57,
+      "value": {
+        "id": "ses_fc03f9386ffeQPgIQUvcRgC2Bg",
+        "projectID": "0d3425c598e03c4a14956072904534f96eaa159d",
+        "model": {
+          "id": "muse-spark-1.2-contributor-free",
+          "providerID": "opencode",
+          "variant": "default"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "time": {
+          "created": 1787775970462,
+          "updated": 1787775970462
+        },
+        "title": "New session - 2026-08-26T20:26:10.462Z",
+        "location": {
+          "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+        },
+        "subpath": "spike/sandbox/workdir"
+      }
+    },
+    "receipt": {
+      "label": "prompt",
+      "ok": true,
+      "ms": 4,
+      "value": {
+        "admittedSeq": 1,
+        "id": "msg_03fc06ca4001yiBTKUkzIWv05m",
+        "sessionID": "ses_fc03f9386ffeQPgIQUvcRgC2Bg",
+        "prompt": {
+          "text": "What is the dominant color of the attached image? Answer with one word.",
+          "files": [
+            {
+              "uri": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEklEQVR4nGP4z8CAFWEXHbQSACj/P8Fu7N9hAAAAAElFTkSuQmCC",
+              "mime": "image/png",
+              "name": "red-square.png"
+            }
+          ]
+        },
+        "delivery": "steer",
+        "timeCreated": 1787775970468
+      }
+    },
+    "assistant": {
+      "id": "msg_03fc07232001NNDIHG7kKMNXmD",
+      "time": {
+        "created": 1787775971890,
+        "completed": 1787775983810
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "muse-spark-1.2-contributor-free",
+        "providerID": "opencode",
+        "variant": "default"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "id": "rs_6a8f4be305713c7b72ce4314:rs_01a03fc072157d609ca22a80f68c7a2b:0",
+          "text": "",
+          "providerMetadata": {
+            "openai": {
+              "itemId": "rs_6a8f4be305713c7b72ce4314:rs_01a03fc072157d609ca22a80f68c7a2b",
+              "reasoningEncryptedContent": "Q-PaDgFLwwMgC3mkstitDfUQ26kTbyI2uV-zux2I1kbky5rWteYo1r9cE0BWY1pOzeXCRKltmUkwWDf1nOpcfXrIYGyfI2_PaJ5anD285CfpI94FQIyEZlTAgPEMv5F_9GhcUtSYcxl09mDvNc1cI7pdQ9BcNt0EBcnF6I94ufuVDh7z3d82hmWW2miq1SFxNpRe1zcjA5KXw4ErfpIQ6ZyH_QcL7SsCn3t2IKd8cOpjPkofLD0SAsnBBzCj8lWjCeU2io4w1Jv9kZ2XoGLM8y8BaeAS-SbRV3O0DOawY9zhYAnXmykAuqybTYC-9qE08ncxw8p-Uv8E3_JVP3e7aW9Kx-0by1uTKL9kpRDYPL5yBP8Lf8cBm_46MIffpgsJTgRt65JcMNpzXftt_6Ad2yjOvwwuCj3E2J-vRoNp4dk0T1O6f-G9nD8UJIc6G4w1QJoZbGgF00IL88z-VwygLdYxXaRbSwcvWM6oulT99k2_-BNlLSMJ7Q4p3M887XoNyJn0dgRBnW43Yi_-N-1wgIx6ulctH0uczs2srRIgnNU5nNRWQsYoLV85plkQERCTt9Gs8lPS78vCxA-MDi282_8Ze72Tx2TEn_UX18nPOT91uOpNnqzcyRzSWMAU0u1ot9f4VrWSPB47tnqIDlDgAnKyxjAaUSNc3zkx2JATmVH4YvPrHnM5oTNzcWLr4SUcrTiRH74-9ShPn9EtAWnTrvzelH0jBJoZI80-YaHydOxNkRg1UKRqXOjJgEnsPD_EQWAKO6NqjYX_zvD6SoBnjrhYNj-sSSihlAxZBd9RNW2QgtJQ7v1qmsIAsgoKhFNUmNBOjyWUG4nt2rETS2LzjCxPx16OdZalklckHvoFVkrzHhVXvSTjx9VWEgbWhGFYtDuIV6lCTbpQ5QJG-K9XBvJxAGpMZP4auFW60_evZoIr1X3CqPoMTQnFucNXUiw_N0kr7eL1k4Rzba7blbnYQAFEWdz4TpwAOPm_qgoKBwa3lSGX0-ubEweRv0NFTWN7rUHFJOG_iH8X2Yg8qI0sQLn1z-nage_eXajZqciv_KCp-gRZHKRbXQFZJH6SHayrjwWTbHPaZnH_OLKUIKMlmCzr0vX8ha61DaZbWKWgCBgYO1cdW8DOAiaFUc1xCJCBJ99Kp83oWoRbYT7EANxCch7LqTKU1cVIEJmPdAuUrvDNLMsFLTRF_J4qNReBJwbyLffG45VcVRrUyuVH9VSdpvq1sN7H9RWEzkEapyfPxjRukj7l4jyRRfUOBYiD5QF2-WjgS6j2bBgEy8EfK6QYKQPx4wGx3NBojJBGOTgubSUxzkYwUjPPGwfUuqYWiPRrL80mTUXWdnE3oow8TfY755NMPirzWv2u5VC1HeI_PM_CueDo9RihElXvnxkfifsmqCPtE_PFHChqNWPWpL3bG_6_7FgdV7iNjddSJdnTAIDUHVFEKy35-jLlh0w3PEVKXoSePex0EWGYNNAbd3__biK_Ih7nCjQikkqCgPL0UZq5j9sgjuPxamLd9wlrhMwPwux7KvKlPx0N2Vz_CU2APKgFqdAGM-_p5OcAd64ibnDk81gkE_0tJB98ZTJ_7dfg0G5zR2zOUMpPqQNSXfu1gBEbaboXRpvR8tX5Bfpi0AMpgcbynbnjAkr4Peo1GsUC85tLcK2h1X1xYTMn_Tzt6qF1a8t_wUjhS7sQaAsEiWMNvMSxH_PSnCHld0WQbd1eDT63YKM3v4lHsW9wuippFv39Z36lvX16leI7lMKaZOvK9iwisGBha_3QzWpNsBxR1a2zIcJACvZtqGUzmutp5mLUEUTgB4-v5sRZ34LDqODG1yBXBa4syvQq0rLKKeNqfTUpVxWZ4I6R7I2ti_q0qPkIYcZaRmVOEwGJPXTe5VGqXQ2RVYCJjiiKxrb7xuBp_p95sAV39yVCwkkdQTq1Az3Uin1QHFsJzdlt5rRAprDhi2dEf1iaI46v_V-aZRIydNdkGBDQrCR7Kev-IV842gR2dU_YsvLIz5-EObFNl0_5_QBiuhXoTO0NX4UbWU6EmHGZRXETLfxzn2mbaihNjTcmuAqN3c_uAmk8etU-XCFRo2fetLVBNssX1ScEKV66ZdGxKv69gXQwMsvdvKp0KxAr9QuLpx6N5aJk5T6XjCfYBAm3ziqZnvhU026VN6SrFeIDatnHzDx9iZgJ5JKwAotpKMRddpsHJiDuwWFd7kavifVqHSagx16H0AkkCWk5WcO5QAx65QDj8OQ-fvF1DaxVmAur_5IWxI8AABml6SKpmh3V--8rL7QUpQjSRUseLYG41bUsJk6PFLBacCgWvGoBLTifzC2BEoxVGlcIjrGnI8e8_JGfZSCAaopIOc1QaVTlugWKu_BWs6m_jhD4aNohITJwIvKg7bpqj5PF1Zy5jkzSchQ1HrfljqzItxNS81XFw1M9r_9JUvmjpItt1HwMnKIO8fGFQ_zGGt3HGvUG8VH4f0apmjZTWNYLj9A3JksQPVgi05dl3e6K0rBaKAIBlz3z26vqBaSWu8iAaR7E_dKjB5tczm6O3m-lk-jr4OkhZKfiF61tW47BGZCWclkDibjcpqnKFtj-8ahWxr2czASdnCxr6prqA0DrGbt3bGhgJ50xvy50KsGjZ2wJUCFmDzt7ZI5sOv6SEUIEtziPqHp4KjU2NsF2vEssfGtnoOw6MQEwZCnmCIbgz1z5NKVrL1xMDPYe4BF83tLznVxURS9xDTTfD3xIpWYvcr40boFzw_McUrOsQ8jws6EXvDWc3cyDXzZpMBteC4U0_AEzQVY3VIVA0ewJym5AleqYmphjbz2epbqu4hQiy9MKfdz9VYeFT-OW5hqchAGPYuQEP9181jUSrsIKwd6lRDMcibcI3uoWEJcMsBFCG1q1aZHAqx29iacKNwhdcUtwlUteAbtFBZJ6Fb4koSHu-82wc19gr0yV0_-t2uioITRh3ca3iA71px5An8UxOMzpZCFtqcyg7pZztG_B3nrydTSJj1wKRa1OzKVxs6kbGP38PDnJdSDIef6Pc1hPgghQqAmPe6cxfYGqhJNrxYDyvn4nYJD8OravGDiAVJCrdMBNh_ayvtfO4Zl6WYWfmWXT9ZCXeP244_3DhLqwFfEf6ixD6XQs307hrhnqNdUbiphkRohTKbiNaAwwDZ20qrSJgZLBUNghAST_f2fSrci4onsD6vfUPKRiydpllpfLqfFLsc_bmQIfscRxvRfYBrRktL-MpgtjmBeTiGHMzlb0VORFVMRSPgMQ6SdaRpmUDOBdAWi9jFQx0gsS0-2eXlZK5r5pExSvwqBDUYo5WNTokAL-MYJfvy_trWznbIWJ1b7esi57WPQm0ohqQ-GZ1jsw77Kez4KH3c1D5TJw2p8-iZ7kr6Z-NiGMAglVuH8WugAaOfaibSrXqPngQec37pXZrhfxm24r1WMpoW3HfjTi0t8fni5_BlVnbFo42yiltm7MlZbwVTI7GtSnBvmXeldFqOu9SKstyvQMIfMOVqn5Ql_-R4XY9R51lQMNWDhWop3gOQp7wpGgasjPDaQvVXh5ev-aAtRdvicSZRGuun3khuDHqzUIE0FKfnGF55dtC3XFaO2JJj_Kgo3hHlKdA1OG36yhKAoxwSAU9TKLzxVRawsUBIf8ucqvPXFU4B1ArlGIH3Ij5qP2b4DoDZA4U228eWSwUYMcO6rmC64j-wGNqWLSHe5N-kh61bO6gmIIdOlPOdn_IAkTUfN3FFhxMPEJumZuX0tWWvLc3qjTaMfXJwK78eUnprWqISydsb8ARP-5g9nSLxUA2rXgNWyz-wi7TuB0K2MpItxmqITCT2uKt2TR64tRqW-Rdk5lqZqvZDC0nuBcVkQDQIKAeq-OraabjIPXbnGynVnWW-Ez3OmBYdZvqm7T4-3FXVhitbPBC9EmwhFSv_MTHLHEJfbqhU3b61Ygr3JnmzZnDQDY3PRKysjJuJHFvVhsOBzhyiP7rJmbjJA17C1N5RTsJZfd9oyv91VV_JnHJLyYM8BjNoXFTJuIB-81k78utVSfLNtWiyd7Qj3g70V9hAWFvnaVBCgCLfVtJErGUfWK8noHBCNn-xdNuz_eqpG29eNe-an0wqPDTlZi91AtPsi43u07ocRYq9oArCblY3goSD6ePR6DNlfwz5thTOVoKWuXtDH-sq4CseEX07_DRtR882W0vkfJvXU8af_N-L9g2aa7sF8z9FFFHLSRZ9NR5xnTEiC3djIK0S1DzrlPuo7e5hh9VD8dl5gDf5KARjs4aSoy7HtHaS-XyUFsJxjm9L-ynyAAJWsBxHxZq5UrtWdi9wHTVFJZrMFUblg0f83CZqaegARvO_k1wYUkxL7LjKOa5Ir5L1qF5iww3HxhvxsBXrfGWDvFis0HD5OJkEsXtzyUYCjk0Epi7ZifUN7oOZhzpzsXnRqfGQY8Pk2IodCp4YBfzy5tNywvgdlUODTKHMLxvDum6cXW1W51UWdKUvxncFnxWO8IfVRiDe9kGivt-v6afa3TWsyLCmooh4msFSBt_E4h1Bgo39rXJwdbItzdthX5QdVc5PDMU1d57IlJk07yytBzpV4qCYyUK2cMwBOhUsUsJW6cCQM13V3mvTqpB7HNw1piIrOibyW3AwYgmLe0-fNsOCnIRFA4liUKj5tp59gqXVIYSszx3H-OY-90wejrMBGji47eQ-_1vgTkVbcO1i17xEVYXk7mo09FzxuckdtfwArrY91ZJiAXMgJ9b6eKxWzucyTONA2Hi7vzEOs_wqDCCeYWZXQkaYZdzpuLYItzJioH9AFh-WvFqMnrWAw47xe6OTi6aVaa111nfAMzTZ0cgOWpfIuSkNvDXP3ZipyXCYv-TzaJR7NAtpLm6IRuZY0JupxlLb-q-cRwaGSJjy7awJHdlfz6AhnAD8ddekjfj-4IIKux-eeHjoyG9Vp5l6P4k0Qpa7Y_cnkT-aqBL3J2BCRjZ0Wu5VG7irM1pxHeQm9knJ1bPrz4ZZvHKcoIcHK_jwNHflp-XMLvGuofviQaMvCb_tCvr3ooICukE_UC9k-Oa7lGHOgDIHgMIM531z48NySoDmPniGOYj1381rksE2cZgZ-BcLzLMem4AH1m-gsxuEcoIKnwaVrVNmc1-9vNeLM0nGIWS9w1HgE5FgCw4ZbPsNYLVTVs6AZ-9bzSYslejxGd1FYv7IL8_iAMJD8nv3z3iz-ByOlSn_69UQ8JjOplVwyXVHCZNjVgK8Uf9gEItgSrNv3d2FLN3M20uFEhO7DsmbN-dD68go-NhbKC0LOVVIwpEL31OKhGFkGiJnUaWKiPLTtZV6PQOTSNCw2uDmjkRkN9-fiHbdCm7LvQTXGfvHCmY8NWLN-JNU3eSnIvAkb6VCVqCPdw91EO6zdeXS3BWU4EgUYRUW4swLVgJAWr9t5EC7_9Os8Ntw-553omVwJL8yDwEx3e-AtzSGeZr7SmvuMT1s1Wv8c0UHfe-SivynvKj00-nQaBBLUWHe3BogUh-vIv2ch-9WJUV2LeH1t0rJditOm_yRMv8dGgqsLTpCzc3W20noV7w-PIL6vAPCR-iy1_pnd3hW6EkKKhqvaca9j-Gx7kem7E_Eg24myqjcty6PYJtehZsNFfkWGBcLpOPEs-Tklb5n2KX-lMO74MBgpxxNLA3ukVYx66G2sN5FWexBl6PzcDLwRw_B70eJrEGTcibn06tn6EzVfRQHy6vy1VN19_ILx4QnpV-KJ5f-2PzPeC9nLTWqFDrrCVRXGXWZfDBVUQYcsMc807kpdlp69tt5YNH6G1DFdoTleFwb1pmTVFD0nem0kjbCPeao94ltoB2YXAh06CEEKhM23MQWg9kb32fZLe5nzYEFh-UQZfjwtWi9nrrSW9PcG0earVBkM7JQcj7zefZ2rvjQch3FByKVUCi9CABYTGbMRCPjw7w7s9fzvMVCQ0CdLDsEAPh3PYHb1OTxgHBPFdGeX9a_Pgux2LaOeqm6stwky4MgppgIm68a-xlupFxemtuUpK-lga4iAhgro5HktdwrDBa0GIhGErG3A5SWj_YM9yo78gdEYlDo4zUHd3Vi-va-rwoyiziIYHXAasClswLAwzTwWK_QQ69v6AFM-kkuAlasu-OxuZj3lGsHXNQQjapcRJAQMRkUjdWma6-H1bm17DMeX2Rh30zu8ZBKNmYPZRULGcUvdfR5HsXdqaKZ3UJgbM-Bro3yJLlTdHY1UylZDYgS5Bcqvf_c8VJ6zG7n60SCB_YANyQDoxgP7q1H7tCzi6ti3sYDvoid176J7oijQI6opJzqnVyu8bQVNxCKGhoL9Hszc5x0a40xD3ZkT74kGdwusWA0CA2cL-18nwXkGTHz3kJelwiZwZp8Mvgh3Rpqpz1T3rATk3CvNGPnCRBjZKBB260ul81-YkGEy_9KyQWj_xr92ERRLe6QdeUP9iahJ13jBwg3VdBmAtwvuuHkateNxXGIzDlL9y9Cf_fCgTHtS-UB9BCBF8LAyg1_j8AbJDRcU43B-OqaAKSnS6Ipcx-d7ogPDA8RDH6tbBsCy_cAYF9BbQLrH23LGl4uBjduB-CSnqLyJyuPRRA0IpCtUIYu5Z8prj6D1Ssm0SrzTxNlk3IvrWelLbrSBm5NzFQAc81HQOiuDB5U1ma5lSiBRSFUYiIF-KxTdsonn1j59TCDSsLjml2poDw3zE0Tm_0YZwyKpDOxqhRh0l7fJ4118NbUxF3MYD-YcUkO3Zpgt4nPas9StR2fNAz5aiLcwVU2P3iJDTrZieUQZQ5F5_UxZz0C0pbZWqJ6z4grtTkjQiThbajQStgLMWKXvifLgVlS4l8IVg9X1nhybH-DYpiVRJCt4gSuTs82KadFfG_0A9PWQeTSxsfCR0W_WbalgUw1j-Ly76014ex7JuhKQnLojeE8udcGnrhqv9MxaT8qLe4kajoGEV5IM-KO-usqjb7I3mlmnphbugHtYeZbPBJP_LXJQu8-2vPnoxWHpC03ICTLW5nyFp1Qji9Hy8KJDFbOYxlEbut5gXR5P3cSxrxMqgXAGhCf0x7EUvPeOMY6-snEMqkq7Us9u9y-lhjB8If1gZ0UPjSGyx9_-r4-nCZCBd7EgyYPnqgAibeLOr6I82WLYTv_A1nRVErDf7fhTP3dGi0_78FfRpKE6DvH5J0s2Khvf9Ai98o18x_vE4iOPVqxA2FTnOYmvBDszZGutmTczuYP_Cz7PI28uMBxE5wlCpxdoSJy07GRYtLyBGfA9xZ5QAK7BukB5JRhBG7XpCW1oefzSradED7WkCsCG7peHq0qGDqBlHIvlPy-FA5wxb6cNgaGkTR4Fs26huHbxz_dRKqXkxkxrDhoF9ucJEnF4pRUDozdyVUXmkHVL7m8Q45TFwIj6ZnjxpBzm0W9RiYQsb5eDccOEqwfHwor61qBGq-E1_sw_eNGVFj38d9tynFUV2LT6j2IDWHHVpYHK8OoFvDBh_VPr7KahVBA7IF-1KLLq_DQ6veSOhOjATuAdvIwVQy19q6FzLEBcOJD29LPOOP5Ez3pCYpXpXLJU5nF5j5NeOTPMiD8OuG-faqpbmCuU7DJI2UScxy757CU5CPo5tVWZCnP3y27CR86WUUJPaKR6rYrI2j9kjsZWasC0i_u1q2GMDp6db6wRNcWKiz9NUqm3iY8-vFa43o-JLvjbVUVpSEqyC5h3UEicV22WAwZbTP0W9tsMh22rX_9SfKiMn02s2C_i31hXuiqk9xuoKqtRWrlJCd83KKgB34XMkkzD-YXOjD-snXm6oa_tkLdGMbrLqYHJvZZRhpoGeY74uufMSWJsG6hpEBEbG7TXqeKWwNlEJabiJxl2zrvxGf5CB2Lufj2ZbvWXR0-p834TO9CnS6P_-U-8n4WYz4sGh0VOrBH5_dYoUprmxAkNNLgiXIma5LlVa7sFKUO8S1CinQmeFlNfdh7dxdMW2l3hxMLc9BZWOjtJlgVPTyeVMmuUzpDGUHQ4_S6SnX9j4TCPTd4MVQ_HxzBFc_rAiBY4KvpLkBcBI0iCMT5UIFqaV5gqXy3b-1U9rEADJsp05eiUKxKXLJCWjDvkfmN6UagyiNzaajYe-12MH4drKVM9bc04lNkKCNuQrRh-KYhiRsLeA7d3J3IATDcWjMpLFqxZnOf4eRWj2XWZGR7GB27g1ei0UuhxQUgy-ANEcSa3vMqkmHfuUbw5jvNonF02zFbBypkn4Y-rtaCO8p_RDuaT6Xfk27mRHY5GvrLlikUsjalDO0_dF3Rt-IZD2SN5xfjbvT0te0rGDfU8gx4LsaDFedSHFZi6_j3ewvH1PYLnKYggu1UBbFzLn9YcIGgbbUu9_zC4fdmJp6XnzeEv4lm750u73qpiK8zOLGY0PlH6a8Do5GDz7jUiyDK-quJQWvrZ0SKz-V8F77V-Vj9BSJ5ywpjaCAcmZ5VcdxZ5ceqsn6_cO2CkE9OA_eJ-rG642c7dbWa3aF8hDpyh9mdLS1Or-6QCUEPIC1pYo4le_q6aeDyhPfSJ6VFRg_C0-9oFLXV_UE8gIYmnb6B-2_Ey--hrXTsZW1mdeoPivkwaLoHFe7LLNEsvfrnxVTGHFjOY1jUQjwbixfSOWVkd1Jjw3pGAeVH6Jk3yyBFz_qcCPAP-3lWyTowctJofWBjCnGWMlwNtkjKNUCNNhWwb8txuNyspaqGANoO4-sE_mGcIZWEIZBtr1D3e106X-Sx3DXyexqfR-Cc8bhMXgbZvXIxpP4rgRCebnDU2qEK2RAzZvuGX0p0WSQguNA1ftrLh47jQwaotdT_cDUdyH9VliY3zQFz0f8hceRXbFZ6UFO6FiAqKvEfLdo_GgGWUAVnwjqmQJXRWOC9iy1OOmjjVde3BjiPRABwNQMM0Pyomzts747sAvDjZoqo8rtETzM-uj9NrEPmIdo00uDOublVVJjFKFyDsRK9z4WKfzOx6kN6nkDUl1IIrAFZ1JIU_m_1i9bLnZOCzP22jkJTgp-YxomZ_K1g6NVxCbQ5gl-23rvGqVHyqz5SIaWkIBXs65iL7A0QDMjj9BnqAz8FCHJmbqTPmH63KaOGpTT_AuPIddQe_IPmNbml6V49r0iWNybfjWAnZxhAwenXHgw3Sqo4RE8fAYQh4Gvb6Oi5ASN9dijsZTLIhIUNvEfmji8dFYVzWOuDImDGSj5LVny3PKa7aSrqNIxnzfomu3BW7-wR5BH1A7S0HH87ky3fOzUUC1pvA-JnDJNskv7Vqr66EPT9LAAesv3OzHCYmA6Q75r_MYjaVD1pcfN4rHZTOPkpJZsogDkvsQo-xbLHyr3DuSPW_FGvWnE07T0QPwBgEi1G2nYUQSn0OdB8DzKI7u9ysBuAfTPr-XgAyeiaNW0GKvvdfGJ55ZOyLxOOr9RPhK9gqvrVsXfsHCPn1SONBg2y9xomtGvCJAUkxQ6hmfxSKJdBuGfhu91zsStsaA2uCrbVb7j9T0T7M2VntPLlDBD6AQqNo9uUAf1R7cP_EMqY3ncYom2npRjVmLScecElExU3VUWktjMXiufCEZz-gBcCto4iGmqXBYJ4o67GGYauEUH0sYu2Q2VcL22Ryy0X853ZNiY1AKk_NoEr7dmBKjOuoC9ZVK3J1kK3BevutbpvZ6RzDjydxQVwpLl40qZBbOTHFx90JQT8mkQSVYYCexnrnDFYLFl4FpOplZIn2xr8MTwhjXcuOz1fv-sg8groy0JsZN4PLzz0DGk_uhrvOMftFVIPaMaJq3kp7VFW5kYpPOW-wNqTRwbGkSDBMZ_uKo9G0hZnLTxHWT0w3_1UFZ2Cetl4mwgTp99Ds1m0OOgHL-Lf7JjClI8_gaXsHGCdO6lwvJhWbPtxSYgn5C5TJs1eLfTr3mZQKeZah_E7tBG0jgX_m00EmmRLoJlaPShEdw3_BB-Hvb2HKtxob85okbNns09vltpHDkD2m3WkYaElIYYni0fqetWYgGq19k4ncd9QJW_pZ1f4dygM_pQ7egEcQKHLQe2gsdU2RharHL-9HA_Y5EfsQz4XCw6L3DaSbPUuf2F1iTqDhZercvr3MWhHqL9EAfl22kAI_uGONJfr4O3vTl92rXgIMz6svT4BGZb2xKmDTL5_f_P8iyGcOeo34PBYAkQxK9FdtEzQqJJ0GzmkBRJIRwo3R0_yT0Zoi8uscZboe6lRSYt-0dP2v571P7PKijo0KB-x9nim8Scq-xGJFgbUxIWtnAVW4KbHUdOE8KI-aWOxmlxesxF1y5OtbE2XiBqxfol7Meptzv3B7ZxKLLCRrDeBzdL2cOO21Gj3E_LoQX_TPHiChriJaSukqEq5W5pi_pOxXBaL_fzJ-i8GwBbRPFuLAQdSiAvQuk1_Yx0FydcUecsUr79IjhKxLTcXIEeTw9o173OkvJ_C7k8-edUU7gYU0tHfyKsLXGiYv3mrMux7HB9K64-YIer_TbvSUCG0Fq4O8g3vmQYD9iBtKd7xu_BwvirlT6OHI4jONROo05TqLQYbtNydYjWlgfMCrEU54KmdUciGInu-qo9uZen92yP3kBFgZ5oK5lDIL8sGcQ9f7lDN1c9hQoCjO5roXOss5FDZZoTsXd8HGPICloKoJhywbGx6wS2LUrhP5eTlZ6jyBPuw362cwNCXtHTMSJ2fpq13soZa6s2pZtNv7PbdlgaXgQi4idlhHQ_MLaJyHoXJcX6T7GALHKuvtV7rktvqKVHgvs--R2LSB6RAfZ7PX-6gBQ7PoS8JZCt4t4NehEuGOezIlARG1cxonzoBT1NNdsqOg5jiGC6whnKaFFm9jU3SZlG6J5VoJQoaobJBjaaXtYDP1i1Pp0BZOUdfM1M7yD_A-okDftpIQzLRYoUwKiuvp3QNqObMumNYYS8gLHs-tk8HGH1P__gocH-sxyp5GSlpWfaLimsCcNir5qN4SdOxHnyCxBwfwX6C6RNxka8Qaepr2a0xYpKp9mfwIniTvbtMO3PQCfcsKp-RcF9E0"
+            }
+          },
+          "time": {
+            "created": 1787775971894,
+            "completed": 1787775983702
+          }
+        },
+        {
+          "type": "text",
+          "id": "msg_01a03fc0a06f77e19ef07ef60855e9fa",
+          "text": "White"
+        }
+      ],
+      "snapshot": {
+        "start": "0b904b5406007bee8656758d2ca3f1c1601caaff",
+        "end": "0b904b5406007bee8656758d2ca3f1c1601caaff",
+        "files": []
+      },
+      "finish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 3344,
+        "output": 11,
+        "reasoning": 750,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    "userMessage": {
+      "id": "msg_03fc06ca4001yiBTKUkzIWv05m",
+      "time": {
+        "created": 1787775970468
+      },
+      "text": "What is the dominant color of the attached image? Answer with one word.",
+      "files": [
+        {
+          "uri": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEklEQVR4nGP4z8CAFWEXHbQSACj/P8Fu7N9hAAAAAElFTkSuQmCC",
+          "mime": "image/png",
+          "name": "red-square.png"
+        }
+      ],
+      "type": "user"
+    }
+  },
+  "file-uri": {
+    "uri": "file:///Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir/red-square.png",
+    "session": {
+      "label": "session.create",
+      "ok": true,
+      "ms": 72,
+      "value": {
+        "id": "ses_fc03f5bfbffeFwVy1HaDZEjMFi",
+        "projectID": "0d3425c598e03c4a14956072904534f96eaa159d",
+        "model": {
+          "id": "muse-spark-1.2-contributor-free",
+          "providerID": "opencode",
+          "variant": "default"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "time": {
+          "created": 1787775984713,
+          "updated": 1787775984713
+        },
+        "title": "New session - 2026-08-26T20:26:24.713Z",
+        "location": {
+          "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+        },
+        "subpath": "spike/sandbox/workdir"
+      }
+    },
+    "receipt": {
+      "label": "prompt",
+      "ok": true,
+      "ms": 4,
+      "value": {
+        "admittedSeq": 1,
+        "id": "msg_03fc0a44c001anRH3eysCXTSNb",
+        "sessionID": "ses_fc03f5bfbffeFwVy1HaDZEjMFi",
+        "prompt": {
+          "text": "What is the dominant color of the attached image? Answer with one word.",
+          "files": [
+            {
+              "uri": "file:///Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir/red-square.png",
+              "mime": "image/png",
+              "name": "red-square.png"
+            }
+          ]
+        },
+        "delivery": "steer",
+        "timeCreated": 1787775984716
+      }
+    },
+    "assistant": {
+      "id": "msg_03fc0a4b70014llH5UW3aRpGTM",
+      "time": {
+        "created": 1787775984823,
+        "completed": 1787775984824
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "muse-spark-1.2-contributor-free",
+        "providerID": "opencode",
+        "variant": "default"
+      },
+      "content": [],
+      "snapshot": {
+        "start": "0b904b5406007bee8656758d2ca3f1c1601caaff"
+      },
+      "finish": "error",
+      "error": {
+        "type": "unknown",
+        "message": "OpenAI Responses media must contain valid base64"
+      }
+    },
+    "userMessage": {
+      "id": "msg_03fc0a44c001anRH3eysCXTSNb",
+      "time": {
+        "created": 1787775984716
+      },
+      "text": "What is the dominant color of the attached image? Answer with one word.",
+      "files": [
+        {
+          "uri": "file:///Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir/red-square.png",
+          "mime": "image/png",
+          "name": "red-square.png"
+        }
+      ],
+      "type": "user"
+    }
+  },
+  "relative-path": {
+    "uri": "red-square.png",
+    "session": {
+      "label": "session.create",
+      "ok": true,
+      "ms": 73,
+      "value": {
+        "id": "ses_fc03f57bdffeAI5tlMFAvRr5S6",
+        "projectID": "0d3425c598e03c4a14956072904534f96eaa159d",
+        "model": {
+          "id": "muse-spark-1.2-contributor-free",
+          "providerID": "opencode",
+          "variant": "default"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "time": {
+          "created": 1787775985800,
+          "updated": 1787775985800
+        },
+        "title": "New session - 2026-08-26T20:26:25.800Z",
+        "location": {
+          "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+        },
+        "subpath": "spike/sandbox/workdir"
+      }
+    },
+    "receipt": {
+      "label": "prompt",
+      "ok": true,
+      "ms": 3,
+      "value": {
+        "admittedSeq": 1,
+        "id": "msg_03fc0a88a0016jo5ybnH9qsye4",
+        "sessionID": "ses_fc03f57bdffeAI5tlMFAvRr5S6",
+        "prompt": {
+          "text": "What is the dominant color of the attached image? Answer with one word.",
+          "files": [
+            {
+              "uri": "red-square.png",
+              "mime": "image/png",
+              "name": "red-square.png"
+            }
+          ]
+        },
+        "delivery": "steer",
+        "timeCreated": 1787775985802
+      }
+    },
+    "assistant": {
+      "id": "msg_03fc0a8e0001z7bvHlJLBBwZwj",
+      "time": {
+        "created": 1787775985888,
+        "completed": 1787775985888
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "muse-spark-1.2-contributor-free",
+        "providerID": "opencode",
+        "variant": "default"
+      },
+      "content": [],
+      "snapshot": {
+        "start": "0b904b5406007bee8656758d2ca3f1c1601caaff"
+      },
+      "finish": "error",
+      "error": {
+        "type": "unknown",
+        "message": "OpenAI Responses media must contain valid base64"
+      }
+    },
+    "userMessage": {
+      "id": "msg_03fc0a88a0016jo5ybnH9qsye4",
+      "time": {
+        "created": 1787775985802
+      },
+      "text": "What is the dominant color of the attached image? Answer with one word.",
+      "files": [
+        {
+          "uri": "red-square.png",
+          "mime": "image/png",
+          "name": "red-square.png"
+        }
+      ],
+      "type": "user"
+    }
+  },
+  "absolute-path": {
+    "uri": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir/red-square.png",
+    "session": {
+      "label": "session.create",
+      "ok": true,
+      "ms": 90,
+      "value": {
+        "id": "ses_fc03f5380ffebmSZahZkP5EOIl",
+        "projectID": "0d3425c598e03c4a14956072904534f96eaa159d",
+        "model": {
+          "id": "muse-spark-1.2-contributor-free",
+          "providerID": "opencode",
+          "variant": "default"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "time": {
+          "created": 1787775986902,
+          "updated": 1787775986902
+        },
+        "title": "New session - 2026-08-26T20:26:26.902Z",
+        "location": {
+          "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+        },
+        "subpath": "spike/sandbox/workdir"
+      }
+    },
+    "receipt": {
+      "label": "prompt",
+      "ok": true,
+      "ms": 3,
+      "value": {
+        "admittedSeq": 1,
+        "id": "msg_03fc0acd8001m5ilEXYHLEvWYx",
+        "sessionID": "ses_fc03f5380ffebmSZahZkP5EOIl",
+        "prompt": {
+          "text": "What is the dominant color of the attached image? Answer with one word.",
+          "files": [
+            {
+              "uri": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir/red-square.png",
+              "mime": "image/png",
+              "name": "red-square.png"
+            }
+          ]
+        },
+        "delivery": "steer",
+        "timeCreated": 1787775986904
+      }
+    },
+    "assistant": {
+      "id": "msg_03fc0ad270017qIvp8OYWPGakG",
+      "time": {
+        "created": 1787775986983,
+        "completed": 1787775986984
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "muse-spark-1.2-contributor-free",
+        "providerID": "opencode",
+        "variant": "default"
+      },
+      "content": [],
+      "snapshot": {
+        "start": "0b904b5406007bee8656758d2ca3f1c1601caaff"
+      },
+      "finish": "error",
+      "error": {
+        "type": "unknown",
+        "message": "OpenAI Responses media must contain valid base64"
+      }
+    },
+    "userMessage": {
+      "id": "msg_03fc0acd8001m5ilEXYHLEvWYx",
+      "time": {
+        "created": 1787775986904
+      },
+      "text": "What is the dominant color of the attached image? Answer with one word.",
+      "files": [
+        {
+          "uri": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir/red-square.png",
+          "mime": "image/png",
+          "name": "red-square.png"
+        }
+      ],
+      "type": "user"
+    }
+  },
+  "https-uri": {
+    "uri": "https://opencode.ai/favicon-96x96-v3.png",
+    "session": {
+      "label": "session.create",
+      "ok": true,
+      "ms": 77,
+      "value": {
+        "id": "ses_fc03f4f30ffe1sN3eHJcBWRHoV",
+        "projectID": "0d3425c598e03c4a14956072904534f96eaa159d",
+        "model": {
+          "id": "muse-spark-1.2-contributor-free",
+          "providerID": "opencode",
+          "variant": "default"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "time": {
+          "created": 1787775987993,
+          "updated": 1787775987993
+        },
+        "title": "New session - 2026-08-26T20:26:27.993Z",
+        "location": {
+          "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+        },
+        "subpath": "spike/sandbox/workdir"
+      }
+    },
+    "receipt": {
+      "label": "prompt",
+      "ok": true,
+      "ms": 3,
+      "value": {
+        "admittedSeq": 1,
+        "id": "msg_03fc0b11b001O9H4WgxZOWScKi",
+        "sessionID": "ses_fc03f4f30ffe1sN3eHJcBWRHoV",
+        "prompt": {
+          "text": "What is the dominant color of the attached image? Answer with one word.",
+          "files": [
+            {
+              "uri": "https://opencode.ai/favicon-96x96-v3.png",
+              "mime": "image/png",
+              "name": "favicon.png"
+            }
+          ]
+        },
+        "delivery": "steer",
+        "timeCreated": 1787775987995
+      }
+    },
+    "assistant": {
+      "id": "msg_03fc0b169001d67Kfgo7o0uS32",
+      "time": {
+        "created": 1787775988073,
+        "completed": 1787775988073
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "muse-spark-1.2-contributor-free",
+        "providerID": "opencode",
+        "variant": "default"
+      },
+      "content": [],
+      "snapshot": {
+        "start": "0b904b5406007bee8656758d2ca3f1c1601caaff"
+      },
+      "finish": "error",
+      "error": {
+        "type": "unknown",
+        "message": "OpenAI Responses media must contain valid base64"
+      }
+    },
+    "userMessage": {
+      "id": "msg_03fc0b11b001O9H4WgxZOWScKi",
+      "time": {
+        "created": 1787775987995
+      },
+      "text": "What is the dominant color of the attached image? Answer with one word.",
+      "files": [
+        {
+          "uri": "https://opencode.ai/favicon-96x96-v3.png",
+          "mime": "image/png",
+          "name": "favicon.png"
+        }
+      ],
+      "type": "user"
+    }
+  }
+}

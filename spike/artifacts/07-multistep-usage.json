@@ -1,0 +1,217 @@
+{
+  "receipt": {
+    "admittedSeq": 1,
+    "id": "msg_03fc6d8b80017Mo6uwXinwXEGg",
+    "sessionID": "ses_fc03928a7ffegM6NasAxFsXl06",
+    "prompt": {
+      "text": "Create a file named notes.txt containing exactly the word hello, then confirm in chat that you are done."
+    },
+    "delivery": "steer",
+    "timeCreated": 1787776391353
+  },
+  "steps": [
+    {
+      "t": "session.next.step.started",
+      "assistantMessageID": "msg_03fc6f0830015525T6hTduYnjx"
+    },
+    {
+      "t": "session.next.step.ended",
+      "assistantMessageID": "msg_03fc6f0830015525T6hTduYnjx",
+      "finish": "tool-calls",
+      "tokens": {
+        "input": 1447,
+        "output": 30,
+        "reasoning": 62,
+        "cache": {
+          "read": 2176,
+          "write": 0
+        }
+      },
+      "cost": 0
+    },
+    {
+      "t": "session.next.step.started",
+      "assistantMessageID": "msg_03fc7084d001zPJS7kHsyesuLy"
+    },
+    {
+      "t": "session.next.step.ended",
+      "assistantMessageID": "msg_03fc7084d001zPJS7kHsyesuLy",
+      "finish": "stop",
+      "tokens": {
+        "input": 3681,
+        "output": 16,
+        "reasoning": 21,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "cost": 0
+    }
+  ],
+  "toolEvents": [
+    {
+      "t": "session.next.tool.input.started",
+      "id": "call-249f8ea3-49d6-46b4-9805-b80e3deabefb",
+      "name": "write",
+      "keys": [
+        "timestamp",
+        "sessionID",
+        "assistantMessageID",
+        "callID",
+        "name"
+      ]
+    },
+    {
+      "t": "session.next.tool.input.delta",
+      "id": "call-249f8ea3-49d6-46b4-9805-b80e3deabefb",
+      "keys": [
+        "timestamp",
+        "sessionID",
+        "assistantMessageID",
+        "callID",
+        "delta"
+      ]
+    },
+    {
+      "t": "session.next.tool.input.ended",
+      "id": "call-249f8ea3-49d6-46b4-9805-b80e3deabefb",
+      "keys": [
+        "timestamp",
+        "sessionID",
+        "assistantMessageID",
+        "callID",
+        "text"
+      ]
+    },
+    {
+      "t": "session.next.tool.called",
+      "id": "call-249f8ea3-49d6-46b4-9805-b80e3deabefb",
+      "name": "write",
+      "keys": [
+        "timestamp",
+        "sessionID",
+        "assistantMessageID",
+        "callID",
+        "tool",
+        "input",
+        "provider"
+      ]
+    },
+    {
+      "t": "session.next.tool.success",
+      "id": "call-249f8ea3-49d6-46b4-9805-b80e3deabefb",
+      "keys": [
+        "timestamp",
+        "sessionID",
+        "assistantMessageID",
+        "callID",
+        "structured",
+        "content",
+        "outputPaths",
+        "provider"
+      ]
+    }
+  ],
+  "usageEvents": [],
+  "allEventTypes": [
+    "session.next.prompt.admitted",
+    "session.next.prompted",
+    "session.next.step.started",
+    "session.next.tool.input.started",
+    "session.next.tool.input.delta",
+    "session.next.tool.input.ended",
+    "session.next.tool.called",
+    "session.next.tool.success",
+    "session.next.step.ended",
+    "session.next.step.started",
+    "session.next.text.started",
+    "session.next.text.delta",
+    "session.next.text.delta",
+    "session.next.text.delta",
+    "session.next.text.delta",
+    "session.next.text.delta",
+    "session.next.text.delta",
+    "session.next.text.delta",
+    "session.next.text.delta",
+    "session.next.text.delta",
+    "session.next.text.delta",
+    "session.next.text.delta",
+    "session.next.text.delta",
+    "session.next.text.delta",
+    "session.next.text.delta",
+    "session.next.text.delta",
+    "session.next.text.delta",
+    "session.next.text.ended",
+    "session.next.step.ended"
+  ],
+  "assistantMessages": [
+    {
+      "id": "msg_03fc7084d001zPJS7kHsyesuLy",
+      "finish": "stop",
+      "tokens": {
+        "input": 3681,
+        "output": 16,
+        "reasoning": 21,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "cost": 0,
+      "contentTypes": [
+        "text"
+      ]
+    },
+    {
+      "id": "msg_03fc6f0830015525T6hTduYnjx",
+      "finish": "tool-calls",
+      "tokens": {
+        "input": 1447,
+        "output": 30,
+        "reasoning": 62,
+        "cache": {
+          "read": 2176,
+          "write": 0
+        }
+      },
+      "cost": 0,
+      "contentTypes": [
+        "tool"
+      ]
+    }
+  ],
+  "sessionAfter": {
+    "label": "session.get",
+    "ok": true,
+    "ms": 6,
+    "value": {
+      "id": "ses_fc03928a7ffegM6NasAxFsXl06",
+      "projectID": "0d3425c598e03c4a14956072904534f96eaa159d",
+      "model": {
+        "id": "nemotron-3.5-lightning-free",
+        "providerID": "opencode",
+        "variant": "default"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "time": {
+        "created": 1787776391037,
+        "updated": 1787776391037
+      },
+      "title": "New session - 2026-08-26T20:33:11.037Z",
+      "location": {
+        "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+      },
+      "subpath": "spike/sandbox/workdir"
+    }
+  }
+}

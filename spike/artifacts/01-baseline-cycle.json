@@ -1,0 +1,187 @@
+{
+  "firstEventOnSubscribe": {
+    "id": "evt_03fb795a8001x4yWD95OIG2T1q",
+    "type": "server.connected",
+    "data": {}
+  },
+  "session": {
+    "label": "session.create",
+    "ok": true,
+    "ms": 47,
+    "value": {
+      "id": "ses_fc0486a50ffeTLma03gCPy1IWr",
+      "projectID": "0d3425c598e03c4a14956072904534f96eaa159d",
+      "model": {
+        "id": "nemotron-3.5-lightning-free",
+        "providerID": "opencode",
+        "variant": "default"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "time": {
+        "created": 1787775391192,
+        "updated": 1787775391192
+      },
+      "title": "New session - 2026-08-26T20:16:31.192Z",
+      "location": {
+        "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+      },
+      "subpath": "spike/sandbox/workdir"
+    }
+  },
+  "receipt": {
+    "label": "session.prompt",
+    "ok": false,
+    "ms": 3,
+    "error": {
+      "_tag": "InvalidRequestError",
+      "message": "Missing key\n  at [\"prompt\"]",
+      "kind": "Payload"
+    }
+  },
+  "wait": {
+    "label": "session.wait",
+    "ok": false,
+    "ms": 2,
+    "error": {
+      "_tag": "ServiceUnavailableError",
+      "message": "Session wait is not available yet",
+      "service": "session.wait"
+    }
+  },
+  "messages": {
+    "label": "message.list",
+    "ok": true,
+    "ms": 13,
+    "value": {
+      "data": [],
+      "cursor": {
+        "previous": null,
+        "next": null
+      }
+    }
+  },
+  "sessionAfter": {
+    "label": "session.get",
+    "ok": true,
+    "ms": 4,
+    "value": {
+      "id": "ses_fc0486a50ffeTLma03gCPy1IWr",
+      "projectID": "0d3425c598e03c4a14956072904534f96eaa159d",
+      "model": {
+        "id": "nemotron-3.5-lightning-free",
+        "providerID": "opencode",
+        "variant": "default"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "time": {
+        "created": 1787775391192,
+        "updated": 1787775391192
+      },
+      "title": "New session - 2026-08-26T20:16:31.192Z",
+      "location": {
+        "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+      },
+      "subpath": "spike/sandbox/workdir"
+    }
+  },
+  "inboxAfter": {
+    "label": "session.inbox.list",
+    "ok": false,
+    "ms": 3,
+    "error": {
+      "__error": true,
+      "name": "ClientError",
+      "message": "UnsupportedContentType",
+      "reason": "UnsupportedContentType"
+    }
+  },
+  "collectorDone": {
+    "__error": true,
+    "name": "ClientError",
+    "message": "Transport",
+    "reason": "Transport",
+    "cause": {
+      "name": "AbortError",
+      "message": "This operation was aborted"
+    }
+  },
+  "events": [
+    {
+      "receivedAt": 1787775391149,
+      "id": "evt_03fb795a8001x4yWD95OIG2T1q",
+      "type": "server.connected",
+      "data": {}
+    },
+    {
+      "receivedAt": 1787775391197,
+      "id": "evt_03fb795d80010rxa0PNhgiXQxz",
+      "type": "session.created",
+      "durable": {
+        "aggregateID": "ses_fc0486a50ffeTLma03gCPy1IWr",
+        "seq": 0,
+        "version": 1
+      },
+      "location": {
+        "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+      },
+      "data": {
+        "sessionID": "ses_fc0486a50ffeTLma03gCPy1IWr",
+        "info": {
+          "id": "ses_fc0486a50ffeTLma03gCPy1IWr",
+          "slug": "shiny-sailor",
+          "projectID": "0d3425c598e03c4a14956072904534f96eaa159d",
+          "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir",
+          "path": "spike/sandbox/workdir",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "New session - 2026-08-26T20:16:31.192Z",
+          "model": {
+            "id": "nemotron-3.5-lightning-free",
+            "providerID": "opencode"
+          },
+          "version": "0.0.0-dev-202608261632",
+          "time": {
+            "created": 1787775391192,
+            "updated": 1787775391192
+          }
+        }
+      }
+    }
+  ],
+  "replayCheck": {
+    "firstEvent": {
+      "id": "evt_03fb79bd8001Igz58yKaxRjbVo",
+      "type": "server.connected",
+      "data": {}
+    },
+    "eventsReceived": [
+      "server.connected"
+    ]
+  }
+}

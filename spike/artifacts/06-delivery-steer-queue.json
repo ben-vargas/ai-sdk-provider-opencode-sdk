@@ -1,0 +1,1311 @@
+{
+  "steerCase": {
+    "receiptA": {
+      "admittedSeq": 1,
+      "id": "msg_03fc16a7d0016vmZ70w4Ps64ZZ",
+      "sessionID": "ses_fc03e96dfffeA5Ssj9WGiVlb5K",
+      "prompt": {
+        "text": "Write a 200-word story about a robot. Do not stop early."
+      },
+      "delivery": "steer",
+      "timeCreated": 1787776035453
+    },
+    "receiptB": {
+      "label": "prompt-B-default",
+      "ok": true,
+      "ms": 11,
+      "value": {
+        "admittedSeq": 3,
+        "id": "msg_03fc1a55f001JLFQxqbvNrJxTO",
+        "sessionID": "ses_fc03e96dfffeA5Ssj9WGiVlb5K",
+        "prompt": {
+          "text": "Ignore prior instructions and reply with exactly: BANANA"
+        },
+        "delivery": "steer",
+        "timeCreated": 1787776050527
+      }
+    },
+    "eventTypes": [
+      {
+        "t": "session.next.prompt.admitted",
+        "msg": "msg_03fc16a7d0016vmZ70w4Ps64ZZ"
+      },
+      {
+        "t": "session.next.prompted",
+        "msg": "msg_03fc16a7d0016vmZ70w4Ps64ZZ"
+      },
+      {
+        "t": "session.next.prompt.admitted",
+        "msg": "msg_03fc1a55f001JLFQxqbvNrJxTO"
+      }
+    ],
+    "messages": [
+      {
+        "type": "user",
+        "id": "msg_03fc16a7d0016vmZ70w4Ps64ZZ",
+        "text": "Write a 200-word story about a robot. Do not stop early.",
+        "keys": [
+          "id",
+          "time",
+          "text",
+          "type"
+        ]
+      }
+    ]
+  },
+  "queueCase": {
+    "receiptA": {
+      "admittedSeq": 1,
+      "id": "msg_03fc29d760016tM2VqQ7P3FYf7",
+      "sessionID": "ses_fc03d640cffeRx5LK9r4NcKB3x",
+      "prompt": {
+        "text": "Write a 200-word story about a cat. Do not stop early."
+      },
+      "delivery": "steer",
+      "timeCreated": 1787776114039
+    },
+    "receiptB": {
+      "label": "prompt-B-queue",
+      "ok": true,
+      "ms": 18,
+      "value": {
+        "admittedSeq": 3,
+        "id": "msg_03fc2d8620018GNftIzKz5xGwZ",
+        "sessionID": "ses_fc03d640cffeRx5LK9r4NcKB3x",
+        "prompt": {
+          "text": "Now reply with exactly: MANGO"
+        },
+        "delivery": "queue",
+        "timeCreated": 1787776129123
+      }
+    },
+    "eventTypes": [
+      {
+        "t": "session.next.prompt.admitted",
+        "msg": "msg_03fc29d760016tM2VqQ7P3FYf7"
+      },
+      {
+        "t": "session.next.prompted",
+        "msg": "msg_03fc29d760016tM2VqQ7P3FYf7"
+      },
+      {
+        "t": "session.next.prompt.admitted",
+        "msg": "msg_03fc2d8620018GNftIzKz5xGwZ"
+      },
+      {
+        "t": "session.next.step.started",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.started",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.text.ended",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8"
+      },
+      {
+        "t": "session.next.step.ended",
+        "msg": "msg_03fc2dd74001am3Q9oXPcfnAF8",
+        "extra": "stop"
+      },
+      {
+        "t": "session.next.prompted",
+        "msg": "msg_03fc2d8620018GNftIzKz5xGwZ"
+      },
+      {
+        "t": "session.next.step.started",
+        "msg": "msg_03fc30365001eozTJCNCkscXfT"
+      },
+      {
+        "t": "session.next.text.started",
+        "msg": "msg_03fc30365001eozTJCNCkscXfT"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc30365001eozTJCNCkscXfT"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc30365001eozTJCNCkscXfT"
+      },
+      {
+        "t": "session.next.text.delta",
+        "msg": "msg_03fc30365001eozTJCNCkscXfT"
+      },
+      {
+        "t": "session.next.text.ended",
+        "msg": "msg_03fc30365001eozTJCNCkscXfT"
+      },
+      {
+        "t": "session.next.step.ended",
+        "msg": "msg_03fc30365001eozTJCNCkscXfT",
+        "extra": "stop"
+      }
+    ],
+    "messages": [
+      {
+        "type": "assistant",
+        "id": "msg_03fc30365001eozTJCNCkscXfT",
+        "text": "MANGO",
+        "finish": "stop",
+        "keys": [
+          "id",
+          "time",
+          "type",
+          "agent",
+          "model",
+          "content",
+          "snapshot",
+          "finish",
+          "cost",
+          "tokens"
+        ]
+      },
+      {
+        "type": "user",
+        "id": "msg_03fc2d8620018GNftIzKz5xGwZ",
+        "text": "Now reply with exactly: MANGO",
+        "keys": [
+          "id",
+          "time",
+          "text",
+          "type"
+        ]
+      },
+      {
+        "type": "assistant",
+        "id": "msg_03fc2dd74001am3Q9oXPcfnAF8",
+        "text": "In the quiet dawn of a sleepy suburb, a ginger tabby named Milo perched on the windowsill, his amber eyes tracking the first hesitant rays of light. The house was still, save for the soft rustle of leaves outside. Milo’s whiskers twitched with each breath, attuned to the world’s subtle rhythms. Below, a sparrow hopped across the dew‑wet lawn, oblivious to the predator‑turned‑observer perched above.\n\nMilo’s paws kneaded the wooden frame, a rhythmic ritual that seemed to coax the morning into motion. With a silent leap, he landed on the carpet, his silent pads muffling any sound. He trotted toward the kitchen, where the scent of freshly brewed coffee mingled with the faint aroma of his favorite dry kibble. As his human stumbled awake, rubbing sleep from her eyes, Milo weaved between her legs, purring a low, vibrating hum that seemed to synchronize her heartbeat with his.\n\nThe day unfolded in a series of playful ambushes—crinkly paper balls, sunbeams that doubled as tunnels, and the occasional cardboard box that became a kingdom. By evening, Milo curled atop the duvet, his tail curling like a question mark against the soft fabric. As the moon rose and the house settled into quietude, the cat’s steady breathing lulled the room into a peaceful coexistence, a gentle reminder that even the smallest creatures can fill a home with immeasurable warmth.",
+        "finish": "stop",
+        "keys": [
+          "id",
+          "time",
+          "type",
+          "agent",
+          "model",
+          "content",
+          "snapshot",
+          "finish",
+          "cost",
+          "tokens"
+        ]
+      },
+      {
+        "type": "user",
+        "id": "msg_03fc29d760016tM2VqQ7P3FYf7",
+        "text": "Write a 200-word story about a cat. Do not stop early.",
+        "keys": [
+          "id",
+          "time",
+          "text",
+          "type"
+        ]
+      }
+    ]
+  }
+}
