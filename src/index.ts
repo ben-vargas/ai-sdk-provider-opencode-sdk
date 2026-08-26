@@ -20,6 +20,7 @@ export type {
   OpencodeFormAnswer,
   OpencodeFormResponse,
   OpencodeFormPolicy,
+  OpencodeDataUri,
   OpencodeFileToResolve,
   OpencodeResolveFileToUri,
   OpencodeProviderOptions,
@@ -39,7 +40,9 @@ export {
   validateModelId,
   validateFormAnswer,
   isValidSessionId,
+  isDataUri,
   mergeSettings,
+  resolveSessionLocation,
 } from "./validation.js";
 export type { ValidationResult } from "./validation.js";
 

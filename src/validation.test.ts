@@ -5,7 +5,9 @@ import {
   validateModelId,
   validateFormAnswer,
   isValidSessionId,
+  isDataUri,
   mergeSettings,
+  resolveSessionLocation,
 } from "./validation.js";
 import type {
   Logger,
@@ -105,6 +107,25 @@ describe("validation", () => {
       expect(result.warnings.some((w) => w.includes("systemPrompt"))).toBe(
         true,
       );
+    });
+
+    it("should warn that directory is deprecated", () => {
+      const result = validateSettings({ directory: "/home/user" });
+      expect(
+        result.warnings.some((w) => w.includes("directory is deprecated")),
+      ).toBe(true);
+    });
+
+    it("should warn that location wins when both location and directory are set", () => {
+      const result = validateSettings({
+        location: { directory: "/v5" },
+        directory: "/v4",
+      });
+      expect(
+        result.warnings.some((w) =>
+          w.includes("location takes precedence and directory will be ignored"),
+        ),
+      ).toBe(true);
     });
 
     it("should warn when sessionId is set in ephemeral mode", () => {
@@ -496,6 +517,67 @@ describe("validation", () => {
       const result = mergeSettings(defaults, { agent: "plan" });
 
       expect(result.location).toEqual({ directory: "/default" });
+    });
+
+    it("should let an override directory supersede a default location", () => {
+      const defaults: OpencodeSettings = {
+        location: { directory: "/default", workspaceID: "ws-default" },
+      };
+      const result = mergeSettings(defaults, { directory: "/override" });
+
+      expect(result.location).toBeUndefined();
+      expect(result.directory).toBe("/override");
+    });
+
+    it("should let an override location supersede a default directory", () => {
+      const defaults: OpencodeSettings = { directory: "/default" };
+      const result = mergeSettings(defaults, {
+        location: { directory: "/override" },
+      });
+
+      expect(result.location).toEqual({ directory: "/override" });
+      expect(result.directory).toBeUndefined();
+    });
+
+    it("should keep default directory when overrides omit both", () => {
+      const defaults: OpencodeSettings = { directory: "/default" };
+      const result = mergeSettings(defaults, { agent: "plan" });
+
+      expect(result.directory).toBe("/default");
+    });
+  });
+
+  describe("resolveSessionLocation", () => {
+    it("should return undefined when neither location nor directory is set", () => {
+      expect(resolveSessionLocation({})).toBeUndefined();
+    });
+
+    it("should map the deprecated directory alias to location.directory", () => {
+      expect(resolveSessionLocation({ directory: "/v4-dir" })).toEqual({
+        directory: "/v4-dir",
+      });
+    });
+
+    it("should prefer location over the deprecated directory alias", () => {
+      expect(
+        resolveSessionLocation({
+          location: { directory: "/v5-dir", workspaceID: "ws-1" },
+          directory: "/v4-dir",
+        }),
+      ).toEqual({ directory: "/v5-dir", workspaceID: "ws-1" });
+    });
+  });
+
+  describe("isDataUri", () => {
+    it("should accept data URIs", () => {
+      expect(isDataUri("data:image/png;base64,iVBORw0KGgo=")).toBe(true);
+    });
+
+    it("should reject non-data URI schemes", () => {
+      expect(isDataUri("file:///tmp/red.png")).toBe(false);
+      expect(isDataUri("https://example.com/red.png")).toBe(false);
+      expect(isDataUri("/tmp/red.png")).toBe(false);
+      expect(isDataUri("red.png")).toBe(false);
     });
   });
 });

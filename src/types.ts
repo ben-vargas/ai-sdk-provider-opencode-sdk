@@ -119,6 +119,16 @@ export type OpencodeFormResponse =
 export type OpencodeFormPolicy = "cancel" | "wait";
 
 /**
+ * A `data:` URI usable as a `files[].uri` prompt value. The only scheme
+ * verified to reach the model end-to-end on current OpenCode v2 builds:
+ * the server admits and stores any scheme without validation, but hands
+ * `file:`/path/`https:` URIs verbatim to the model provider where they fail
+ * the whole turn. The stored MIME comes from the URI's declared mediatype,
+ * so encode the correct media type into the URI itself.
+ */
+export type OpencodeDataUri = `data:${string}`;
+
+/**
  * A file the provider needs a v2 prompt URI for. Only `data:` URIs are known
  * to reach the model end-to-end on current builds; other schemes are stored
  * verbatim and fail at the model provider.
@@ -136,12 +146,14 @@ export interface OpencodeFileToResolve {
 
 /**
  * Hook to turn a file part into a `files[].uri` value for `session.prompt`.
- * Return a URI string to attach the file, or undefined to skip it (the
- * provider emits a warning for skipped files).
+ * Return a `data:` URI to attach the file, or undefined to skip it (the
+ * provider emits a warning for skipped files). Non-`data:` URIs are known
+ * to fail the whole turn downstream, so the provider rejects any other
+ * scheme before prompting (warning + skip) rather than attaching it.
  */
 export type OpencodeResolveFileToUri = (
   file: OpencodeFileToResolve,
-) => Promise<string | undefined> | string | undefined;
+) => Promise<OpencodeDataUri | undefined> | OpencodeDataUri | undefined;
 
 /**
  * Settings for individual model instances.
@@ -203,6 +215,13 @@ export interface OpencodeSettings {
    * `session.create`. Replaces v1's `directory`/`cwd` settings.
    */
   location?: OpencodeSessionLocation;
+
+  /**
+   * Directory the session binds to.
+   * @deprecated v4 migration alias: maps to `location.directory`. Ignored
+   * when `location` is provided. Use `location` instead.
+   */
+  directory?: string;
 
   /**
    * Inbox delivery mode when prompting a busy session.

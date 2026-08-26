@@ -1,9 +1,11 @@
 import { z } from "zod";
 import type {
   Logger,
+  OpencodeDataUri,
   OpencodeFormAnswer,
   OpencodeFormRequest,
   OpencodeProviderSettings,
+  OpencodeSessionLocation,
   OpencodeSettings,
 } from "./types.js";
 
@@ -42,6 +44,7 @@ export const opcodeSettingsSchema = z.object({
   systemPrompt: z.string().optional(),
   variant: z.string().optional(),
   location: locationSchema.optional(),
+  directory: z.string().optional(),
   delivery: z.enum(["steer", "queue"]).optional(),
   resume: z.boolean().optional(),
   onForm: z.function().optional(),
@@ -123,6 +126,14 @@ export function validateSettings(
   if (settings.systemPrompt !== undefined) {
     warnings.push(
       "systemPrompt is degraded on OpenCode v2: it is prepended to the first user turn as a delimited block (system-role priority is lost)",
+    );
+  }
+
+  if (settings.directory !== undefined) {
+    warnings.push(
+      settings.location !== undefined
+        ? "Both directory and location were provided; location takes precedence and directory will be ignored"
+        : 'directory is deprecated; use location: { directory: "..." } instead',
     );
   }
 
@@ -360,9 +371,41 @@ export function mergeSettings(
     return { ...defaults };
   }
 
+  // location and the deprecated directory alias are one logical field:
+  // an override of either supersedes both defaults.
+  const overridesLocation =
+    overrides.location !== undefined || overrides.directory !== undefined;
+
   return {
     ...defaults,
     ...overrides,
-    location: overrides.location ?? defaults.location,
+    location: overridesLocation ? overrides.location : defaults.location,
+    directory: overridesLocation ? overrides.directory : defaults.directory,
   };
+}
+
+/**
+ * Resolve the effective session location from `location` and the deprecated
+ * v4 `directory` alias. `location` takes precedence when both are set.
+ */
+export function resolveSessionLocation(
+  settings: OpencodeSettings,
+): OpencodeSessionLocation | undefined {
+  if (settings.location !== undefined) {
+    return settings.location;
+  }
+  if (settings.directory !== undefined) {
+    return { directory: settings.directory };
+  }
+  return undefined;
+}
+
+/**
+ * Check whether a resolved file URI is a `data:` URI — the only scheme
+ * verified to reach the model end-to-end on current OpenCode v2 builds.
+ * The prompt path must reject (warn + skip) anything else before prompting,
+ * since a bad attachment fails the whole turn late at the model provider.
+ */
+export function isDataUri(uri: string): uri is OpencodeDataUri {
+  return uri.startsWith("data:");
 }
