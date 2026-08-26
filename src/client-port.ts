@@ -48,6 +48,8 @@ export interface OpencodeClientPort {
     readonly inbox: Pick<OpenCodeClient["session"]["inbox"], "cancel">;
   };
   readonly message: Pick<OpenCodeClient["message"], "list">;
+  /** Catalog lookup: resolves a bare model ID + variant to a providerID. */
+  readonly model: Pick<OpenCodeClient["model"], "list">;
   readonly event: Pick<OpenCodeClient["event"], "subscribe">;
   readonly permission: Pick<
     OpenCodeClient["permission"],
