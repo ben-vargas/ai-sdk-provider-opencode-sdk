@@ -1,428 +1,401 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
+import { APICallError, LoadAPIKeyError } from "@ai-sdk/provider";
+import { ClientError } from "@opencode-ai/client";
 import {
-  isAuthenticationError,
-  isTimeoutError,
-  isAbortError,
-  isOutputLengthError,
-  createAuthenticationError,
-  createAPICallError,
-  createEmptyResponseDataError,
-  createTimeoutError,
   extractErrorMessage,
+  getClientErrorStatus,
+  isAbortError,
+  isClientError,
+  isTaggedError,
+  needsSessionReconciliation,
+  normalizeStructuredError,
   wrapError,
+  type OpencodeErrorData,
+  type OpencodeErrorPhase,
 } from "./errors.js";
-import { LoadAPIKeyError, APICallError } from "@ai-sdk/provider";
 
-describe("errors", () => {
-  describe("isAuthenticationError", () => {
-    it("should return true for ProviderAuthError name", () => {
-      const error = { name: "ProviderAuthError", message: "Auth failed" };
-      expect(isAuthenticationError(error)).toBe(true);
-    });
+function data(error: Error): OpencodeErrorData {
+  expect(APICallError.isInstance(error)).toBe(true);
+  return (error as APICallError).data as OpencodeErrorData;
+}
 
-    it("should return true for 401 status code", () => {
-      const error = { statusCode: 401, message: "Unauthorized" };
-      expect(isAuthenticationError(error)).toBe(true);
-    });
+function abortCause(): Error {
+  const abort = new Error("The operation was aborted");
+  abort.name = "AbortError";
+  return abort;
+}
 
-    it("should return true for 403 status code", () => {
-      const error = { statusCode: 403, message: "Forbidden" };
-      expect(isAuthenticationError(error)).toBe(true);
-    });
+interface WrapCase {
+  name: string;
+  error: () => unknown;
+  /** Expected retryability by phase. */
+  retryable: { "pre-dispatch": boolean; "post-dispatch": boolean };
+  /** Expected reconcile marker by phase. */
+  reconcile: { "pre-dispatch": boolean; "post-dispatch": boolean };
+  errorTag?: string;
+  clientReason?: string;
+  statusCode?: number;
+  messageContains?: string[];
+}
 
-    it('should return true for message containing "unauthorized"', () => {
-      const error = { message: "Request was unauthorized" };
-      expect(isAuthenticationError(error)).toBe(true);
-    });
+const PHASES: OpencodeErrorPhase[] = ["pre-dispatch", "post-dispatch"];
 
-    it('should return true for message containing "api key"', () => {
-      const error = { message: "Invalid API key provided" };
-      expect(isAuthenticationError(error)).toBe(true);
-    });
+const wrapCases: WrapCase[] = [
+  // --- ClientError, all five reasons ---
+  {
+    name: "ClientError Transport",
+    error: () =>
+      new ClientError("Transport", { cause: new Error("ECONNRESET") }),
+    retryable: { "pre-dispatch": true, "post-dispatch": false },
+    reconcile: { "pre-dispatch": false, "post-dispatch": true },
+    clientReason: "Transport",
+    messageContains: ["transport failure", "ECONNRESET"],
+  },
+  {
+    name: "ClientError UnexpectedStatus without a recoverable status",
+    error: () => new ClientError("UnexpectedStatus"),
+    retryable: { "pre-dispatch": false, "post-dispatch": false },
+    reconcile: { "pre-dispatch": false, "post-dispatch": false },
+    clientReason: "UnexpectedStatus",
+    messageContains: ["unexpected status"],
+  },
+  {
+    name: "ClientError UnexpectedStatus with cause status 503",
+    error: () =>
+      new ClientError("UnexpectedStatus", { cause: { status: 503 } }),
+    retryable: { "pre-dispatch": true, "post-dispatch": false },
+    reconcile: { "pre-dispatch": false, "post-dispatch": true },
+    clientReason: "UnexpectedStatus",
+    statusCode: 503,
+  },
+  {
+    name: "ClientError UnexpectedStatus with cause status 429",
+    error: () =>
+      new ClientError("UnexpectedStatus", { cause: { status: 429 } }),
+    retryable: { "pre-dispatch": true, "post-dispatch": false },
+    reconcile: { "pre-dispatch": false, "post-dispatch": true },
+    clientReason: "UnexpectedStatus",
+    statusCode: 429,
+  },
+  {
+    name: "ClientError UnexpectedStatus with cause status 404",
+    error: () =>
+      new ClientError("UnexpectedStatus", { cause: { status: 404 } }),
+    retryable: { "pre-dispatch": false, "post-dispatch": false },
+    reconcile: { "pre-dispatch": false, "post-dispatch": false },
+    clientReason: "UnexpectedStatus",
+    statusCode: 404,
+  },
+  {
+    name: "ClientError UnsupportedContentType",
+    error: () => new ClientError("UnsupportedContentType"),
+    retryable: { "pre-dispatch": false, "post-dispatch": false },
+    reconcile: { "pre-dispatch": false, "post-dispatch": false },
+    clientReason: "UnsupportedContentType",
+    messageContains: ["version skew"],
+  },
+  {
+    name: "ClientError MalformedResponse",
+    error: () => new ClientError("MalformedResponse"),
+    retryable: { "pre-dispatch": false, "post-dispatch": false },
+    reconcile: { "pre-dispatch": false, "post-dispatch": false },
+    clientReason: "MalformedResponse",
+    messageContains: ["version skew"],
+  },
+  {
+    name: "ClientError SseEventTooLarge",
+    error: () => new ClientError("SseEventTooLarge"),
+    retryable: { "pre-dispatch": false, "post-dispatch": false },
+    reconcile: { "pre-dispatch": false, "post-dispatch": false },
+    clientReason: "SseEventTooLarge",
+    messageContains: ["transport strategy"],
+  },
+  // --- Tagged errors ---
+  {
+    name: "SessionBusyError",
+    error: () => ({
+      _tag: "SessionBusyError",
+      sessionID: "ses_1",
+      message: "busy",
+    }),
+    retryable: { "pre-dispatch": true, "post-dispatch": false },
+    reconcile: { "pre-dispatch": false, "post-dispatch": true },
+    errorTag: "SessionBusyError",
+  },
+  {
+    name: "ConflictError",
+    error: () => ({ _tag: "ConflictError", message: "conflict" }),
+    retryable: { "pre-dispatch": true, "post-dispatch": false },
+    reconcile: { "pre-dispatch": false, "post-dispatch": true },
+    errorTag: "ConflictError",
+  },
+  {
+    name: "ServiceUnavailableError",
+    error: () => ({
+      _tag: "ServiceUnavailableError",
+      message: "unavailable",
+      service: "session.wait",
+    }),
+    retryable: { "pre-dispatch": true, "post-dispatch": false },
+    reconcile: { "pre-dispatch": false, "post-dispatch": true },
+    errorTag: "ServiceUnavailableError",
+  },
+  {
+    name: "InvalidRequestError",
+    error: () => ({
+      _tag: "InvalidRequestError",
+      message: 'invalid at ["prompt"]["text"]',
+      kind: "Payload",
+    }),
+    retryable: { "pre-dispatch": false, "post-dispatch": false },
+    reconcile: { "pre-dispatch": false, "post-dispatch": false },
+    errorTag: "InvalidRequestError",
+  },
+  {
+    name: "SessionNotFoundError",
+    error: () => ({
+      _tag: "SessionNotFoundError",
+      sessionID: "ses_x",
+      message: "not found",
+    }),
+    retryable: { "pre-dispatch": false, "post-dispatch": false },
+    reconcile: { "pre-dispatch": false, "post-dispatch": false },
+    errorTag: "SessionNotFoundError",
+  },
+  {
+    name: "FormInvalidAnswerError",
+    error: () => ({
+      _tag: "FormInvalidAnswerError",
+      id: "form_1",
+      message: "bad answer",
+    }),
+    retryable: { "pre-dispatch": false, "post-dispatch": false },
+    reconcile: { "pre-dispatch": false, "post-dispatch": false },
+    errorTag: "FormInvalidAnswerError",
+  },
+  {
+    name: "UnknownError",
+    error: () => ({ _tag: "UnknownError", message: "???" }),
+    retryable: { "pre-dispatch": false, "post-dispatch": false },
+    reconcile: { "pre-dispatch": false, "post-dispatch": false },
+    errorTag: "UnknownError",
+  },
+  // --- Anything else ---
+  {
+    name: "plain Error",
+    error: () => new Error("boom"),
+    retryable: { "pre-dispatch": false, "post-dispatch": false },
+    reconcile: { "pre-dispatch": false, "post-dispatch": false },
+    messageContains: ["boom"],
+  },
+];
 
-    it('should return true for message containing "authentication"', () => {
-      const error = { message: "Authentication required" };
-      expect(isAuthenticationError(error)).toBe(true);
-    });
+describe("wrapError (tag/reason × phase table)", () => {
+  for (const testCase of wrapCases) {
+    for (const phase of PHASES) {
+      it(`${testCase.name} — ${phase}`, () => {
+        const wrapped = wrapError(testCase.error(), {
+          phase,
+          operation: "session.prompt",
+          sessionId: "ses_1",
+        });
 
-    it("should return false for null", () => {
-      expect(isAuthenticationError(null)).toBe(false);
-    });
+        expect(APICallError.isInstance(wrapped)).toBe(true);
+        const apiError = wrapped as APICallError;
+        expect(apiError.isRetryable).toBe(testCase.retryable[phase]);
 
-    it("should return false for undefined", () => {
-      expect(isAuthenticationError(undefined)).toBe(false);
-    });
+        const errorData = data(apiError);
+        expect(errorData.phase).toBe(phase);
+        expect(errorData.reconcile).toBe(testCase.reconcile[phase]);
+        expect(needsSessionReconciliation(apiError)).toBe(
+          testCase.reconcile[phase],
+        );
+        expect(errorData.errorTag).toBe(testCase.errorTag);
+        expect(errorData.clientReason).toBe(testCase.clientReason);
+        expect(errorData.statusCode).toBe(testCase.statusCode);
+        expect(apiError.statusCode).toBe(testCase.statusCode);
+        expect(errorData.operation).toBe("session.prompt");
+        expect(errorData.sessionId).toBe("ses_1");
 
-    it("should return false for non-auth errors", () => {
-      const error = { name: "NetworkError", message: "Connection failed" };
-      expect(isAuthenticationError(error)).toBe(false);
-    });
+        for (const substring of testCase.messageContains ?? []) {
+          expect(apiError.message.toLowerCase()).toContain(
+            substring.toLowerCase(),
+          );
+        }
+      });
+    }
+  }
+
+  it("universal rule: NOTHING wraps to a retryable error post-dispatch", () => {
+    for (const testCase of wrapCases) {
+      const wrapped = wrapError(testCase.error(), { phase: "post-dispatch" });
+      if (APICallError.isInstance(wrapped)) {
+        expect(wrapped.isRetryable).toBe(false);
+      }
+    }
+  });
+});
+
+describe("auth errors", () => {
+  it.each(["UnauthorizedError", "ForbiddenError"])(
+    "maps %s to LoadAPIKeyError in both phases",
+    (tag) => {
+      for (const phase of PHASES) {
+        const wrapped = wrapError({ _tag: tag, message: "denied" }, { phase });
+        expect(LoadAPIKeyError.isInstance(wrapped)).toBe(true);
+        expect(wrapped.message).toContain(tag);
+        expect(needsSessionReconciliation(wrapped)).toBe(false);
+      }
+    },
+  );
+});
+
+describe("abort detection", () => {
+  it("detects standard AbortError shapes", () => {
+    expect(isAbortError(abortCause())).toBe(true);
+    expect(isAbortError({ name: "AbortError" })).toBe(true);
+    expect(isAbortError({ code: "ABORT_ERR" })).toBe(true);
   });
 
-  describe("isTimeoutError", () => {
-    it("should return true for timeout in name", () => {
-      const error = { name: "TimeoutError", message: "Request timed out" };
-      expect(isTimeoutError(error)).toBe(true);
-    });
-
-    it("should return false for AbortError name", () => {
-      const error = { name: "AbortError", message: "Aborted" };
-      expect(isTimeoutError(error)).toBe(false);
-    });
-
-    it("should return false for ABORT_ERR code", () => {
-      const error = { code: "ABORT_ERR", message: "Operation aborted" };
-      expect(isTimeoutError(error)).toBe(false);
-    });
-
-    it("should return true for ETIMEDOUT code", () => {
-      const error = { code: "ETIMEDOUT", message: "Connection timed out" };
-      expect(isTimeoutError(error)).toBe(true);
-    });
-
-    it("should return true for ESOCKETTIMEDOUT code", () => {
-      const error = { code: "ESOCKETTIMEDOUT", message: "Socket timeout" };
-      expect(isTimeoutError(error)).toBe(true);
-    });
-
-    it('should return true for message containing "timeout"', () => {
-      const error = { message: "Request timeout after 5000ms" };
-      expect(isTimeoutError(error)).toBe(true);
-    });
-
-    it('should return true for message containing "timed out"', () => {
-      const error = { message: "Connection timed out" };
-      expect(isTimeoutError(error)).toBe(true);
-    });
-
-    it("should return false for null", () => {
-      expect(isTimeoutError(null)).toBe(false);
-    });
-
-    it("should return false for non-timeout errors", () => {
-      const error = { name: "NetworkError", message: "Connection failed" };
-      expect(isTimeoutError(error)).toBe(false);
-    });
+  it("detects the client's abort surface: Transport with an abort cause", () => {
+    const error = new ClientError("Transport", { cause: abortCause() });
+    expect(isAbortError(error)).toBe(true);
   });
 
-  describe("isAbortError", () => {
-    it("should return true for AbortError name", () => {
-      const error = { name: "AbortError", message: "Aborted" };
-      expect(isAbortError(error)).toBe(true);
+  it("does not flag a genuine transport failure", () => {
+    const error = new ClientError("Transport", {
+      cause: new Error("socket hang up"),
     });
-
-    it("should return true for ABORT_ERR code", () => {
-      const error = { code: "ABORT_ERR", message: "Operation aborted" };
-      expect(isAbortError(error)).toBe(true);
-    });
-
-    it("should return true for MessageAbortedError name", () => {
-      const error = { name: "MessageAbortedError", message: "Message aborted" };
-      expect(isAbortError(error)).toBe(true);
-    });
-
-    it("should return false for null", () => {
-      expect(isAbortError(null)).toBe(false);
-    });
-
-    it("should return false for non-abort errors", () => {
-      const error = { name: "NetworkError", message: "Failed" };
-      expect(isAbortError(error)).toBe(false);
-    });
+    expect(isAbortError(error)).toBe(false);
+    expect(isAbortError(new Error("nope"))).toBe(false);
+    expect(isAbortError(null)).toBe(false);
   });
 
-  describe("isOutputLengthError", () => {
-    it("should return true for MessageOutputLengthError name", () => {
-      const error = {
-        name: "MessageOutputLengthError",
-        message: "Output too long",
-      };
-      expect(isOutputLengthError(error)).toBe(true);
-    });
+  it("wrapError passes abort errors through unchanged", () => {
+    const abort = abortCause();
+    expect(wrapError(abort, { phase: "pre-dispatch" })).toBe(abort);
 
-    it('should return true for message containing "output length"', () => {
-      const error = { message: "Maximum output length exceeded" };
-      expect(isOutputLengthError(error)).toBe(true);
+    const transportAbort = new ClientError("Transport", {
+      cause: abortCause(),
     });
+    expect(wrapError(transportAbort, { phase: "post-dispatch" })).toBe(
+      transportAbort,
+    );
+  });
+});
 
-    it('should return true for message containing "max tokens"', () => {
-      const error = { message: "Exceeded max tokens limit" };
-      expect(isOutputLengthError(error)).toBe(true);
+describe("passthrough", () => {
+  it("returns already-wrapped AI SDK errors unchanged", () => {
+    const api = new APICallError({
+      message: "x",
+      url: "opencode://request",
+      requestBodyValues: {},
     });
+    const auth = new LoadAPIKeyError({ message: "y" });
+    expect(wrapError(api, { phase: "post-dispatch" })).toBe(api);
+    expect(wrapError(auth, { phase: "pre-dispatch" })).toBe(auth);
+  });
+});
 
-    it('should return true for message containing "token limit"', () => {
-      const error = { message: "Token limit reached" };
-      expect(isOutputLengthError(error)).toBe(true);
-    });
-
-    it("should return true for ContextOverflowError name", () => {
-      const error = { name: "ContextOverflowError", message: "Context limit" };
-      expect(isOutputLengthError(error)).toBe(true);
-    });
-
-    it("should return false for null", () => {
-      expect(isOutputLengthError(null)).toBe(false);
-    });
-
-    it("should return false for non-length errors", () => {
-      const error = { name: "NetworkError", message: "Failed" };
-      expect(isOutputLengthError(error)).toBe(false);
-    });
+describe("guards", () => {
+  it("isClientError accepts instances and structural clones", () => {
+    expect(isClientError(new ClientError("Transport"))).toBe(true);
+    expect(
+      isClientError({ name: "ClientError", reason: "MalformedResponse" }),
+    ).toBe(true);
+    expect(isClientError(new Error("x"))).toBe(false);
+    expect(isClientError(null)).toBe(false);
   });
 
-  describe("createAuthenticationError", () => {
-    it("should create LoadAPIKeyError with message", () => {
-      const error = { message: "Invalid API key" };
-      const result = createAuthenticationError(error);
-
-      expect(result).toBeInstanceOf(LoadAPIKeyError);
-      expect(result.message).toContain("Invalid API key");
-    });
-
-    it("should include provider info if available", () => {
-      const error = {
-        message: "Auth failed",
-        data: { providerID: "anthropic" },
-      };
-      const result = createAuthenticationError(error);
-
-      expect(result.message).toContain("anthropic");
-    });
+  it("isTaggedError requires a string _tag", () => {
+    expect(isTaggedError({ _tag: "SessionBusyError", message: "m" })).toBe(
+      true,
+    );
+    expect(isTaggedError({ _tag: 7 })).toBe(false);
+    expect(isTaggedError(new Error("x"))).toBe(false);
   });
 
-  describe("createAPICallError", () => {
-    it("should create APICallError with message", () => {
-      const error = { message: "API call failed" };
-      const result = createAPICallError(error);
+  it("needsSessionReconciliation is false for foreign errors", () => {
+    expect(needsSessionReconciliation(new Error("x"))).toBe(false);
+    expect(needsSessionReconciliation(undefined)).toBe(false);
+    expect(
+      needsSessionReconciliation(
+        new APICallError({
+          message: "x",
+          url: "u",
+          requestBodyValues: {},
+        }),
+      ),
+    ).toBe(false);
+  });
+});
 
-      expect(result).toBeInstanceOf(APICallError);
-      expect(result.message).toBe("API call failed");
+describe("getClientErrorStatus", () => {
+  it("recovers status via guarded cause inspection only", () => {
+    expect(
+      getClientErrorStatus(
+        new ClientError("UnexpectedStatus", { cause: { status: 500 } }),
+      ),
+    ).toBe(500);
+    expect(
+      getClientErrorStatus(
+        new ClientError("UnexpectedStatus", { cause: { statusCode: 429 } }),
+      ),
+    ).toBe(429);
+    expect(getClientErrorStatus(new ClientError("UnexpectedStatus"))).toBe(
+      undefined,
+    );
+    expect(
+      getClientErrorStatus(
+        new ClientError("UnexpectedStatus", { cause: "500" }),
+      ),
+    ).toBe(undefined);
+    expect(
+      getClientErrorStatus(
+        new ClientError("UnexpectedStatus", { cause: { status: "500" } }),
+      ),
+    ).toBe(undefined);
+  });
+});
+
+describe("normalizeStructuredError", () => {
+  it("produces a non-retryable, non-reconcile APICallError", () => {
+    const wrapped = normalizeStructuredError(
+      { type: "overloaded_error", message: "provider overloaded", status: 529 },
+      { operation: "session.prompt", sessionId: "ses_1", messageId: "msg_1" },
+    );
+    expect(wrapped.isRetryable).toBe(false);
+    expect(wrapped.statusCode).toBe(529);
+    expect(wrapped.message).toContain("overloaded_error");
+    expect(wrapped.message).toContain("provider overloaded");
+    const errorData = wrapped.data as OpencodeErrorData;
+    expect(errorData).toMatchObject({
+      phase: "post-dispatch",
+      reconcile: false,
+      errorType: "overloaded_error",
+      statusCode: 529,
+      sessionId: "ses_1",
+      messageId: "msg_1",
     });
-
-    it("should include status code if available", () => {
-      const error = { message: "Server error", statusCode: 500 };
-      const result = createAPICallError(error);
-
-      expect(result.statusCode).toBe(500);
-    });
-
-    it("should include metadata", () => {
-      const error = { message: "Failed" };
-      const result = createAPICallError(error, {
-        sessionId: "session-123",
-        messageId: "msg-456",
-      });
-
-      expect(result.data).toMatchObject({
-        sessionId: "session-123",
-        messageId: "msg-456",
-      });
-    });
-
-    it("should mark 5xx errors as retryable", () => {
-      const error = { message: "Server error", statusCode: 503 };
-      const result = createAPICallError(error);
-
-      expect(result.isRetryable).toBe(true);
-    });
-
-    it("should mark 429 as retryable", () => {
-      const error = { message: "Rate limited", statusCode: 429 };
-      const result = createAPICallError(error);
-
-      expect(result.isRetryable).toBe(true);
-    });
-
-    it("should mark abort errors as non-retryable", () => {
-      const error = { name: "AbortError", message: "Aborted" };
-      const result = createAPICallError(error);
-
-      expect(result.isRetryable).toBe(false);
-    });
+    expect(needsSessionReconciliation(wrapped)).toBe(false);
   });
 
-  describe("createEmptyResponseDataError", () => {
-    it("should create actionable error with model guidance", () => {
-      const result = createEmptyResponseDataError(undefined, {
-        sessionId: "session-123",
-        modelId: "github-copilot/gpt-5",
-      });
-
-      expect(result).toBeInstanceOf(APICallError);
-      expect(result.message).toContain("OpenCode returned no response data");
-      expect(result.message).toContain('for model "github-copilot/gpt-5"');
-      expect(result.message).toContain("provider/model");
-      expect(result.message).toContain("opencode models");
-      expect(result.isRetryable).toBe(false);
-      expect(result.data).toMatchObject({
-        errorType: "EmptyResponseData",
-        sessionId: "session-123",
-        modelId: "github-copilot/gpt-5",
-      });
-    });
-
-    it("should omit model hint when modelId is missing", () => {
-      const result = createEmptyResponseDataError(undefined);
-
-      expect(result.message).toContain("OpenCode returned no response data");
-      expect(result.message).not.toContain("for model");
-      expect(result.message).not.toContain("Original error");
-    });
-
-    it("should include original error details when available", () => {
-      const result = createEmptyResponseDataError(
-        { message: "model not found", statusCode: 400 },
-        { modelId: "github-copilot/gpt-5" },
-      );
-
-      expect(result.message).toContain("Original error: model not found");
-      expect(result.statusCode).toBe(400);
-    });
+  it("omits status when the structured error has none", () => {
+    const wrapped = normalizeStructuredError(
+      { type: "unknown", message: "Provider turn interrupted" },
+      {},
+    );
+    expect(wrapped.statusCode).toBeUndefined();
+    expect((wrapped.data as OpencodeErrorData).statusCode).toBeUndefined();
   });
+});
 
-  describe("createTimeoutError", () => {
-    it("should create timeout error with duration", () => {
-      const result = createTimeoutError(5000);
-
-      expect(result).toBeInstanceOf(APICallError);
-      expect(result.message).toContain("5000ms");
-      expect(result.isRetryable).toBe(true);
-    });
-
-    it("should include operation in message", () => {
-      const result = createTimeoutError(10000, "server startup");
-
-      expect(result.message).toContain("server startup");
-    });
-  });
-
-  describe("extractErrorMessage", () => {
-    it('should return "Unknown error" for null', () => {
-      expect(extractErrorMessage(null)).toBe("Unknown error");
-    });
-
-    it('should return "Unknown error" for undefined', () => {
-      expect(extractErrorMessage(undefined)).toBe("Unknown error");
-    });
-
-    it("should return string directly", () => {
-      expect(extractErrorMessage("Direct error message")).toBe(
-        "Direct error message",
-      );
-    });
-
-    it("should extract message from Error instance", () => {
-      const error = new Error("Test error");
-      expect(extractErrorMessage(error)).toBe("Test error");
-    });
-
-    it("should extract message property from object", () => {
-      const error = { message: "Object error message" };
-      expect(extractErrorMessage(error)).toBe("Object error message");
-    });
-
-    it("should extract error property from object", () => {
-      const error = { error: "Error property message" };
-      expect(extractErrorMessage(error)).toBe("Error property message");
-    });
-
-    it("should extract nested data.message", () => {
-      const error = { data: { message: "Nested message" } };
-      expect(extractErrorMessage(error)).toBe("Nested message");
-    });
-
-    it('should return "Unknown error" for object without message', () => {
-      const error = { code: 500 };
-      expect(extractErrorMessage(error)).toBe("Unknown error");
-    });
-  });
-
-  describe("wrapError", () => {
-    it("should wrap authentication errors as LoadAPIKeyError", () => {
-      const error = { name: "ProviderAuthError", message: "Auth failed" };
-      const result = wrapError(error);
-
-      expect(result).toBeInstanceOf(LoadAPIKeyError);
-    });
-
-    it("should wrap timeout errors as APICallError with retryable", () => {
-      const error = { name: "TimeoutError", message: "Timed out" };
-      const result = wrapError(error);
-
-      expect(result).toBeInstanceOf(APICallError);
-      expect((result as APICallError).isRetryable).toBe(true);
-      expect(result.message).toContain("5000ms");
-    });
-
-    it("should use metadata timeout when wrapping timeout errors", () => {
-      const error = { name: "TimeoutError", message: "Timed out" };
-      const result = wrapError(error, { timeoutMs: 12000 });
-
-      expect(result).toBeInstanceOf(APICallError);
-      expect(result.message).toContain("12000ms");
-    });
-
-    it("should use timeout value from error when available", () => {
-      const error = {
-        name: "TimeoutError",
-        message: "Timed out",
-        timeoutMs: 7500,
-      };
-      const result = wrapError(error);
-
-      expect(result).toBeInstanceOf(APICallError);
-      expect(result.message).toContain("7500ms");
-    });
-
-    it("should wrap other errors as APICallError", () => {
-      const error = { message: "Generic error" };
-      const result = wrapError(error);
-
-      expect(result).toBeInstanceOf(APICallError);
-    });
-
-    it("should wrap empty JSON responses with model guidance", () => {
-      const error = new SyntaxError("Unexpected end of JSON input");
-      const result = wrapError(error, {
-        sessionId: "session-123",
-        modelId: "github-copilot/gpt-5",
-      });
-
-      expect(result).toBeInstanceOf(APICallError);
-      expect(result.message).toContain(
-        "OpenCode returned an empty JSON response",
-      );
-      expect(result.message).toContain('for model "github-copilot/gpt-5"');
-      expect(result.message).toContain("provider/model");
-      expect((result as APICallError).isRetryable).toBe(false);
-      expect((result as APICallError).data).toMatchObject({
-        errorType: "EmptyJSONResponse",
-        sessionId: "session-123",
-        modelId: "github-copilot/gpt-5",
-      });
-    });
-
-    it("should pass metadata through", () => {
-      const error = { message: "Error" };
-      const result = wrapError(error, { sessionId: "session-123" });
-
-      expect((result as APICallError).data).toMatchObject({
-        sessionId: "session-123",
-      });
-    });
-
-    it("should return already-wrapped AI SDK errors unchanged", () => {
-      const original = createEmptyResponseDataError(undefined, {
-        sessionId: "session-123",
-        modelId: "github-copilot/gpt-5",
-      });
-      const result = wrapError(original, { sessionId: "other-session" });
-
-      expect(result).toBe(original);
-      expect((result as APICallError).data).toMatchObject({
-        errorType: "EmptyResponseData",
-        sessionId: "session-123",
-      });
-    });
+describe("extractErrorMessage", () => {
+  it("handles strings, Errors, message-bearing objects, and junk", () => {
+    expect(extractErrorMessage("boom")).toBe("boom");
+    expect(extractErrorMessage(new Error("bang"))).toBe("bang");
+    expect(extractErrorMessage({ message: "pow" })).toBe("pow");
+    expect(extractErrorMessage(null)).toBe("Unknown error");
+    expect(extractErrorMessage(42)).toBe("Unknown error");
   });
 });

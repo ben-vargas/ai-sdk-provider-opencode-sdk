@@ -92,15 +92,19 @@ export type {
 
 // Error exports
 export {
-  isAuthenticationError,
-  isTimeoutError,
   isAbortError,
-  isOutputLengthError,
-  createAuthenticationError,
-  createAPICallError,
-  createTimeoutError,
+  isClientError,
+  isTaggedError,
+  needsSessionReconciliation,
+  getClientErrorStatus,
   extractErrorMessage,
+  normalizeStructuredError,
   wrapError,
+} from "./errors.js";
+export type {
+  OpencodeErrorData,
+  OpencodeErrorPhase,
+  OpencodeWrapErrorOptions,
 } from "./errors.js";
 
 // Logger exports
