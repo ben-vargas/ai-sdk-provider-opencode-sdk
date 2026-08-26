@@ -5,7 +5,34 @@ import type {
   SharedV4Warning,
   LanguageModelV4Usage,
 } from "@ai-sdk/provider";
-import type { Logger, ToolStreamState, StreamingUsage } from "./types.js";
+import type { Logger } from "./types.js";
+
+/**
+ * Tool state tracking for streaming (v1-era; this module is rewritten against
+ * the v2 event union in a later stage).
+ */
+export interface ToolStreamState {
+  callId: string;
+  toolName: string;
+  inputStarted: boolean;
+  inputClosed: boolean;
+  callEmitted: boolean;
+  resultEmitted: boolean;
+  emittedAttachmentIds: Set<string>;
+  lastInput?: string;
+}
+
+/**
+ * Accumulated usage data during streaming (v1-era; see above).
+ */
+export interface StreamingUsage {
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  cachedInputTokens: number;
+  cachedWriteTokens: number;
+  totalCost: number;
+}
 import { resolveStructuredOutputFinishReason } from "./map-opencode-finish-reason.js";
 import {
   safeStringifyToolInput,

@@ -1,8 +1,10 @@
 import { z } from "zod";
 import type {
-  OpencodeSettings,
-  OpencodeProviderSettings,
   Logger,
+  OpencodeFormAnswer,
+  OpencodeFormRequest,
+  OpencodeProviderSettings,
+  OpencodeSettings,
 } from "./types.js";
 
 /**
@@ -23,10 +25,9 @@ const loggerSchema = z.object({
     .optional(),
 });
 
-const permissionRuleSchema = z.object({
-  permission: z.string(),
-  pattern: z.string(),
-  action: z.enum(["allow", "deny", "ask"]),
+const locationSchema = z.object({
+  directory: z.string(),
+  workspaceID: z.string().optional(),
 });
 
 /**
@@ -34,34 +35,42 @@ const permissionRuleSchema = z.object({
  */
 export const opcodeSettingsSchema = z.object({
   sessionId: z.string().optional(),
+  sessionMode: z.enum(["ephemeral", "persistent", "existing"]).optional(),
   createNewSession: z.boolean().optional(),
   sessionTitle: z.string().optional(),
   agent: z.string().optional(),
   systemPrompt: z.string().optional(),
-  tools: z.record(z.string(), z.boolean()).optional(),
-  permission: z.array(permissionRuleSchema).optional(),
   variant: z.string().optional(),
-  cwd: z.string().optional(),
-  directory: z.string().optional(),
-  outputFormatRetryCount: z.number().int().nonnegative().optional(),
-  onQuestion: z.function().optional(),
-  questionPolicy: z.enum(["reject", "wait"]).optional(),
+  location: locationSchema.optional(),
+  delivery: z.enum(["steer", "queue"]).optional(),
+  resume: z.boolean().optional(),
+  onForm: z.function().optional(),
+  formPolicy: z.enum(["cancel", "wait"]).optional(),
+  resolveFileToUri: z.function().optional(),
   logger: z.union([loggerSchema, z.literal(false)]).optional(),
   verbose: z.boolean().optional(),
+});
+
+const serviceOptionsSchema = z.object({
+  file: z.string().optional(),
+  version: z.union([z.string(), z.function()]).optional(),
+  command: z.array(z.string()).optional(),
 });
 
 /**
  * Schema for OpencodeProviderSettings.
  */
 export const opcodeProviderSettingsSchema = z.object({
-  hostname: z.string().optional(),
-  port: z.number().int().positive().optional(),
-  baseUrl: z.string().url().optional(),
-  autoStartServer: z.boolean().optional(),
-  serverTimeout: z.number().int().positive().optional(),
-  clientOptions: z.record(z.string(), z.unknown()).optional(),
   client: z.object({}).passthrough().optional(),
-  clientManager: z.object({}).passthrough().optional(),
+  baseUrl: z.string().url().optional(),
+  service: serviceOptionsSchema.optional(),
+  autoStart: z.boolean().optional(),
+  clientOptions: z
+    .object({
+      fetch: z.function().optional(),
+      headers: z.unknown().optional(),
+    })
+    .optional(),
   defaultSettings: opcodeSettingsSchema.optional(),
 });
 
@@ -101,12 +110,19 @@ export function validateSettings(
     warnings.push(`Invalid session ID format: ${settings.sessionId}`);
   }
 
-  if (
-    settings.outputFormatRetryCount !== undefined &&
-    settings.outputFormatRetryCount > 10
-  ) {
+  if (settings.sessionId && settings.sessionMode === "ephemeral") {
     warnings.push(
-      `outputFormatRetryCount ${settings.outputFormatRetryCount} is high; consider a value between 0 and 5`,
+      'sessionId is ignored in "ephemeral" session mode; use sessionMode "existing" to pin a session',
+    );
+  }
+
+  if (settings.sessionMode === "existing" && !settings.sessionId) {
+    warnings.push('sessionMode "existing" requires a sessionId');
+  }
+
+  if (settings.systemPrompt !== undefined) {
+    warnings.push(
+      "systemPrompt is degraded on OpenCode v2: it is prepended to the first user turn as a delimited block (system-role priority is lost)",
     );
   }
 
@@ -121,7 +137,9 @@ export function validateSettings(
 }
 
 /**
- * Validate OpencodeProviderSettings.
+ * Validate OpencodeProviderSettings, enforcing backend exclusivity:
+ * exactly one of `client`, `baseUrl`, or service discovery is used, with
+ * precedence client > baseUrl > service.
  */
 export function validateProviderSettings(
   settings: OpencodeProviderSettings | undefined,
@@ -145,24 +163,22 @@ export function validateProviderSettings(
     );
   }
 
-  // Validate port range
-  if (
-    settings.port !== undefined &&
-    (settings.port < 1 || settings.port > 65535)
-  ) {
-    warnings.push(`Port ${settings.port} is outside valid range (1-65535)`);
-  }
-
-  // Validate timeout
-  if (settings.serverTimeout !== undefined && settings.serverTimeout < 1000) {
+  // Backend exclusivity
+  if (settings.client && settings.baseUrl) {
     warnings.push(
-      `Server timeout ${settings.serverTimeout}ms is very short, consider at least 5000ms`,
+      "Both client and baseUrl were provided; client takes precedence and baseUrl will be ignored",
     );
   }
 
-  if (settings.clientManager && settings.client) {
+  if (settings.client && settings.service) {
     warnings.push(
-      "Both clientManager and client were provided; clientManager will be used and client will be ignored.",
+      "Both client and service were provided; client takes precedence and service discovery will be skipped",
+    );
+  }
+
+  if (settings.baseUrl && settings.service) {
+    warnings.push(
+      "Both baseUrl and service were provided; baseUrl takes precedence and service discovery will be skipped",
     );
   }
 
@@ -172,18 +188,10 @@ export function validateProviderSettings(
     );
   }
 
-  if (settings.clientOptions) {
-    const options = settings.clientOptions as Record<string, unknown>;
-    if (options.baseUrl !== undefined) {
-      warnings.push(
-        "clientOptions.baseUrl is ignored; use provider baseUrl or hostname/port instead",
-      );
-    }
-    if (options.directory !== undefined) {
-      warnings.push(
-        "clientOptions.directory is ignored; use defaultSettings.directory or per-model directory instead",
-      );
-    }
+  if (settings.autoStart && (settings.client || settings.baseUrl)) {
+    warnings.push(
+      "autoStart only applies to the service-discovery backend and will be ignored",
+    );
   }
 
   // Log warnings if logger is provided
@@ -261,6 +269,79 @@ export function isValidSessionId(sessionId: string): boolean {
 }
 
 /**
+ * Validate a keyed form answer against the form's field definitions.
+ * Checks that every answered key exists on the form, that value shapes match
+ * the field type, and that required unconditional fields are answered.
+ * Conditional (`when`) requirements are not evaluated client-side.
+ */
+export function validateFormAnswer(
+  form: OpencodeFormRequest,
+  answer: OpencodeFormAnswer,
+): ValidationResult<OpencodeFormAnswer> {
+  const warnings: string[] = [];
+  const fieldsByKey = new Map(form.fields.map((field) => [field.key, field]));
+
+  for (const [key, value] of Object.entries(answer)) {
+    const field = fieldsByKey.get(key);
+    if (!field) {
+      warnings.push(`Answer key "${key}" does not match any form field`);
+      continue;
+    }
+
+    switch (field.type) {
+      case "string":
+      case "external":
+        if (typeof value !== "string") {
+          warnings.push(`Field "${key}" (${field.type}) requires a string`);
+        }
+        break;
+      case "number":
+        if (typeof value !== "number") {
+          warnings.push(`Field "${key}" (number) requires a number`);
+        }
+        break;
+      case "integer":
+        if (typeof value !== "number" || !Number.isInteger(value)) {
+          warnings.push(`Field "${key}" (integer) requires an integer`);
+        }
+        break;
+      case "boolean":
+        if (typeof value !== "boolean") {
+          warnings.push(`Field "${key}" (boolean) requires a boolean`);
+        }
+        break;
+      case "multiselect":
+        if (
+          !Array.isArray(value) ||
+          value.some((item) => typeof item !== "string")
+        ) {
+          warnings.push(
+            `Field "${key}" (multiselect) requires an array of strings`,
+          );
+        }
+        break;
+    }
+  }
+
+  for (const field of form.fields) {
+    // "external" fields carry no required/when/default metadata
+    if (field.type === "external") {
+      continue;
+    }
+    if (
+      field.required &&
+      !field.when?.length &&
+      !(field.key in answer) &&
+      field.default === undefined
+    ) {
+      warnings.push(`Required field "${field.key}" is missing an answer`);
+    }
+  }
+
+  return { value: answer, warnings };
+}
+
+/**
  * Merge settings with defaults.
  */
 export function mergeSettings(
@@ -282,11 +363,6 @@ export function mergeSettings(
   return {
     ...defaults,
     ...overrides,
-    // Merge tools object if both exist
-    tools:
-      defaults.tools || overrides.tools
-        ? { ...defaults.tools, ...overrides.tools }
-        : undefined,
-    permission: overrides.permission ?? defaults.permission,
+    location: overrides.location ?? defaults.location,
   };
 }

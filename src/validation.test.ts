@@ -3,10 +3,17 @@ import {
   validateSettings,
   validateProviderSettings,
   validateModelId,
+  validateFormAnswer,
   isValidSessionId,
   mergeSettings,
 } from "./validation.js";
-import type { Logger, OpencodeSettings } from "./types.js";
+import type {
+  Logger,
+  OpencodeClient,
+  OpencodeFormRequest,
+  OpencodeProviderSettings,
+  OpencodeSettings,
+} from "./types.js";
 
 describe("validation", () => {
   describe("validateSettings", () => {
@@ -17,24 +24,17 @@ describe("validation", () => {
     });
 
     it("should pass valid settings through unchanged", () => {
-      const settings = {
+      const settings: OpencodeSettings = {
         sessionId: "test-session-123",
+        sessionMode: "existing",
         createNewSession: false,
         sessionTitle: "Test Session",
         agent: "build",
-        systemPrompt: "You are helpful",
-        tools: { Bash: true, Write: false },
-        permission: [
-          {
-            permission: "bash",
-            pattern: "npm test",
-            action: "ask",
-          },
-        ],
         variant: "safe",
-        cwd: "/home/user",
-        directory: "/home/user",
-        outputFormatRetryCount: 2,
+        location: { directory: "/home/user", workspaceID: "ws-1" },
+        delivery: "queue",
+        resume: false,
+        formPolicy: "cancel",
         verbose: true,
       };
 
@@ -46,6 +46,7 @@ describe("validation", () => {
     it("should warn about invalid session ID format", () => {
       const settings = {
         sessionId: "invalid session id with spaces!@#",
+        sessionMode: "existing" as const,
       };
 
       const result = validateSettings(settings);
@@ -63,16 +64,17 @@ describe("validation", () => {
 
       const settings = {
         sessionId: "bad session!",
+        sessionMode: "existing" as const,
       };
 
       validateSettings(settings, logger);
       expect(logger.warn).toHaveBeenCalled();
     });
 
-    it("should accept onQuestion and questionPolicy settings", () => {
+    it("should accept onForm and formPolicy settings", () => {
       const settings: OpencodeSettings = {
-        onQuestion: () => ({ type: "reject" }),
-        questionPolicy: "wait",
+        onForm: () => ({ type: "cancel" }),
+        formPolicy: "wait",
       };
 
       const result = validateSettings(settings);
@@ -80,24 +82,50 @@ describe("validation", () => {
       expect(result.warnings).toHaveLength(0);
     });
 
-    it("should warn about invalid questionPolicy values", () => {
+    it("should warn about invalid formPolicy values", () => {
       const settings = {
-        questionPolicy: "ignore",
+        formPolicy: "ignore",
       } as unknown as OpencodeSettings;
 
       const result = validateSettings(settings);
-      expect(result.warnings.some((w) => w.includes("questionPolicy"))).toBe(
+      expect(result.warnings.some((w) => w.includes("formPolicy"))).toBe(true);
+    });
+
+    it("should warn about non-function onForm values", () => {
+      const settings = {
+        onForm: "not a function",
+      } as unknown as OpencodeSettings;
+
+      const result = validateSettings(settings);
+      expect(result.warnings.some((w) => w.includes("onForm"))).toBe(true);
+    });
+
+    it("should warn that systemPrompt is degraded", () => {
+      const result = validateSettings({ systemPrompt: "You are helpful" });
+      expect(result.warnings.some((w) => w.includes("systemPrompt"))).toBe(
         true,
       );
     });
 
-    it("should warn about non-function onQuestion values", () => {
-      const settings = {
-        onQuestion: "not a function",
-      } as unknown as OpencodeSettings;
+    it("should warn when sessionId is set in ephemeral mode", () => {
+      const result = validateSettings({
+        sessionId: "abc123",
+        sessionMode: "ephemeral",
+      });
+      expect(result.warnings.some((w) => w.includes("ephemeral"))).toBe(true);
+    });
 
+    it('should warn when sessionMode "existing" has no sessionId', () => {
+      const result = validateSettings({ sessionMode: "existing" });
+      expect(
+        result.warnings.some((w) => w.includes("requires a sessionId")),
+      ).toBe(true);
+    });
+
+    it("should warn about invalid delivery values", () => {
+      const settings = { delivery: "interrupt" } as unknown as OpencodeSettings;
       const result = validateSettings(settings);
-      expect(result.warnings.some((w) => w.includes("onQuestion"))).toBe(true);
+      expect(result.warnings.some((w) => w.includes("delivery"))).toBe(true);
     });
   });
 
@@ -109,17 +137,12 @@ describe("validation", () => {
     });
 
     it("should pass valid provider settings through", () => {
-      const settings = {
-        hostname: "localhost",
-        port: 4096,
-        autoStartServer: true,
-        serverTimeout: 10000,
+      const settings: OpencodeProviderSettings = {
+        baseUrl: "http://127.0.0.1:4096",
         clientOptions: {
           headers: {
             Authorization: "Bearer token",
           },
-          throwOnError: true,
-          credentials: "include",
         },
       };
 
@@ -128,31 +151,64 @@ describe("validation", () => {
       expect(result.warnings).toHaveLength(0);
     });
 
-    it("should warn about invalid port", () => {
-      const settings = {
-        port: 70000,
+    it("should accept service options with autoStart", () => {
+      const settings: OpencodeProviderSettings = {
+        service: {
+          file: "/tmp/opencode-service.json",
+          version: (version) => version.startsWith("0.0.0-beta"),
+          command: ["opencode", "serve", "--service"],
+        },
+        autoStart: true,
+      };
+
+      const result = validateProviderSettings(settings);
+      expect(result.warnings).toHaveLength(0);
+    });
+
+    it("should warn about invalid baseUrl", () => {
+      const result = validateProviderSettings({ baseUrl: "not-a-url" });
+      expect(result.warnings.some((w) => w.includes("baseUrl"))).toBe(true);
+    });
+
+    it("should warn when both client and baseUrl are provided", () => {
+      const settings: OpencodeProviderSettings = {
+        client: {} as OpencodeClient,
+        baseUrl: "http://127.0.0.1:4096",
       };
 
       const result = validateProviderSettings(settings);
       expect(
-        result.warnings.some((w) => w.includes("port") || w.includes("Port")),
+        result.warnings.some((w) => w.includes("client takes precedence")),
       ).toBe(true);
     });
 
-    it("should warn about very short timeout", () => {
-      const settings = {
-        serverTimeout: 100,
+    it("should warn when both client and service are provided", () => {
+      const settings: OpencodeProviderSettings = {
+        client: {} as OpencodeClient,
+        service: { file: "/tmp/service.json" },
       };
 
       const result = validateProviderSettings(settings);
-      expect(result.warnings.some((w) => w.includes("timeout"))).toBe(true);
+      expect(
+        result.warnings.some((w) => w.includes("service discovery")),
+      ).toBe(true);
+    });
+
+    it("should warn when both baseUrl and service are provided", () => {
+      const settings: OpencodeProviderSettings = {
+        baseUrl: "http://127.0.0.1:4096",
+        service: { file: "/tmp/service.json" },
+      };
+
+      const result = validateProviderSettings(settings);
+      expect(
+        result.warnings.some((w) => w.includes("baseUrl takes precedence")),
+      ).toBe(true);
     });
 
     it("should warn when both client and clientOptions are provided", () => {
-      const settings = {
-        client: {} as Awaited<
-          ReturnType<typeof import("@opencode-ai/sdk/v2").createOpencodeClient>
-        >,
+      const settings: OpencodeProviderSettings = {
+        client: {} as OpencodeClient,
         clientOptions: {
           headers: {
             "x-test": "value",
@@ -162,59 +218,26 @@ describe("validation", () => {
 
       const result = validateProviderSettings(settings);
       expect(
-        result.warnings.some(
-          (w) =>
-            w.includes("client and clientOptions") ||
-            w.includes("clientOptions"),
-        ),
+        result.warnings.some((w) => w.includes("clientOptions")),
       ).toBe(true);
     });
 
-    it("should warn when clientOptions contains reserved baseUrl and directory", () => {
-      const settings = {
-        clientOptions: {
-          baseUrl: "http://ignored:9999",
-          directory: "/tmp/ignored",
-        } as unknown as Record<string, unknown>,
-      };
-
-      const result = validateProviderSettings(settings);
+    it("should warn when autoStart is combined with client or baseUrl", () => {
+      const withClient = validateProviderSettings({
+        client: {} as OpencodeClient,
+        autoStart: true,
+      });
       expect(
-        result.warnings.some(
-          (w) => w.includes("clientOptions.baseUrl") || w.includes("baseUrl"),
-        ),
+        withClient.warnings.some((w) => w.includes("autoStart")),
       ).toBe(true);
+
+      const withBaseUrl = validateProviderSettings({
+        baseUrl: "http://127.0.0.1:4096",
+        autoStart: true,
+      });
       expect(
-        result.warnings.some(
-          (w) =>
-            w.includes("clientOptions.directory") || w.includes("directory"),
-        ),
+        withBaseUrl.warnings.some((w) => w.includes("autoStart")),
       ).toBe(true);
-    });
-
-    it("should not warn for undefined reserved keys in clientOptions", () => {
-      const settings = {
-        clientOptions: {
-          baseUrl: undefined,
-          directory: undefined,
-          headers: {
-            "x-test": "value",
-          },
-        } as unknown as Record<string, unknown>,
-      };
-
-      const result = validateProviderSettings(settings);
-      expect(
-        result.warnings.some(
-          (w) => w.includes("clientOptions.baseUrl") || w.includes("baseUrl"),
-        ),
-      ).toBe(false);
-      expect(
-        result.warnings.some(
-          (w) =>
-            w.includes("clientOptions.directory") || w.includes("directory"),
-        ),
-      ).toBe(false);
     });
   });
 
@@ -321,6 +344,101 @@ describe("validation", () => {
     });
   });
 
+  describe("validateFormAnswer", () => {
+    const form: OpencodeFormRequest = {
+      id: "form_1",
+      sessionID: "ses_1",
+      title: "Deployment options",
+      fields: [
+        { key: "env", type: "string", required: true, options: [] },
+        { key: "replicas", type: "integer" },
+        { key: "ratio", type: "number" },
+        { key: "confirm", type: "boolean", required: true, default: false },
+        {
+          key: "regions",
+          type: "multiselect",
+          options: [
+            { label: "us-east", value: "us-east" },
+            { label: "eu-west", value: "eu-west" },
+          ],
+        },
+        { key: "callback", type: "external", url: "https://example.com" },
+      ] as OpencodeFormRequest["fields"],
+    };
+
+    it("should accept a well-formed answer", () => {
+      const result = validateFormAnswer(form, {
+        env: "production",
+        replicas: 3,
+        ratio: 0.5,
+        confirm: true,
+        regions: ["us-east"],
+      });
+      expect(result.warnings).toHaveLength(0);
+    });
+
+    it("should warn about unknown answer keys", () => {
+      const result = validateFormAnswer(form, { env: "prod", bogus: "x" });
+      expect(result.warnings.some((w) => w.includes('"bogus"'))).toBe(true);
+    });
+
+    it("should warn about wrong value shapes per field type", () => {
+      const result = validateFormAnswer(form, {
+        env: 42,
+        replicas: 1.5,
+        ratio: "a lot",
+        confirm: "yes",
+        regions: "us-east",
+      });
+      expect(
+        result.warnings.some((w) => w.includes('"env"') && w.includes("string")),
+      ).toBe(true);
+      expect(
+        result.warnings.some(
+          (w) => w.includes('"replicas"') && w.includes("integer"),
+        ),
+      ).toBe(true);
+      expect(
+        result.warnings.some(
+          (w) => w.includes('"ratio"') && w.includes("number"),
+        ),
+      ).toBe(true);
+      expect(
+        result.warnings.some(
+          (w) => w.includes('"confirm"') && w.includes("boolean"),
+        ),
+      ).toBe(true);
+      expect(
+        result.warnings.some(
+          (w) => w.includes('"regions"') && w.includes("array of strings"),
+        ),
+      ).toBe(true);
+    });
+
+    it("should warn about missing required fields without defaults", () => {
+      const result = validateFormAnswer(form, {});
+      expect(result.warnings.some((w) => w.includes('"env"'))).toBe(true);
+      // confirm has a default, so it is not reported missing
+      expect(result.warnings.some((w) => w.includes('"confirm"'))).toBe(false);
+    });
+
+    it("should not require conditional (when-gated) fields", () => {
+      const conditionalForm: OpencodeFormRequest = {
+        ...form,
+        fields: [
+          {
+            key: "reason",
+            type: "string",
+            required: true,
+            when: [{ key: "confirm", equals: true }],
+          },
+        ] as unknown as OpencodeFormRequest["fields"],
+      };
+      const result = validateFormAnswer(conditionalForm, {});
+      expect(result.warnings).toHaveLength(0);
+    });
+  });
+
   describe("mergeSettings", () => {
     it("should return empty object when both are undefined", () => {
       const result = mergeSettings(undefined, undefined);
@@ -340,64 +458,44 @@ describe("validation", () => {
     });
 
     it("should merge settings with overrides taking precedence", () => {
-      const defaults = {
+      const defaults: OpencodeSettings = {
         agent: "build",
         verbose: true,
         sessionTitle: "Default",
       };
-      const overrides = { agent: "plan", cwd: "/home" };
+      const overrides: OpencodeSettings = {
+        agent: "plan",
+        delivery: "steer",
+      };
       const result = mergeSettings(defaults, overrides);
 
       expect(result).toEqual({
         agent: "plan",
         verbose: true,
         sessionTitle: "Default",
-        cwd: "/home",
+        delivery: "steer",
       });
     });
 
-    it("should merge tools objects", () => {
-      const defaults = { tools: { Bash: true, Write: true } };
-      const overrides = { tools: { Write: false, Read: true } };
-      const result = mergeSettings(defaults, overrides);
-
-      expect(result.tools).toEqual({
-        Bash: true,
-        Write: false,
-        Read: true,
-      });
-    });
-
-    it("should prefer override permission rules", () => {
-      const defaults = {
-        permission: [
-          { permission: "bash", pattern: "*", action: "ask" as const },
-        ],
+    it("should prefer override location wholesale", () => {
+      const defaults: OpencodeSettings = {
+        location: { directory: "/default", workspaceID: "ws-default" },
       };
-      const overrides = {
-        permission: [
-          { permission: "bash", pattern: "npm test", action: "allow" as const },
-        ],
+      const overrides: OpencodeSettings = {
+        location: { directory: "/override" },
       };
       const result = mergeSettings(defaults, overrides);
 
-      expect(result.permission).toEqual(overrides.permission);
+      expect(result.location).toEqual({ directory: "/override" });
     });
 
-    it("should handle tools in defaults only", () => {
-      const defaults = { tools: { Bash: true } };
-      const overrides = { agent: "build" };
-      const result = mergeSettings(defaults, overrides);
+    it("should keep default location when overrides omit it", () => {
+      const defaults: OpencodeSettings = {
+        location: { directory: "/default" },
+      };
+      const result = mergeSettings(defaults, { agent: "plan" });
 
-      expect(result.tools).toEqual({ Bash: true });
-    });
-
-    it("should handle tools in overrides only", () => {
-      const defaults = { agent: "build" };
-      const overrides = { tools: { Bash: false } };
-      const result = mergeSettings(defaults, overrides);
-
-      expect(result.tools).toEqual({ Bash: false });
+      expect(result.location).toEqual({ directory: "/default" });
     });
   });
 });
