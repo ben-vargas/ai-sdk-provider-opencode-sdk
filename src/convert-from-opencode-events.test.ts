@@ -202,6 +202,32 @@ describe("tolerated stream anomalies", () => {
     expect(warnings).toHaveLength(1);
   });
 
+  it("warns and drops a malformed tool-result file entry", () => {
+    const f = eventFactory();
+    const warnings: string[] = [];
+    const state = createV2StreamState({
+      sessionId: SESSION_ID,
+      logger: { warn: (m) => warnings.push(m), error: () => {} },
+    });
+    const msg = "msg_mf";
+    const tool = "tool_mf";
+    convertV2EventToStreamParts(f.toolCalled(msg, tool, {}), state);
+    const parts = convertV2EventToStreamParts(
+      f.toolSuccess(msg, tool, [
+        // No comma → unparseable data URI → dropped with a warning.
+        { type: "file", uri: "data:image/png;base64", mime: "image/png" },
+      ]),
+      state,
+    );
+    expect(parts.some((part) => part.type === "tool-result")).toBe(true);
+    expect(
+      parts.filter((part) => part.type === "file" || part.type === "source"),
+    ).toEqual([]);
+    expect(warnings).toEqual([
+      expect.stringContaining("malformed tool-result file entry"),
+    ]);
+  });
+
   it("keeps streamed content and warns when the final text diverges non-prefix", () => {
     const f = eventFactory();
     const warnings: string[] = [];

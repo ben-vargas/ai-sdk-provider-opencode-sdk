@@ -347,6 +347,14 @@ export function convertV2EventToStreamParts(
     parts.push({ type: "raw", rawValue: event });
   }
 
+  if (state.finishEmitted) {
+    // Finish is the stream's last semantic part — a reducer-owned invariant,
+    // not an orchestration courtesy. Anything arriving after it (late deltas,
+    // duplicate terminal events, post-interrupt stragglers) reduces to
+    // raw-only output.
+    return parts;
+  }
+
   switch (event.type) {
     case "session.text.started":
       handleBlockStarted(
@@ -930,6 +938,7 @@ function handleToolResult(
       }
       parts.push(
         ...convertToolFileContent(
+          state,
           `${data.id}-file-${index}`,
           item.uri,
           item.mime,
@@ -941,18 +950,20 @@ function handleToolResult(
 }
 
 function convertToolFileContent(
+  state: V2StreamState,
   id: string,
   uri: string,
   mime: string,
   name?: string,
 ): LanguageModelV4StreamPart[] {
-  const { plan } = planFilePartConversion({
+  const { plan, error } = planFilePartConversion({
     id,
     mime,
     ...(name ? { filename: name } : {}),
     url: uri,
   });
   if (!plan) {
+    warn(state, `Dropping malformed tool-result file entry ${id}: ${error}`);
     return [];
   }
 
@@ -1192,6 +1203,11 @@ function buildUsage(state: V2StreamState): LanguageModelV4Usage {
       cacheWrite: usage.cachedWriteTokens,
     },
     outputTokens: {
+      // `total` intentionally mirrors v1/OpenCode `output` as-is. Reasoning
+      // tokens are counted disjointly from `output` per the spike Q8
+      // arithmetic, but whether OpenCode's `output` is meant to compose with
+      // `reasoning` (total = output + reasoning) is unresolved upstream
+      // (open Q7) — do not change this arithmetic without that answer.
       total: usage.outputTokens,
       text: undefined,
       reasoning: usage.reasoningTokens,

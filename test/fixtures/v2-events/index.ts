@@ -19,6 +19,10 @@ import {
   executionInterruptedUser,
 } from "./execution-interrupted.js";
 import { duplicateDurableEvents } from "./duplicate-durable-events.js";
+import {
+  contentAfterFinish,
+  contentAfterFinishRaw,
+} from "./content-after-finish.js";
 import { deltaAfterMissedStarted } from "./delta-after-missed-started.js";
 import { logSyncedReplay } from "./log-synced.js";
 import { outOfOrderOrdinals } from "./out-of-order-ordinals.js";
@@ -43,6 +47,8 @@ export const fixtures: V2EventFixture[] = [
   executionInterruptedSuperseded,
   executionInterruptedShutdown,
   duplicateDurableEvents,
+  contentAfterFinish,
+  contentAfterFinishRaw,
   deltaAfterMissedStarted,
   logSyncedReplay,
   outOfOrderOrdinals,
