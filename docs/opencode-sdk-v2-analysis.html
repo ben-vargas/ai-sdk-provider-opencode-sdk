@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenCode SDK v2 — Impact Analysis for ai-sdk-provider-opencode-sdk</title>
+<style>
+:root{
+  --bg:#ffffff; --fg:#1a1f26; --muted:#5c6672; --border:#e3e7ec;
+  --accent:#4059ad; --accent-soft:#eef1fa; --code-bg:#f4f6f8;
+  --th-bg:#f7f8fa; --warn:#8a4b08; --warn-bg:#fdf3e4;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#14181d; --fg:#e6e9ed; --muted:#98a2ad; --border:#2a323b;
+    --accent:#8fa3e8; --accent-soft:#1d2433; --code-bg:#1d232b;
+    --th-bg:#1a2027; --warn:#e8b872; --warn-bg:#2a2115;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.65 -apple-system,"SF Pro Text",Segoe UI,Roboto,Helvetica,Arial,sans-serif;}
+main{max-width:880px;margin:0 auto;padding:48px 28px 96px}
+header.site{border-bottom:1px solid var(--border);padding:28px;margin:0;
+  background:var(--accent-soft)}
+header.site .inner{max-width:880px;margin:0 auto}
+header.site h1{margin:0 0 6px;font-size:26px;line-height:1.25}
+header.site p{margin:0;color:var(--muted);font-size:14px}
+h1,h2,h3,h4{line-height:1.3;scroll-margin-top:16px}
+h1{font-size:26px}
+h2{font-size:21px;margin-top:2.2em;padding-bottom:.3em;border-bottom:1px solid var(--border)}
+h3{font-size:17px;margin-top:1.8em}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{font:.875em/1.5 "SF Mono",SFMono-Regular,ui-monospace,Menlo,Consolas,monospace;
+  background:var(--code-bg);padding:.12em .35em;border-radius:4px}
+pre{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;
+  padding:14px 16px;overflow-x:auto}
+pre code{background:none;padding:0}
+table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:14.5px;display:block;overflow-x:auto}
+th,td{border:1px solid var(--border);padding:8px 12px;text-align:left;vertical-align:top;min-width:120px}
+th{background:var(--th-bg);font-weight:600}
+blockquote{margin:1em 0;padding:.5em 1em;border-left:3px solid var(--accent);
+  background:var(--accent-soft);border-radius:0 6px 6px 0;color:var(--muted)}
+hr{border:none;border-top:1px solid var(--border);margin:2.5em 0}
+li{margin:.35em 0}
+strong{font-weight:650}
+.meta-note{font-size:13.5px;color:var(--muted);border:1px solid var(--border);
+  border-radius:8px;padding:10px 14px;margin:20px 0}
+@media print{ body{font-size:12px} header.site{background:none} }
+</style>
+</head>
+<body>
+<header class="site"><div class="inner">
+<h1>OpenCode SDK v2 — Impact Analysis</h1>
+<p>ai-sdk-provider-opencode-sdk · four-model converged analysis (Claude Fable 5 · GPT-5.6-Sol · Grok 4.6 · Kimi K3) · validated by GPT-5.6-Sol · 2026-08-26</p>
+</div></header>
+<main>
+<h1>OpenCode SDK v2: Impact Analysis for ai-sdk-provider-opencode-sdk</h1>
+<p><strong>Date:</strong> 2026-08-26
+<strong>Provider version analyzed:</strong> 4.1.0 (AI SDK v7 / <code>LanguageModelV4</code>, <code>@opencode-ai/sdk ^1.18.11</code> via its <code>/v2</code> entrypoint)
+<strong>v2 evidence base:</strong> <code>@opencode-ai/client@0.0.0-beta-18286</code> and <code>@opencode-ai/sdk@0.0.0-beta-18286</code> (published 2026-08-26), their full <code>.d.ts</code> surfaces, and the v2 docs at <code>opencode.ai/v2/docs/build</code> (build, sdk, client, plugins pages).
+<strong>Method:</strong> Four independent analyses — Claude Fable 5, GPT-5.6-Sol (max reasoning, via Codex), Grok 4.6 (high), and Kimi K3 (max, via pi) — each working read-only from the same ground-truth type definitions, docs snapshots, and provider source; converged by Claude, then iterated through 8 adversarial validation rounds by GPT-5.6-Sol against the beta <code>.d.ts</code> ground truth (25 blocking findings raised, independently verified, and incorporated) until validator sign-off with zero open issues. All four analyses independently reached the same top-level conclusions.</p>
+<hr>
+<h2>Executive summary</h2>
+<p>OpenCode v2 is <strong>a new backend, not an SDK bump</strong>. Every layer this provider touches changes simultaneously:</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>v1 (current)</th>
+<th>v2 (beta)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Package</td>
+<td><code>@opencode-ai/sdk/v2</code> → <code>createOpencodeClient</code></td>
+<td><strong><code>@opencode-ai/client</code></strong> → <code>OpenCode.make({baseUrl, headers?, fetch?})</code>; <code>@opencode-ai/sdk</code> is now an <em>embedded in-process host</em> (Effect-based)</td>
+</tr>
+<tr>
+<td>Results</td>
+<td><code>{data, error}</code> fields-style</td>
+<td>Payloads returned directly; <strong>typed errors thrown</strong> (<code>_tag</code> unions + <code>ClientError</code>)</td>
+</tr>
+<tr>
+<td>Prompt</td>
+<td>Blocking <code>session.prompt({parts, model, system, tools, format, …})</code> → <code>{info, parts}</code></td>
+<td><strong>Fire-and-forget</strong> <code>session.prompt({sessionID, text, files?, delivery?, resume?})</code> → inbox receipt; model/agent are <strong>session state</strong></td>
+</tr>
+<tr>
+<td>Streaming</td>
+<td><code>message.part.updated</code> snapshots + prefix-diffing</td>
+<td><strong>Native delta events</strong> (<code>session.text.delta</code>, <code>session.reasoning.delta</code>, <code>session.tool.input.delta</code>) + execution lifecycle events</td>
+</tr>
+<tr>
+<td>Questions</td>
+<td><code>question.asked</code> / <code>question.reply(answers: string[][])</code></td>
+<td><strong>Forms</strong>: <code>form.*</code> API with typed, keyed fields</td>
+</tr>
+<tr>
+<td>Permissions</td>
+<td><code>permission.reply({requestID, …})</code>; per-session ruleset at create</td>
+<td><code>permission.reply({sessionID, requestID, …})</code>; rules live on <strong>agents/config</strong>, not session create</td>
+</tr>
+<tr>
+<td>Structured output</td>
+<td><code>format: json_schema</code> + <code>StructuredOutput</code> tool</td>
+<td><strong>Gone</strong> — no schema-enforced output anywhere in the beta prompt path</td>
+</tr>
+<tr>
+<td>Server lifecycle</td>
+<td><code>createOpencodeServer({hostname, port})</code> + health probes</td>
+<td><code>Service.discover/ensure/stop/headers</code> (registration file, version predicate, basic auth) or embedded <code>OpenCode.create()</code></td>
+</tr>
+</tbody></table>
+<p><strong>Recommendation (unanimous across all four analyses):</strong> clean-break <strong>v5.0.0</strong> targeting <code>@opencode-ai/client</code>, with 4.x maintained for OpenCode 1.18 servers. Develop against the beta now under a <code>next</code> dist-tag with an exact version pin; do not GA until OpenCode v2 stabilizes. Add an optional <code>./embedded</code> entrypoint for the in-process host (kept out of the default dependency graph — it hard-depends on <code>effect@4.0.0-rc</code>). The four hardest gaps — structured output, per-prompt system prompt, file-attachment ingestion, and inbox→execution correlation — should be raised upstream <em>now</em>, while v2 is still beta.</p>
+<hr>
+<h2>1. V2 change inventory</h2>
+<p>Everything below is verified against the beta <code>.d.ts</code> files (cited by type/method name); items marked <em>(docs)</em> come from the v2 docs prose.</p>
+<h3>1.1 Packaging and runtime topology</h3>
+<ul>
+<li><strong>Package split.</strong> v2 <code>@opencode-ai/sdk</code> is an embedded in-process host (<code>OpenCode.create()</code>; deps: <code>@opencode-ai/{client,core,plugin,schema,server,util}</code> + hard <code>effect@4.0.0-rc.111</code>). The network client is <strong><code>@opencode-ai/client</code></strong> — exports <code>.</code>/<code>./promise</code> (browser-compatible Promise client), <code>./service</code> (Node-only process management), <code>./solid</code>, <code>./effect*</code> (Effect and solid-js are <em>optional</em> peers; the Promise root is Effect-free). There is <strong>no <code>/v2</code> subpath</strong> in either package — the provider&#39;s <code>@opencode-ai/sdk/v2</code> import sites (four in production source, plus exported types derived from them) have no drop-in replacement.</li>
+<li><strong>Embedded host ownership.</strong> <code>OpenCode.create()</code> returns <code>Omit&lt;OpenCodeClient, &quot;plugin&quot;&gt; &amp; {sessions, events, plugin, close, [Symbol.asyncDispose]}</code> — the same Promise values, typed errors, and <code>AsyncIterable</code> events as the network client, with no HTTP listener. A <code>./workerd</code> entry boots the host inside a Cloudflare Durable Object (SQLite on DO storage).</li>
+<li><strong>No <code>engines</code> field</strong> in either beta manifest; docs use <code>bun add …@beta</code> / <code>…@dev</code> (note: different dist-tags per package). The provider&#39;s Node <code>&gt;=22</code> floor should be retained as its own stability floor.</li>
+<li>Repo moved to <code>anomalyco/opencode</code>.</li>
+</ul>
+<h3>1.2 Client construction, results, errors</h3>
+<ul>
+<li><code>OpenCode.make({baseUrl, fetch?, headers?})</code>; each operation takes trailing <code>RequestOptions {signal?, headers?}</code>. Gone from client config: <code>directory</code>, <code>responseStyle</code>, <code>throwOnError</code>, interceptors, serializers, SSE retry knobs, <code>experimental_workspaceID</code>.</li>
+<li>Methods resolve <strong>directly to payloads</strong> and <strong>throw</strong> on failure: tagged errors with <code>_tag</code> discriminants and exported guards (<code>UnauthorizedError</code>, <code>ForbiddenError</code>, <code>InvalidRequestError {kind?, field?}</code>, <code>SessionNotFoundError {sessionID}</code>, <code>SessionBusyError {sessionID}</code>, <code>ProviderNotFoundError</code>, <code>AgentNotFoundError</code>, <code>MessageNotFoundError</code>, <code>ConflictError</code>, <code>ServiceUnavailableError</code>, <code>FormNotFoundError</code>, <code>FormAlreadySettledError</code>, <code>FormInvalidAnswerError</code>, <code>PermissionNotFoundError</code>, <code>UnknownError</code>, …; guards named <code>isUnauthorizedError</code>, <code>isSessionBusyError</code>, etc.) plus transport-level <code>ClientError {reason: &quot;Transport&quot;|&quot;UnexpectedStatus&quot;|&quot;UnsupportedContentType&quot;|&quot;MalformedResponse&quot;|&quot;SseEventTooLarge&quot;}</code>.</li>
+<li><strong>Headers are the auth story</strong> — global at <code>make()</code>, per-request override in <code>RequestOptions</code>. This finally gives a direct mapping for AI SDK <code>LanguageModelV4CallOptions.headers</code>, which the provider currently ignores. Locally managed services may require <strong>basic auth</strong> (<code>Endpoint.auth</code>), constructed via <code>Service.headers(endpoint)</code> — a raw <code>fetch(baseUrl + &quot;/health&quot;)</code> probe would 401.</li>
+<li>The generated Promise client does not expose response headers or raw <code>Response</code> objects; AI SDK response-header metadata cannot be populated without a custom-<code>fetch</code> side channel.</li>
+</ul>
+<h3>1.3 The prompt contract (largest behavioral break)</h3>
+<p><code>SessionPromptInput</code>: <code>{sessionID, text (required), files?: [{uri, name?, description?, mention?}], agents?, skills?, id?, metadata?, delivery?: &quot;steer&quot;|&quot;queue&quot;, resume?}</code> → returns <strong><code>SessionInboxUser</code></strong> <code>{id, sessionID, timeCreated, type: &quot;user&quot;, payload, delivery}</code> — an inbox receipt, not the assistant response.</p>
+<p>Removed from the prompt (all present in v1): <code>parts[]</code>, <code>model</code>, <code>agent</code>, <code>system</code>, <code>tools</code>, <code>format</code> (json_schema), <code>variant</code>, <code>noReply</code>, <code>messageID</code> (now <code>id</code>), <code>directory</code>. Consequences:</p>
+<ul>
+<li><strong>Model/agent are session state</strong>: set at <code>session.create({title?, agent?, model?: {id, providerID, variant?}, location?})</code> or via <code>session.switchModel</code>/<code>switchAgent</code> (note the rename: v1 <code>modelID</code> → v2 <code>ModelRef.id</code>; v1 <code>variant</code> folds into the model ref). Two concurrent AI SDK calls with different models against one session now race server-side state.</li>
+<li><strong>Completion is observed, not returned</strong>: <code>session.wait({sessionID}) → Promise&lt;void&gt;</code>, execution lifecycle events (<code>session.execution.started/succeeded/failed/interrupted</code>), <code>session.idle</code>; the assistant message is fetched via <code>message.list</code>, <code>session.message</code>, or <code>session.context</code>, or assembled from delta events.</li>
+<li><strong>Busy/delivery semantics exist but are under-specified.</strong> The types prove that <code>delivery: &quot;steer&quot; | &quot;queue&quot;</code>, <code>resume</code>, <code>SessionBusyError {sessionID}</code>, and <code>SessionExecutionInterrupted.reason: &quot;user&quot;|&quot;shutdown&quot;|&quot;superseded&quot;</code> all exist; they do <em>not</em> establish the default delivery, exactly when a busy session throws vs. enqueues, whether steer auto-interrupts (plausibly producing <code>reason: &quot;superseded&quot;</code>), or what <code>resume</code> continues. Treat these as behaviors to verify against a live beta (§5) before the provider relies on them.</li>
+<li><strong>Files are URI-only at the input boundary</strong> (<code>{uri, name?, …}</code> — no mime, no bytes). The <em>stored</em> <code>PromptFileAttachment</code> has <code>{data: PromptBase64, mime, source: inline|uri}</code>, implying base64 normalization happens server-side, but whether <code>data:</code>/<code>file:</code> URIs are accepted inbound is not type-evident. The provider&#39;s entire base64-data-URL attachment path is at risk.</li>
+<li>New structural inputs with no AI SDK analog: agent/skill mentions with <code>{start, end, text}</code> ranges.</li>
+</ul>
+<h3>1.4 Session lifecycle and location</h3>
+<ul>
+<li><code>session.abort</code> → <strong><code>session.interrupt({sessionID, continue?}) → {interrupted: boolean}</code></strong>.</li>
+<li>Location model: client-level <code>directory</code> is gone; <code>LocationRef = {directory, workspaceID?}</code> binds at <code>session.create({location})</code> and can change via <code>session.move</code>. Catalog/list APIs take <code>location?: {directory?, workspace?}</code>; session-scoped calls take only <code>{sessionID, …}</code>.</li>
+<li><code>SessionCreateInput</code> has <strong>no <code>permission</code> field</strong> (v1 had one) and no <code>metadata</code>/<code>parentID</code>; forking is a separate <code>session.fork({sessionID, boundary})</code>. Note a beta codegen conflict: the standalone <code>SessionForkBoundary</code> alias declares <code>messageID</code> on both <code>before</code> and <code>through</code> variants, but the <code>SessionForkInput</code> actually accepted by <code>client.session.fork</code> declares <code>through</code> as <code>{type: &quot;through&quot;}</code> with <strong>no <code>messageID</code></strong> — treat the fork input contract as unresolved (§5).</li>
+<li><code>SessionInfo</code> is richer: <code>parentID</code>/<code>fork</code> lineage, <code>location</code>, active <code>agent</code>/<code>model</code>, cumulative <code>cost: MoneyUSD</code> and <code>tokens: TokenUsageInfo</code>, <code>outcome?: &quot;succeeded&quot;|&quot;failed&quot;|&quot;interrupted&quot;</code>, revert state.</li>
+<li>New session surface: <code>import</code>/<code>export</code>, <code>compact</code>, <code>revert.stage/clear/commit</code>, <code>inbox.{list,cancel,steer,queue}</code>, <code>instructions.entry.{list,put,remove}</code> (keyed instruction store), <code>environment</code>, <code>background</code>, <code>view</code>, <code>log({after?, follow?})</code> (replayable <strong>durable event log</strong>), <code>stats</code>, <code>active</code>, <code>synthetic</code>, <code>shell</code>, <code>skill</code>, <code>generate({sessionID, prompt}) → {text}</code>.</li>
+<li><code>credential.{update,activate,remove}</code> replaces v1 <code>auth.*</code>; <code>integration.*</code> replaces provider-auth helpers.</li>
+</ul>
+<h3>1.5 Messages and content</h3>
+<ul>
+<li><code>SessionMessageAssistant</code> is self-contained: <code>{content: Array&lt;Text|Reasoning|Tool&gt;, agent, model: ModelRef, finish?: &quot;stop&quot;|&quot;length&quot;|&quot;tool-calls&quot;|&quot;content-filter&quot;|&quot;error&quot;|&quot;unknown&quot;, rawFinish?, cost?, tokens?, error?: SessionStructuredError, retry?, snapshot?}</code>. v1&#39;s parallel <code>{info, parts[]}</code> shape is gone; there are no <code>step-start</code>/<code>step-finish</code> <em>parts</em> (step lifecycle is events), and no <code>synthetic</code>/<code>ignored</code> flags on assistant text.</li>
+<li>Tool content: <code>{type: &quot;tool&quot;, id, name, executed?, state, …}</code> (v1: <code>callID</code>/<code>tool</code>). States are <code>streaming {input: string}</code> → <code>running {input: JSON object}</code> → <code>completed {input, content: [ToolContent, …]}</code> | <code>error {input, error, content?}</code> — <strong>no <code>pending</code> state</strong> (only the streaming state carries a string input; the later states carry a JSON object), and results are a <strong>content array</strong> (<code>{type:&quot;text&quot;} | {type:&quot;file&quot;, uri, mime, name?}</code>), not a string <code>output</code> + attachments. Tool file references use <code>uri</code>, not <code>url</code>. The v1 <code>running</code> state&#39;s <code>title</code> (which the provider forwards as <code>tool-input-start.title</code>) has no typed v2 equivalent — drop it deliberately or enrich only from guarded <code>metadata</code>.</li>
+<li><strong>Direct assistant file outputs are removed.</strong> v1 assistant messages could carry top-level <code>file</code> parts, which the provider maps to AI SDK file/source content in both generation modes independently of tool attachments. v2 assistant <code>content</code> permits only text, reasoning, and tool entries — files surface only inside tool-result content; <code>SessionStepEnded.files</code>/<code>snapshot</code> are bare path strings with no MIME/content contract and are not an equivalent. This is a removed capability the migration must document (with a warning), not a mapping change.</li>
+<li><code>session.context</code> returns a broad message union (agent-selected, model-selected, location-switched, user, synthetic, system, skill, shell, assistant, compaction) — consumers must filter deliberately.</li>
+<li>Message history reads move to <code>message.list</code> (not <code>session.messages</code>).</li>
+</ul>
+<h3>1.6 Events (streaming)</h3>
+<ul>
+<li><code>client.event.subscribe(requestOptions?) → AsyncIterable&lt;V2Event&gt;</code> — no awaited <code>{stream}</code> wrapper, <strong>no directory/session filter argument</strong>; filtering is client-side. <strong>The session ID does not live at one uniform path</strong>: most session events carry <code>data.sessionID</code>, but <code>form.created</code> carries it at <code>data.form.sessionID</code> — a naive <code>data.sessionID</code> filter silently drops form requests and can deadlock generation. Session extraction must be discriminated by event type.</li>
+<li>Near-uniform envelope <code>{id, type, location?, durable?: {aggregateID, seq, version}, data}</code> with <code>created</code> on all but <code>server.connected</code> (<code>V2EventServerConnected</code> lacks it) — the provider&#39;s dual <code>properties</code>/<code>data</code> tolerance becomes single-shape, but don&#39;t assume every envelope field on every member.</li>
+<li><strong>Delta-native streaming</strong>: <code>session.text.started/delta/ended</code>, <code>session.reasoning.started/delta/ended</code> (text and reasoning are both keyed by <code>{assistantMessageID, ordinal}</code>, so reducer identity must include the content kind — e.g. <code>${assistantMessageID}:text:${ordinal}</code> vs <code>:reasoning:</code>), <code>session.tool.input.started/delta/ended</code> (keyed by tool <code>id</code>; <code>started</code> carries <code>name</code>), <code>session.tool.called/success/failed</code> (these three carry an <code>executed</code> flag; <code>session.tool.progress</code> does not), <code>session.step.started/ended/failed</code> (<code>ended</code> carries <code>finish</code>, <code>rawFinish</code>, <code>cost</code>, <code>tokens</code>, <code>snapshot</code>), <code>session.execution.started/succeeded/failed/interrupted</code> (<code>interrupted.reason: &quot;user&quot;|&quot;shutdown&quot;|&quot;superseded&quot;</code>), <code>session.retry.scheduled</code>, <code>session.usage.updated</code>, inbox events, <code>permission.asked/replied</code>, <code>form.created/replied/cancelled</code>, plus non-session noise (TUI, MCP, filesystem, catalog). (<code>session.usage.recorded</code> is <em>not</em> in the live union — see the durable split below.)</li>
+<li><strong>Correlation gap:</strong> the prompt receipt and inbox events expose an inbox ID; execution lifecycle events expose only <code>sessionID</code>; step events add <code>assistantMessageID</code> but no inbox ID. On a shared/existing session, an event pump can therefore attribute <em>another client&#39;s</em> execution (e.g. the TUI&#39;s) to this call — and a provider-local lock cannot exclude external clients. Until upstream documents an inbox→execution correlation key, deterministic lifecycle handling is only achievable on sessions this provider creates and exclusively owns (one conversation, one session, one active generation — note the session must still survive across a tool-approval round-trip, so &quot;ephemeral&quot; is per-conversation, not per-HTTP-call), and shared-session mode must carry an explicit exclusivity caveat.</li>
+<li><strong>Durable vs transient — two different unions, not a subset</strong>: <code>session.log</code> yields <code>SessionLogItem = SessionEventDurable | EventLogSynced</code> (a <code>log.synced</code> sentinel the reader must handle). The durable union includes lifecycle/terminal events but <em>not</em> text/reasoning/tool-input deltas, and the two unions genuinely diverge: <code>SessionUsageUpdated</code> is live-only while <code>SessionUsageRecorded</code> is durable-only. A recovery design that &quot;replays <code>V2Event</code>s from the log&quot; is therefore type-incorrect — the reducer needs an explicit normalization layer over both unions. After an SSE drop, lifecycle state is recoverable but live deltas are not; final-message reconciliation is required. Crucially, <code>PermissionAsked/Replied</code> and <code>Form*</code> events are <strong>also absent from the durable union</strong>, and a session blocked on one may remain without a terminal execution event while the request is pending — so reconnect recovery must additionally poll <code>permission.list/get</code> and <code>form.list</code>/<code>form.state</code> (deduplicating against already-handled request/form IDs), not just replay the log.</li>
+<li>Note <code>SessionStepFailed</code> is not error-only: it can carry <code>finish?: &quot;content-filter&quot;</code>, <code>rawFinish</code>, <code>cost</code>, and <code>tokens</code> — a reducer that reads usage/finish only from <code>SessionStepEnded</code> loses failed-step accounting and the content-filter reason.</li>
+</ul>
+<h3>1.7 Questions → Forms</h3>
+<p>No <code>question.*</code> API exists. Replacement: <code>form.request.list</code>, <code>form.list/create/get/state/reply/cancel</code>; <code>FormInfo {id, sessionID, title, metadata?, fields}</code> with typed fields (<code>string</code> w/ options+format, <code>number</code>, <code>integer</code>, <code>boolean</code>, <code>multiselect</code> w/ min/max, <code>external {url}</code>), per-field <code>key</code>, conditional <code>when</code> clauses, defaults. <code>form.reply</code> takes <code>answer: Record&lt;key, string|number|boolean|string[]&gt;</code> — keyed, not v1&#39;s positional <code>string[][]</code>. <code>form.cancel</code> replaces <code>question.reject</code>. Errors: <code>FormNotFoundError</code>, <code>FormAlreadySettledError</code>, <code>FormInvalidAnswerError</code>. <code>form.state</code> enables a polling fallback when SSE is unavailable.</p>
+<h3>1.8 Permissions</h3>
+<ul>
+<li><code>permission.asked</code> data: <code>{id, sessionID, action, resources[], save?, metadata?, source?: {type: &quot;tool&quot;, messageID, id}, message?}</code> — v1&#39;s <code>permission</code>→<code>action</code>, <code>patterns</code>→<code>resources</code>, <code>tool.callID</code>→<code>source.id</code>.</li>
+<li><code>permission.reply({sessionID, requestID, reply: &quot;once&quot;|&quot;always&quot;|&quot;reject&quot;, message?})</code> — <strong><code>sessionID</code> newly required</strong>; no <code>directory</code>.</li>
+<li>Per-session rulesets at create are gone; v2 rules live on <strong>agents</strong> (<code>AgentInfo.permissions</code>) and project-persisted <strong>saved permissions</strong> (<code>permission.saved.list/remove</code>). <code>permission.create</code> creates/evaluates a live request — it is not a policy-installation API. In embedded mode, the plugin <code>permission.hook(&quot;evaluate&quot;)</code> can programmatically allow/ask/deny <em>(docs)</em>.</li>
+</ul>
+<h3>1.9 Finish, usage, cost, structured errors</h3>
+<ul>
+<li><code>finish</code> is a closed union aligned with AI SDK (<code>&quot;unknown&quot;</code> → <code>other</code> is the only normalization), plus native <code>rawFinish</code>. Available per-step (<code>SessionStepEnded</code>, and <code>SessionStepFailed</code> for <code>&quot;content-filter&quot;</code>) and per-message.</li>
+<li><code>TokenUsageInfo {input, output, reasoning, cache: {read, write}}</code> maps directly onto the provider&#39;s <code>StreamingUsage</code> accumulator (<code>inputTokens</code>/<code>outputTokens</code>/<code>reasoningTokens</code>/<code>cachedInputTokens</code>/<code>cachedWriteTokens</code>, minus <code>totalCost</code>); <code>MoneyUSD</code> cost appears separately on steps, messages, and sessions.</li>
+<li>v1&#39;s named error classes (<code>MessageAbortedError</code>, <code>MessageOutputLengthError</code>, <code>ContextOverflowError</code>, <code>StructuredOutputError</code>, <code>ProviderAuthError</code>, …) are replaced by <code>SessionStructuredError {type: string, message, status?}</code> on execution/step/tool failures and retry records. All <code>error.name</code>-based mapping breaks.</li>
+</ul>
+<h3>1.10 Structured output: removed</h3>
+<p>No <code>format</code>/<code>json_schema</code> parameter exists anywhere in the v2 beta prompt path, and there is no <code>StructuredOutput</code> tool (grep of the full types: <code>format</code> appears only as a form-field format and a config formatter). <code>generate.text({prompt, model?})</code> and <code>session.generate({sessionID, prompt})</code> return <code>{text}</code> only. The docs explicitly describe <code>generate.text</code> as generating &quot;without creating a session, invoking tools, or adding to session history&quot;; <code>session.generate</code> is described only as a transient generation request — do not assume it is tool-free until verified. This is the provider&#39;s biggest user-facing regression: <code>responseFormat: {type: &quot;json&quot;}</code> (and therefore <code>Output.object()</code>/<code>generateObject</code>-style flows) has no server-side enforcement to target.</p>
+<h3>1.11 Service management</h3>
+<p><code>createOpencodeServer</code> is gone. <code>@opencode-ai/client/service</code>: <code>Service.discover({file?, version?})</code>, <code>Service.ensure({file?, version?, command? (default [&quot;opencode&quot;,&quot;serve&quot;,&quot;--service&quot;]), env?, onStart?(reason: &quot;missing&quot;|&quot;version-mismatch&quot;, prev?)})</code> → <code>Endpoint {url, auth?}</code>, <code>Service.stop({file?})</code>, <code>Service.headers(endpoint)</code>. Discovery is via an XDG-state registration file with version predicates — not port probing. There is no <code>hostname</code>/<code>port</code>/<code>timeout</code> knob; the service is a <strong>shared, registered process</strong>, not a child the provider owns. <code>client.health.get() → {healthy, version, pid}</code> and <code>client.server.get()</code> replace raw health probes. <code>client.migration.v1.status()</code> reports v1→v2 data-migration state (<code>required</code>/<code>running</code>/<code>completed</code>/<code>error</code>) — a useful connection preflight.</p>
+<hr>
+<h2>2. Required migration work</h2>
+<h3>2.1 Features with NO v2 network equivalent (decide before coding)</h3>
+<table>
+<thead>
+<tr>
+<th>Current feature</th>
+<th>v2 status</th>
+<th>Least-bad strategy</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Per-request <code>system</code> (AI SDK <code>system:</code> + <code>settings.systemPrompt</code>)</td>
+<td>No <code>system</code> on prompt or session create</td>
+<td>Prepend a clearly delimited system block to the first turn&#39;s <code>text</code> + emit an unsupported-degraded warning (system-role priority is lost). <code>session.instructions.entry.put</code> is the most promising native vehicle but its model-context semantics are undocumented — treat as experimental. Embedded mode: agent transform / session-context plugin hook restores true system semantics.</td>
+</tr>
+<tr>
+<td>Per-request <code>tools: Record&lt;string, boolean&gt;</code></td>
+<td>No prompt/create field</td>
+<td>Remove (already deprecated). Server/agent config is the network-mode answer (i.e., none per-request). In embedded mode the correct plugin surface is <code>ctx.session.hook(&quot;context&quot;)</code> mutating <code>event.tools</code> (the docs&#39; example deletes <code>event.tools.write</code>) — <strong>not</strong> tool transforms, whose <code>ToolDraft</code> exposes only <code>add()</code>, and not agent <code>permissions</code>, which gate execution rather than filter tool exposure.</td>
+</tr>
+<tr>
+<td><code>responseFormat: json_schema</code> + <code>outputFormatRetryCount</code></td>
+<td>Entirely absent</td>
+<td>Emit a <code>SharedV4Warning</code> — <code>{type: &quot;unsupported&quot;, feature, details}</code> or the provider&#39;s existing <code>{type: &quot;other&quot;}</code> form (note: the older <code>unsupported-setting</code> discriminator does not exist in V4 and won&#39;t type-check); opt-in prompt-engineered JSON instruction (the existing <code>createJsonModeInstruction</code> path becomes primary) + client-side parse/validate. Two distinct repair strategies: <strong>repairing already-produced text</strong> via <code>generate.text</code> (documented as no-tools/no-history) is always safe; <strong>replaying the original turn</strong> is gated on it being side-effect-free — <code>session.fork</code> only branches conversation state (no filesystem/tool-effect isolation or rollback) and never lifts that gate. File upstream.</td>
+</tr>
+<tr>
+<td>Per-session <code>permission</code> ruleset at create</td>
+<td>No create field; rules live on agents / saved permissions</td>
+<td>Deprecate the setting; document agent-config and saved-permission paths; embedded <code>ctx.permission.hook(&quot;evaluate&quot;)</code> for programmatic policy (explicit configured denies bypass the hook).</td>
+</tr>
+<tr>
+<td><code>onQuestion(request) → {type: &quot;answer&quot;, answers: string[][]} | {type: &quot;reject&quot;}</code></td>
+<td>Forms with typed keyed fields</td>
+<td>New <code>onForm(form) → keyed answer | cancel</code> + `formPolicy: &quot;cancel&quot;</td>
+</tr>
+<tr>
+<td>Arbitrary multi-role <code>parts[]</code> history injection</td>
+<td>Prompt is one user text + URI files</td>
+<td>On reused sessions send only the new user text (OpenCode owns the transcript). For fresh sessions with multi-turn AI SDK history: serialize to a delimited transcript. <code>session.import</code> (<code>SessionTransferData {info, messages}</code>) is the only candidate for structured history seeding — verify its accepted message shapes first; <code>session.synthetic</code> accepts only <code>{text, description?, metadata?}</code> and <strong>cannot</strong> carry role/tool/file history. Make the mode explicit (<code>ephemeral</code> vs <code>persistent</code>).</td>
+</tr>
+<tr>
+<td>Base64/bytes file input</td>
+<td>Prompt files are <code>{uri}</code> only</td>
+<td>Pending upstream clarification: accept only verified URI schemes; offer a <code>resolveFileToUri</code> hook; don&#39;t write temp files by default (breaks remote/browser/workerd). This decision is coupled to <strong><code>supportedUrls</code></strong>: the provider currently advertises <code>{}</code>, which makes the AI SDK download every remote URL to bytes <em>before</em> the provider sees it — so verified URL schemes would never reach the resolver as URLs. v5 must either keep <code>{}</code> (bytes-only, resolver handles downloads) or advertise verified pass-through URL patterns once live-beta testing establishes which URI schemes the server accepts.</td>
+</tr>
+<tr>
+<td>Owned server + <code>close()</code> on exit</td>
+<td>Shared registered service</td>
+<td><strong>Never stop the shared default-registration service on disposal.</strong> <code>Endpoint</code> carries no ownership token and <code>Service.stop({file?})</code> stops whatever is currently registered — even &quot;we spawned it&quot; (<code>onStart</code> fired) doesn&#39;t prevent killing a daemon other clients attached to afterwards. True ownership requires a dedicated registration <code>file</code> the provider controls (then stop is safe) or an upstream lease mechanism; otherwise expose stop only as an explicit user-invoked action. Remove process-global signal handlers.</td>
+</tr>
+<tr>
+<td>Fields-style <code>{data, error}</code> handling</td>
+<td>Removed</td>
+<td>try/catch typed errors; delete <code>extractSdkResult</code>, <code>createEmptyResponseDataError</code>, fields-style failure checks.</td>
+</tr>
+</tbody></table>
+<h3>2.2 File-by-file</h3>
+<p><strong>package.json</strong> — swap dep to <code>@opencode-ai/client</code> (exact pin while beta; no caret). Embedded <code>@opencode-ai/sdk</code> as optional peer behind a <code>./embedded</code> export with dynamic import — never in the default graph (Effect RC + six sibling packages). Keep Node <code>&gt;=22</code>, ESM-only. This is semver-major (5.0.0).</p>
+<p><strong>src/types.ts</strong> — retype <code>OpencodeClient</code> from <code>@opencode-ai/client</code> (<code>ReturnType&lt;typeof OpenCode.make&gt;</code>); collapse <code>clientOptions</code> to <code>{fetch?, headers?}</code>. Remove/deprecate: <code>systemPrompt</code>, <code>tools</code>, <code>permission</code> (create-time), <code>outputFormatRetryCount</code>, <code>cwd</code>, <code>onQuestion</code>/<code>questionPolicy</code>. Add: <code>location {directory, workspaceID?}</code> (<code>settings.directory</code> maps to <code>location.directory</code>), <code>delivery</code>, <code>resume</code>, <code>onForm</code>/<code>formPolicy</code> (default <code>formPolicy: &quot;cancel&quot;</code> — the non-deadlocking analog of today&#39;s <code>questionPolicy: &quot;reject&quot;</code> default), session mode (<code>ephemeral</code>/<code>persistent</code>/<code>existing</code>), service options, file-URI resolver hook. <code>providerOptions.opencode.messageID</code> → prompt <code>id</code> (drop the <code>msg_</code> prefix assertion pending upstream confirmation). Expand <code>OpencodeProviderMetadata</code>: <code>tokens</code>, <code>finish</code>/<code>rawFinish</code>, <code>inboxId</code>, <code>outcome</code>, structured error, retry info.</p>
+<p>Session-setting migration map (v4 → v5):</p>
+<table>
+<thead>
+<tr>
+<th>v4 setting/API</th>
+<th>v5 disposition</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>sessionId</code></td>
+<td>Kept: pins an existing v2 session (with the shared-session exclusivity caveat, §1.6); validate with <code>session.get</code> + <code>migration.v1.status</code> preflight, and decide whether a mismatched <code>location</code> rejects or triggers <code>session.move</code></td>
+</tr>
+<tr>
+<td><code>createNewSession</code></td>
+<td><strong>Semantics change — document as a break.</strong> Today <code>true</code> creates a fresh session on <em>every generation call</em> (bypassing the cached/preset session). Pure per-call isolation is incompatible with v2&#39;s tool-approval continuation, which must reattach to the blocked session across calls. Keep the setting as per-call isolation for ordinary calls, but approval-only continuation calls always reuse the pinned blocked session regardless — or remove the setting; either way the deviation must be documented</td>
+</tr>
+<tr>
+<td><code>sessionTitle</code></td>
+<td>Kept: <code>session.create({title})</code></td>
+</tr>
+<tr>
+<td><code>getSessionId()</code></td>
+<td>Kept: returns the pinned session ID</td>
+</tr>
+<tr>
+<td>implicit &quot;reuse one session forever&quot; default</td>
+<td><strong>Changed</strong>: default becomes provider-owned session per conversation, exclusive to this provider; shared/persistent reuse is opt-in with documented caveats</td>
+</tr>
+</tbody></table>
+<p><strong>src/opencode-client-manager.ts</strong> — near-total rewrite. Delete: dynamic <code>@opencode-ai/sdk/v2</code> imports, <code>createOpencodeServer</code> + <code>server.close()</code>, unauthenticated <code>/health</code>→<code>/config</code> probes, <code>responseStyle</code>/<code>directory</code> client options, hostname/port/timeout plumbing, and the process-exit/SIGINT/SIGTERM/uncaughtException handler suite (a library should not own process termination, and a shared service must not die with one consumer). Replace with explicit backends: (1) caller-supplied client; (2) caller-supplied manager (the current <code>clientManager</code> injection setting — retain it, retyped to the new manager interface, or explicitly document its removal as a v5 break); (3) <code>baseUrl</code> → <code>OpenCode.make</code> (+ user headers); (4) connect-without-start (the current <code>autoStartServer: false</code> mode) → <code>Service.discover()</code> and fail clearly when no registered service exists — hostname/port probing has no v2 equivalent, so this public mode must be re-based on discovery (or on an explicit <code>baseUrl</code>), not silently deleted; (5) auto-start → <code>Service.ensure({version: predicate, onStart})</code> + <code>OpenCode.make({baseUrl: endpoint.url, headers: merge(Service.headers(endpoint), userHeaders)})</code>; (6) embedded host (optional entrypoint). Disposition the small public manager API alongside: <code>createClientManager</code>/<code>createClientManagerFromSettings</code> re-typed to the new backends, <code>getServerUrl()</code> → endpoint URL for baseUrl/service backends, the configured URL if known for caller-supplied clients, and undefined (or a typed error) for the embedded host, which exposes no endpoint; <code>isServerManaged()</code> → &quot;started by this provider&quot; (meaningful only in owned-service/embedded modes); any manager cache/registry must key on the full effective identity (baseUrl or registration file, headers/auth, custom <code>fetch</code>), not just host/port. Disposal never stops a shared service (see §2.1 ownership row); an &quot;owned service&quot; mode requires a provider-controlled registration <code>file</code>. Preflight <code>migration.v1.status()</code> and <code>health.get()</code> version gating. Ownership and headers must be explicit per backend: dispose closes an owned embedded host and aborts this provider&#39;s subscriptions, but never closes caller-supplied clients/managers or the shared service; per-call AI SDK <code>headers</code> must reach <em>every</em> request in a generation (subscribe, prompt, wait/read, form/permission replies, interrupt), merged over client-level and <code>Service.headers</code> values — filtering out <code>undefined</code> entries first, since <code>LanguageModelV4CallOptions.headers</code> permits them and the <code>RequestInit</code> record form does not. Keep SSE-abort registration (subscribe returns an <code>AsyncIterable</code>; verify loop-exit cancels the response body). Avoid the mutable singleton pattern — key managers by endpoint/backend.</p>
+<p><strong>src/opencode-language-model.ts</strong> — the central rewrite.</p>
+<ul>
+<li><em>Session establishment:</em> <code>session.create({title, agent, model: {id, providerID, variant?}, location})</code>. <strong>Bare model IDs need a decision</strong>: the current provider accepts <code>&quot;modelID&quot;</code> without a provider prefix (parsed with empty <code>providerID</code>, and the model field is simply omitted from the v1 prompt so the server default applies); v2 <code>ModelRef</code> requires both <code>id</code> and <code>providerID</code>, but <code>SessionCreateInput.model</code> is optional — so the equivalent behavior is to omit <code>model</code> at create (server/session default), optionally resolving bare IDs via <code>model.default()</code>/the catalog; document whichever is chosen. One wrinkle: a bare model ID combined with <code>settings.variant</code> <em>cannot</em> omit the model (variant rides <code>ModelRef</code>), so that combination must resolve a <code>providerID</code> via the catalog or be rejected. Treat model/agent as immutable per model instance; a different model on a reused session ⇒ switch-then-prompt must be serialized, or prefer session-per-model. Default to <strong>one active generation per exclusively-owned session</strong> — note a provider-local lock cannot exclude external clients (TUI) on shared sessions; see the correlation gap in §1.6. And because <code>LanguageModelV4</code> calls carry no conversation identifier while the session must persist across approval round-trips, the session↔conversation binding needs an explicit rule: <strong>one model instance = one conversation = one pinned session</strong> (documented constraint, matching the current provider&#39;s single mutable <code>sessionId</code>), with <code>providerOptions.opencode.sessionId</code> as the per-call escape hatch for callers managing sessions themselves.</li>
+<li><em>doGenerate:</em> subscribe to events <strong>before</strong> prompting, and establish readiness before the prompt goes out — starting <code>iterator.next()</code> alone doesn&#39;t prove the server registered the stream; treat the initial <code>server.connected</code> event as the readiness handshake (verify it is emitted on subscribe, else fall back to a bounded readiness race). Reply approvals via the new <code>permission.reply</code> shape; <code>session.prompt(...)</code> → keep the receipt; complete via execution events with <code>session.wait</code> as watchdog; fetch the assistant message (<code>message.list</code>/<code>session.message</code> keyed by <code>SessionStepStarted.assistantMessageID</code>); map <code>content[]</code>, <code>finish</code>/<code>rawFinish</code>, <code>tokens</code>, <code>cost</code> (consuming <code>SessionStepFailed</code>&#39;s finish/usage as well as <code>SessionStepEnded</code>&#39;s). Forms/permissions must be handled concurrently or the wait deadlocks. Handle <code>SessionBusyError</code> (retry with <code>delivery: &quot;queue&quot;</code> or surface clearly).</li>
+<li><em>doStream:</em> one event pump; extract the session ID <strong>per event type</strong> (<code>data.sessionID</code> for most, <code>data.form.sessionID</code> for <code>form.created</code>); map deltas 1:1; finish on <code>session.execution.succeeded/failed/interrupted</code> (never on an intermediate step&#39;s <code>&quot;tool-calls&quot;</code> finish; keep <code>session.idle</code> only as a hang-prevention backstop). On <code>execution.failed</code>, prefer the failing step&#39;s own <code>SessionStepFailed.finish</code> (<code>&quot;content-filter&quot;</code>) and its <code>cost</code>/<code>tokens</code> when present over a generic <code>error</code> — the execution-failed event itself carries only the structured error. Map all three interruption reasons: <code>&quot;user&quot;</code> → finish <code>stop</code> (raw <code>&quot;interrupted:user&quot;</code>); <code>&quot;superseded&quot;</code> → finish <code>other</code> (another inbox item steered over this turn — surface in provider metadata); <code>&quot;shutdown&quot;</code> → finish <code>error</code> (server went away mid-turn); mark these provisional pending upstream docs. Abort → cancel the pending inbox item if undelivered, else <code>session.interrupt({continue: false})</code>; emit raw events under <code>includeRawChunks</code>.</li>
+<li><em>Approvals (two-phase round-trip — a design the current draft of the code has no v2 answer for):</em> AI SDK approval responses arrive in a <strong>subsequent</strong> <code>doGenerate</code>/<code>doStream</code> call, and that call must <strong>not</strong> issue a new <code>session.prompt</code> — v2 requires <code>text</code> on every prompt, and a new prompt would enqueue a second user message on top of the still-blocked execution (duplicate work or deadlock). Phase 1: surface <code>tool-approval-request</code> (correlate via <code>PermissionAsked.data.source.id</code>; <code>source</code> is optional, so source-less requests fall back to the request id with no tool correlation, as today) and finish the call; the session must therefore be <strong>pinned across the approval boundary</strong> (the model instance&#39;s session state / <code>providerMetadata.opencode.sessionId</code>), which is why &quot;ephemeral&quot; means session-per-conversation, not session-per-HTTP-call. Phase 2: detect an approval-only prompt (approval responses, no new user content) → <strong>subscribe and complete the readiness handshake first</strong> → then <code>permission.reply({sessionID, requestID, reply})</code> → observe the <em>original</em> execution to completion (events + wait, reconciling via durable log / polls / final message) → return its result. Ordering matters: the reply can resume the blocked execution instantly, so deltas, a further approval/form, or completion can fire before a late subscriber is listening — the same subscribe-before-trigger rule as the prompt path. Preserve the issue-#22 ordering machinery (buffer approval until <code>tool-input-available</code>) with the new keys.</li>
+<li><em>Forms:</em> port the question dedup/in-flight/retryable machinery keyed by form id; reply keyed answers; <code>form.cancel</code> on policy/handler failure.</li>
+<li><em>Content extraction:</em> map <code>content[]</code>; tool results serialize the <code>ToolContent</code> array as structured JSON + emit file URIs as separate file/source parts (keep the raw array in provider metadata); delete all <code>StructuredOutput</code> flattening.</li>
+</ul>
+<p><strong>src/convert-to-opencode-messages.ts</strong> — output becomes <code>{text, files[], warnings}</code> (+ separated system block for the embedded path). Transcript serializer with stable delimiters/escaping; reused-session mode sends only the latest user turn; file parts go through the URI resolver or warn.</p>
+<p><strong>src/convert-from-opencode-events.ts</strong> — rewrite against the generated <code>V2Event</code> union (~70% deletion): drop <code>getEventPayload</code>, snapshot diffing, <code>lastTextContent</code>/<code>lastReasoningContent</code>, <code>messageRoles</code>, reasoning-vs-text partID guessing, <code>synthetic</code>/<code>ignored</code> filtering, question branch, <code>STRUCTURED_OUTPUT_TOOL</code>. Reducer keyed by <code>{sessionID, assistantMessageID, ordinal|toolId}</code>; stable AI SDK block ids like <code>${assistantMessageID}:text:${ordinal}</code> (kind included — text and reasoning share the ordinal keyspace); capture tool <code>name</code> from <code>input.started</code> (later events don&#39;t repeat it); tolerate duplicate durable events. The reducer&#39;s input layer must normalize the two distinct unions — live <code>V2Event</code> vs <code>session.log</code>&#39;s <code>SessionLogItem</code> (durable events + the <code>log.synced</code> sentinel) — rather than assuming log replay yields <code>V2Event</code>s.</p>
+<p><strong>src/map-opencode-finish-reason.ts</strong> — shrinks to a table: five values map 1:1, <code>&quot;unknown&quot;</code>→<code>other</code>, <code>raw = rawFinish ?? finish</code>; interrupted-by-user → <code>stop</code>; delete the error-name switch and <code>resolveStructuredOutputFinishReason</code>.</p>
+<p><strong>src/errors.ts</strong> — rebase on <code>_tag</code> guards + a <strong>total</strong> <code>ClientError.reason</code> mapping (all five reasons): <code>&quot;Transport&quot;</code> → <strong>phase-aware retryability</strong>: the AI SDK auto-retries the entire call when <code>APICallError.isRetryable</code> is set, so only provably pre-dispatch failures (subscribe, <code>session.create</code>, anything before the prompt/permission-reply was sent) may be marked retryable; a transport failure after dispatch — or with uncertain delivery — must be non-retryable and reconciled through the pinned session&#39;s wait/log/message state instead, or the retry itself enqueues duplicate work; <code>&quot;UnexpectedStatus&quot;</code> → non-retryable <code>APICallError</code> by default, with <strong>no status promise</strong>: the public <code>ClientError</code> type exposes only <code>reason</code> and an untyped <code>cause</code>, so a status code (for 429/5xx retry classification) is recoverable only via guarded runtime inspection of the cause or a custom-<code>fetch</code> side channel — treat as unknown-status when absent; <code>&quot;UnsupportedContentType&quot;</code> and <code>&quot;MalformedResponse&quot;</code> → non-retryable protocol errors (server/client contract mismatch — surface a version-skew hint); <code>&quot;SseEventTooLarge&quot;</code> → non-retryable without a different transport strategy. Tagged errors: <code>UnauthorizedError</code>/<code>ForbiddenError</code> → auth errors; <code>SessionBusyError</code>/<code>ConflictError</code> → conditionally retryable with backoff; validation/not-found/form-invalid → non-retryable; <code>ServiceUnavailableError</code> → retryable pre-dispatch only. <strong>The phase rule is universal, not Transport-specific</strong>: no error of any kind may surface as a retryable <code>APICallError</code> once the prompt (or a permission reply) has been dispatched — e.g. a 503 thrown by the post-prompt <code>session.wait</code> watchdog must be retried <em>internally</em> against the pinned session (re-wait/log/message reconciliation), because a retryable surface error makes the AI SDK rerun the whole call and submit a duplicate prompt. Add a second normalization path for <code>SessionStructuredError</code> from events. Never auto-replay a tool-capable execution after transport failure (it may already have mutated the workspace).</p>
+<p><strong>src/validation.ts / logger.ts / opencode-part-utils.ts / opencode-provider.ts / index.ts</strong> — schema updates for removed/added settings; part-utils gains a URI branch and loses v1 attachment planning; provider factory splits by backend; index re-exports form/permission/v2 event types and drops question/envelope-era exports. <code>logUnsupportedCallOptions</code> remains correct — v2 still has no sampling parameters on the prompt path.</p>
+<p><strong>Tests, examples, README</strong> — every mock encodes the v1 protocol (<code>{info, parts}</code> prompts, <code>{stream}</code> subscriptions, <code>question.*</code>, <code>session.abort</code>, <code>responseStyle</code>, <code>createOpencodeServer</code>): full rewrite around receipts + event fixtures + typed errors. Examples: question-handling → forms; generate/stream-object → explicitly degraded prompt-mode JSON; abort → interrupt; client-options → headers/fetch/Service. README must stop claiming native json_schema, per-request system/tools, and v1 attachment behavior.</p>
+<hr>
+<h2>3. Improvement opportunities (what v2 makes better)</h2>
+<ol>
+<li><strong>Delta-native streaming.</strong> 1:1 mapping to AI SDK <code>text/reasoning/tool-input</code> start/delta/end parts; kills prefix-slicing, snapshot/delta divergence bugs, the reasoning-vs-text disambiguation hack, and re-stringified tool input. Several hundred lines and a whole bug class deleted; tool-input streaming becomes genuinely incremental string deltas instead of re-diffed snapshots.</li>
+<li><strong>Typed events imported from the package.</strong> Deletes ~300 lines of hand-rolled event/part interfaces and the dual-envelope shim; compile-time drift detection against future betas.</li>
+<li><strong>Typed thrown errors.</strong> Deletes <code>extractSdkResult</code> and both error-shape paths; honest retry classification from <code>_tag</code>/<code>reason</code> instead of string sniffing; structured fields (<code>sessionID</code>, <code>providerID</code>, <code>field</code>) flow into error metadata. Ends the &quot;silent fields-style failure&quot; class the 3.0.5/4.0.0 releases patched.</li>
+<li><strong>Standardized finish + native usage/cost.</strong> Table-lookup finish mapping with native <code>rawFinish</code>; per-step <code>tokens</code>/<code>cost</code> from <code>SessionStepEnded</code> <em>and</em> <code>SessionStepFailed</code> plus message/session totals — no part archaeology. (Open question: whether step tokens are incremental or cumulative — verify before summing.)</li>
+<li><strong>Explicit turn lifecycle.</strong> <code>execution.succeeded/failed/interrupted</code> distinguishes <em>a turn</em> ending from the session being idle — a far better completion signal than v1&#39;s idle inference; <code>session.wait</code> simplifies the non-streaming path (with the forms/permissions caveat). Caveat: lifecycle events carry no inbox ID, so this is only deterministic for <em>this call&#39;s</em> turn on a session the provider exclusively owns (§1.6 correlation gap).</li>
+<li><strong><code>Service.ensure</code> + typed health.</strong> Version-predicate gating, shared daemon across tools, basic-auth handling, <code>onStart</code> observability; deletes the most accident-prone parts of the client manager. <code>migration.v1.status</code> gives actionable preflight diagnostics.</li>
+<li><strong>Embedded host mode (flagship opportunity).</strong> <code>OpenCode.create()</code> is call-site compatible with the network client — a <code>./embedded</code> entrypoint gives zero-server, zero-port, zero-auth operation, and is also the best <strong>integration-test harness</strong> (real OpenCode in-process instead of mocks). Plugins recover what the network path lost: true system-prompt injection (<code>ctx.agent.transform</code> / <code>ctx.session.hook(&quot;context&quot;)</code> pushing onto <code>event.system</code>), per-session tool filtering (<code>ctx.session.hook(&quot;context&quot;)</code> mutating <code>event.tools</code>), programmatic permission policy (<code>ctx.permission.hook(&quot;evaluate&quot;)</code> — noting an explicitly configured <code>deny</code> is final and bypasses the hook), custom tools (<code>ctx.tool.transform</code>&#39;s <code>add()</code>). Workerd opens a Durable Object deployment path later.</li>
+<li><strong>Inbox delivery semantics.</strong> Expose <code>delivery: &quot;queue&quot;</code> and <code>&quot;steer&quot;</code> plus <code>resume</code> — a real concurrency/steering story the provider never had. (Recommend queue as the provider default to avoid <code>SessionBusyError</code>, pending verification of the server&#39;s actual default and steer/resume behavior — §5.)</li>
+<li><strong>Session fork / import / durable log.</strong> Fork for branching and side-effect-free retry loops (note the fork-input codegen conflict, §1.4); <code>session.import</code> as the candidate for structured history seeding on fresh sessions (verify accepted shapes — <code>session.synthetic</code> is text-only); <code>session.log({after, follow})</code> for SSE-drop recovery with sequence numbers (transient deltas still require final-message reconciliation).</li>
+<li><strong>Headers + <code>includeRawChunks</code>.</strong> Forward AI SDK per-call headers (auth/tracing/tenancy); emit raw typed events for advanced consumers — both currently ignored options.</li>
+<li><strong>Richer approvals/forms metadata.</strong> <code>action</code>/<code>resources</code>/<code>save</code> and <code>source.{messageID, id}</code> correlation beat v1&#39;s <code>permission</code>/<code>patterns</code>; typed form fields beat positional string arrays; <code>form.state</code> polling is a resilience fallback.</li>
+<li><strong><code>generate.text</code> / <code>session.generate</code>.</strong> Cheap side-calls (titles, JSON repair attempts, policy checks): <code>generate.text</code> is documented as no-session/no-tools/no-history; <code>session.generate</code> is documented only as transient (tool behavior unverified). Never a silent substitute for the main model invocation.</li>
+</ol>
+<hr>
+<h2>4. Strategy and sequencing</h2>
+<p><strong>Clean-break major, not dual-runtime support</strong> (unanimous): the contract differs at every layer; a runtime v1/v2 switch would double every code path and the 8,000+-line test surface for a v1 line OpenCode itself is replacing.</p>
+<pre><code>ai-sdk-provider-opencode-sdk 4.x   → OpenCode 1.18.x servers, maintenance only
+ai-sdk-provider-opencode-sdk 5.x   → OpenCode v2, dist-tag &quot;next&quot; until upstream stabilizes
+  &quot;.&quot;          network client (@opencode-ai/client only)
+  &quot;./embedded&quot; optional in-process host (@opencode-ai/sdk as optional peer, dynamic import)
+  (evaluate &quot;./service&quot; re-exports and &quot;./workerd&quot; after demand/runtime validation)
+</code></pre>
+<p>Sequencing:</p>
+<ol>
+<li><strong>Now:</strong> spike branch against an exact-pinned beta; file upstream issues for the four hardest gaps (structured output, per-prompt system, file-URI ingestion semantics, inbox→execution correlation) while the API is still movable. Optionally add a 4.x warning when the connected server looks like v2: the manager&#39;s current raw <code>/health</code>/<code>/config</code> fetches are availability checks only, and the typed per-instance health response (<code>V2HealthGetResponse</code>) carries no version — but the v1 SDK&#39;s <strong>global</strong> health response (<code>GlobalHealthResponse</code>) includes <code>version: string</code>; use that, with the v2-only route <code>GET /api/experimental/migration/v1</code> (the generated migration client&#39;s actual path) as a fallback signal.</li>
+<li><strong>Core first:</strong> narrow internal client-port interface (only the methods the model needs — makes both network and embedded backends structurally satisfy it, and isolates beta churn in one facade); event reducer against recorded fixtures; then doGenerate/doStream on receipts + lifecycle events; network mode with caller-supplied client/baseUrl.</li>
+<li><strong>Then:</strong> <code>Service.ensure</code> path (auth, version predicates, non-owning disposal, migration preflight).</li>
+<li><strong>Then:</strong> embedded entrypoint + plugin-restored features (system injection, tool filtering, permission hooks) as experimental.</li>
+<li><strong>GA (5.0.0 on <code>latest</code>)</strong> only after OpenCode v2 ships a stable client and one soak cycle of integration tests passes; keep the beta line on <code>next</code> until then.</li>
+</ol>
+<p><strong>Testing:</strong> contract tests pinned to the exact beta (fail CI on generated-API drift); pure event-fixture tests for the reducer (delta interleavings, approval-before-tool-call ordering, duplicate durable events, step-vs-execution failure, retry scheduling); typed-error mapping per <code>_tag</code>; integration tests gated on an available v2 binary (prompt→wait→read, forms during wait, interrupt mid-stream, <code>SessionBusyError</code>/queue, auth headers, file URIs); embedded-host in-process integration tests; packed-artifact tests (root import must not resolve Effect; entrypoint isolation); differential v1-vs-v2 provider runs comparing AI-SDK-level outputs.</p>
+<p><strong>Risk register (top items):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Severity</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Beta churn (docs explicitly warn; codegen shows instability artifacts — <code>FormInfo1</code>, indexed-access input types)</td>
+<td>High</td>
+<td>Exact pins, one internal facade module, contract-drift CI, <code>next</code>-only publishing</td>
+</tr>
+<tr>
+<td>Prompt-returns-receipt asynchrony (wait/events/forms races; no inbox→execution correlation key, so shared sessions can misattribute another client&#39;s turn)</td>
+<td>High</td>
+<td>Subscribe-then-prompt, execution events as primary signal + wait as watchdog, provider-owned session-per-conversation default, explicit exclusivity caveat on shared/existing sessions</td>
+</tr>
+<tr>
+<td>Structured output regression (breaks <code>Output.object()</code> users)</td>
+<td>High</td>
+<td>Loud warning + documented prompt-mode degradation; retries only for side-effect-free turns; upstream issue</td>
+</tr>
+<tr>
+<td>Session-scoped model/agent vs AI SDK&#39;s stateless-model assumption</td>
+<td>Med-High</td>
+<td>Immutable per-instance model/agent; fork/create instead of switching shared sessions</td>
+</tr>
+<tr>
+<td>Per-request system prompt loses role priority</td>
+<td>Med-High</td>
+<td>Delimited prepend + warning; embedded plugin path; watch <code>instructions.entry</code> semantics</td>
+</tr>
+<tr>
+<td>File <code>uri</code> ambiguity (data:/file:/paths untested across local/remote/browser/workerd)</td>
+<td>Medium</td>
+<td>Conservative scheme allowlist, resolver hook, live-beta verification before 5.0</td>
+</tr>
+<tr>
+<td>Shared-service lifecycle (stopping a daemon other clients rely on — no ownership token exists)</td>
+<td>Medium</td>
+<td>Never stop on disposal; owned-stop only with a provider-controlled registration <code>file</code> or explicit user action</td>
+</tr>
+<tr>
+<td>Effect RC weight in embedded mode</td>
+<td>Medium</td>
+<td>Optional peer + dynamic import; verify the client&#39;s Promise root never touches Effect in a bare install</td>
+</tr>
+<tr>
+<td>Forms ≠ questions (keyed vs positional; 4.1.0 <code>onQuestion</code> users)</td>
+<td>Medium</td>
+<td>New <code>onForm</code> API + migration table; no lossy compat shim as primary</td>
+</tr>
+<tr>
+<td>Usage double-counting (step vs message vs session totals)</td>
+<td>Medium</td>
+<td>Verify incremental-vs-cumulative semantics before aggregating; single authoritative source</td>
+</tr>
+<tr>
+<td>SSE drop mid-turn (deltas not durable)</td>
+<td>Medium</td>
+<td><code>session.log</code> catch-up + final-message reconciliation; report unrecoverable gaps</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>5. Open questions (genuinely unresolved by beta types/docs)</h2>
+<p><strong>Prompt/execution semantics</strong></p>
+<ol>
+<li>How is a <code>SessionInboxUser.id</code> correlated to an execution and its assistant message(s)? (<code>SessionStepStarted.assistantMessageID</code> exists, but no shared inbox key.)</li>
+<li>What exactly does <code>session.wait</code> wait for (current execution? all queued items? background compaction/title jobs?), and does it reject or resolve on execution failure — or hang on a pending form/permission?</li>
+<li>Default <code>delivery</code> when omitted; precise <code>resume</code> semantics (after interrupt? after failure?) and <code>interrupt({continue: true})</code> meaning; what triggers <code>interrupted.reason: &quot;superseded&quot;</code>.</li>
+<li>Can one session run concurrent executions, or is it always serialized (determining whether provider-level locking is correctness or caution)?</li>
+<li>Prompt <code>id</code> constraints (v1 required <code>msg_</code> prefix) and idempotency on retry.</li>
+</ol>
+<p><strong>Files</strong>
+6. Which URI schemes does <code>files[].uri</code> accept — <code>data:</code>, <code>file:</code>, workspace-relative, <code>http(s)</code>? Who fetches remote URIs, under what credentials (SSRF surface)? Is an upload API planned?</p>
+<p><strong>Content/usage</strong>
+7. Are <code>SessionStepEnded.tokens</code> incremental per step or cumulative? Does <code>output</code> include reasoning tokens, and does <code>input</code> include or exclude <code>cache.read</code>/<code>cache.write</code>? (The type alone doesn&#39;t prove it, and it blocks safe derivation of the AI SDK <code>total</code>/<code>noCache</code>/<code>text</code> fields — the provider currently <em>assumes</em> input excludes cache and sums them for the total.)
+8. Can one execution produce multiple assistant messages, and what event-ordering guarantees exist (tool-input-start before permission.asked? content-ended before execution.succeeded?)
+9. Tool <code>executed</code> flag semantics at each lifecycle point (maps to AI SDK <code>providerExecuted</code>?); should mixed text/file tool content preserve ordering?
+10. Authoritative <code>rawFinish</code> when step and message values differ.</p>
+<p><strong>System prompt / permissions / forms</strong>
+11. Is <code>session.instructions.entry.put</code> a real system-prompt vehicle (does it enter model context; does it survive compaction), or what is the intended per-session system story?
+12. How are permission rules installed programmatically in network mode (no create-time field; <code>permission.create</code> looks evaluation-flavored; is <code>permission.saved</code> the replacement)?
+13. Does execution block on pending forms (almost certainly — confirm, since <code>session.wait</code> would then deadlock without a handler), and can multiple forms be pending at once? How should <code>external</code> form fields be handled by a generic callback? Does <code>form.cancel</code> fail the tool, the turn, or continue?
+14. The v2 sdk&#39;s <code>contracts</code> still re-exports a <code>Question</code> schema — dead code or a sign questions may return? (Watch before investing heavily in forms.)</p>
+<p><strong>Events/service/runtime</strong>
+15. Does <code>event.subscribe</code> support server-side filtering or replay/cursors (or is <code>session.log</code> the only catch-up), and is the stream location-scoped or server-global?
+16. <code>Service.ensure</code> version predicate against <code>0.0.0-beta-N</code> builds; basic-auth username convention; concurrent <code>ensure</code>/<code>stop</code> against one registration file; is an ensured service intended to be shared/persistent (ownership/lease model)?
+17. Official runtime matrix (no <code>engines</code> anywhere; docs use bun): Node floor for <code>/service</code>, embedded-host Bun support, workerd maturity (production-intended? events across DO eviction?).
+18. Does a required v1 migration block v2 session APIs, and is there a programmatic migration trigger beyond <code>status</code>?
+19. Does the Promise client intentionally discard response headers (needed for AI SDK response metadata)?
+20. Is structured output intentionally removed or not yet implemented — and is <code>@opencode-ai/sdk</code> v1 getting a compat window after v2 GA (timeline to stable)?
+21. Is the <code>SessionForkInput</code>/<code>SessionForkBoundary</code> mismatch (the callable input&#39;s <code>through</code> variant lacks <code>messageID</code> while the standalone alias includes it) a codegen bug or intentional shorthand?
+22. <code>session.import</code>&#39;s shape is typed (<code>SessionTransferData {info, messages: SessionMessageInfo[]}</code>) — the unresolved question is whether arbitrary <em>constructed</em> transfers (synthesized from AI SDK history rather than exported from a real session) are accepted and sanitized, or whether import only round-trips genuine exports.</p>
+<hr>
+<h2>Appendix: Source analyses</h2>
+<p>Full independent analyses (with per-claim type citations) are preserved at <code>~/.flowition/workflows/ai-sdk-provider-opencode-sdk/context/</code>: <code>claude-analysis.md</code>, <code>codex-analysis.md</code> (GPT-5.6-Sol), <code>grok-analysis.md</code> (Grok 4.6), <code>pi-analysis.md</code> (Kimi K3). Flowition runs: analysis <code>flo_fd838e7e</code>; validation rounds 1–8 <code>flo_a689edb4</code>, <code>flo_60ecf9fe</code>, <code>flo_661ad4ac</code>, <code>flo_583d4d36</code>, <code>flo_7494c1b0</code>, <code>flo_58e04cfb</code>, <code>flo_aa3c0d3b</code>, <code>flo_412200af</code> (final verdict: agree, no open issues). Rounds 1–2 corrected analysis-level facts; rounds 3–8 hardened the section-2 migration design (approval round-trip, event-union normalization, retry phasing) — depth that goes beyond pure impact analysis but directly serves &quot;what will need to be changed.&quot;</p>
+</main>
+</body>
+</html>
