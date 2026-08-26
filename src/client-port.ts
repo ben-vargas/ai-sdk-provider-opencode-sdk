@@ -42,7 +42,11 @@ export interface OpencodeClientPort {
     | "switchAgent"
     | "message"
     | "context"
-  >;
+    | "log"
+  > & {
+    /** Cancel a not-yet-delivered inbox item (abort before delivery). */
+    readonly inbox: Pick<OpenCodeClient["session"]["inbox"], "cancel">;
+  };
   readonly message: Pick<OpenCodeClient["message"], "list">;
   readonly event: Pick<OpenCodeClient["event"], "subscribe">;
   readonly permission: Pick<

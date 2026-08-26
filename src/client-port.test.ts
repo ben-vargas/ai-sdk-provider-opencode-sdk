@@ -8,7 +8,10 @@ import { asClientPort, type OpencodeClientPort } from "./client-port.js";
 // fail `tsc`/editor checks (and vitest transform on gross breakage) when the
 // pinned beta's surface drifts from the port.
 type Satisfies<T extends U, U> = T;
-export type _ClientSatisfiesPort = Satisfies<OpenCodeClient, OpencodeClientPort>;
+export type _ClientSatisfiesPort = Satisfies<
+  OpenCodeClient,
+  OpencodeClientPort
+>;
 
 describe("client-port", () => {
   it("OpenCode.make's client satisfies OpencodeClientPort structurally", () => {
@@ -35,6 +38,8 @@ describe("client-port", () => {
     expect(typeof port.session.switchAgent).toBe("function");
     expect(typeof port.session.message).toBe("function");
     expect(typeof port.session.context).toBe("function");
+    expect(typeof port.session.log).toBe("function");
+    expect(typeof port.session.inbox.cancel).toBe("function");
     expect(typeof port.message.list).toBe("function");
     expect(typeof port.event.subscribe).toBe("function");
     expect(typeof port.permission.list).toBe("function");

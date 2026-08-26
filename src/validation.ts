@@ -6,6 +6,7 @@ import type {
   OpencodeFormRequest,
   OpencodeProviderSettings,
   OpencodeSessionLocation,
+  OpencodeSessionMode,
   OpencodeSettings,
 } from "./types.js";
 
@@ -119,8 +120,16 @@ export function validateSettings(
     );
   }
 
+  if (settings.sessionId && settings.sessionMode === "persistent") {
+    warnings.push(
+      'sessionId is ignored in "persistent" session mode (the provider creates and reuses its own session); use sessionMode "existing" to pin a session',
+    );
+  }
+
   if (settings.sessionMode === "existing" && !settings.sessionId) {
-    warnings.push('sessionMode "existing" requires a sessionId');
+    warnings.push(
+      'sessionMode "existing" requires a sessionId; falling back to "ephemeral"',
+    );
   }
 
   if (settings.systemPrompt !== undefined) {
@@ -382,6 +391,30 @@ export function mergeSettings(
     location: overridesLocation ? overrides.location : defaults.location,
     directory: overridesLocation ? overrides.directory : defaults.directory,
   };
+}
+
+/**
+ * Resolve the effective session mode from `sessionMode` and `sessionId`.
+ *
+ * Explicit rule for the sessionId+sessionMode ambiguity:
+ * - An explicit `sessionMode` always wins. Conflicting combinations warn
+ *   (in {@link validateSettings}) and the losing field is ignored:
+ *   `sessionId` with mode "ephemeral"/"persistent" is ignored; mode
+ *   "existing" without a `sessionId` falls back to "ephemeral".
+ * - With no explicit mode, providing a `sessionId` pins that session and
+ *   implies mode "existing".
+ * - Otherwise the default is "ephemeral".
+ */
+export function resolveSessionMode(
+  settings: OpencodeSettings,
+): OpencodeSessionMode {
+  if (settings.sessionMode === "existing") {
+    return settings.sessionId ? "existing" : "ephemeral";
+  }
+  if (settings.sessionMode) {
+    return settings.sessionMode;
+  }
+  return settings.sessionId ? "existing" : "ephemeral";
 }
 
 /**

@@ -225,6 +225,12 @@ export interface OpencodeSettings {
 
   /**
    * Inbox delivery mode when prompting a busy session.
+   *
+   * Divergence note: the design doc recommends `"queue"` as the provider
+   * default (avoids `SessionBusyError` and mid-turn supersession), while the
+   * live spike observed the *server* default to be `"steer"` when the field
+   * is omitted. The provider therefore always sends its own default
+   * explicitly rather than inheriting the server's.
    * @default "queue"
    */
   delivery?: OpencodeDelivery;
@@ -411,6 +417,8 @@ export interface OpencodeProviderMetadata {
     rawFinish?: string;
     /** Execution outcome for the turn. */
     outcome?: "succeeded" | "failed" | "interrupted";
+    /** Interrupt reason when the turn was interrupted. */
+    interruptReason?: "user" | "shutdown" | "superseded";
     /** Cost in USD, summed across the turn's steps when available. */
     cost?: number;
     /** Native token usage, summed across the turn's steps. */

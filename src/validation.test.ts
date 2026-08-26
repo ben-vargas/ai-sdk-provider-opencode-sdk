@@ -8,6 +8,7 @@ import {
   isDataUri,
   mergeSettings,
   resolveSessionLocation,
+  resolveSessionMode,
 } from "./validation.js";
 import type {
   Logger,
@@ -143,6 +144,14 @@ describe("validation", () => {
       ).toBe(true);
     });
 
+    it("should warn when sessionId is set in persistent mode", () => {
+      const result = validateSettings({
+        sessionId: "abc123",
+        sessionMode: "persistent",
+      });
+      expect(result.warnings.some((w) => w.includes("persistent"))).toBe(true);
+    });
+
     it("should warn about invalid delivery values", () => {
       const settings = { delivery: "interrupt" } as unknown as OpencodeSettings;
       const result = validateSettings(settings);
@@ -210,9 +219,9 @@ describe("validation", () => {
       };
 
       const result = validateProviderSettings(settings);
-      expect(
-        result.warnings.some((w) => w.includes("service discovery")),
-      ).toBe(true);
+      expect(result.warnings.some((w) => w.includes("service discovery"))).toBe(
+        true,
+      );
     });
 
     it("should warn when both baseUrl and service are provided", () => {
@@ -238,9 +247,9 @@ describe("validation", () => {
       };
 
       const result = validateProviderSettings(settings);
-      expect(
-        result.warnings.some((w) => w.includes("clientOptions")),
-      ).toBe(true);
+      expect(result.warnings.some((w) => w.includes("clientOptions"))).toBe(
+        true,
+      );
     });
 
     it("should warn when autoStart is combined with client or baseUrl", () => {
@@ -248,17 +257,17 @@ describe("validation", () => {
         client: {} as OpencodeClient,
         autoStart: true,
       });
-      expect(
-        withClient.warnings.some((w) => w.includes("autoStart")),
-      ).toBe(true);
+      expect(withClient.warnings.some((w) => w.includes("autoStart"))).toBe(
+        true,
+      );
 
       const withBaseUrl = validateProviderSettings({
         baseUrl: "http://127.0.0.1:4096",
         autoStart: true,
       });
-      expect(
-        withBaseUrl.warnings.some((w) => w.includes("autoStart")),
-      ).toBe(true);
+      expect(withBaseUrl.warnings.some((w) => w.includes("autoStart"))).toBe(
+        true,
+      );
     });
   });
 
@@ -412,7 +421,9 @@ describe("validation", () => {
         regions: "us-east",
       });
       expect(
-        result.warnings.some((w) => w.includes('"env"') && w.includes("string")),
+        result.warnings.some(
+          (w) => w.includes('"env"') && w.includes("string"),
+        ),
       ).toBe(true);
       expect(
         result.warnings.some(
@@ -565,6 +576,35 @@ describe("validation", () => {
           directory: "/v4-dir",
         }),
       ).toEqual({ directory: "/v5-dir", workspaceID: "ws-1" });
+    });
+  });
+
+  describe("resolveSessionMode", () => {
+    it("defaults to ephemeral", () => {
+      expect(resolveSessionMode({})).toBe("ephemeral");
+    });
+
+    it("implies existing when a sessionId is pinned without a mode", () => {
+      expect(resolveSessionMode({ sessionId: "ses_1" })).toBe("existing");
+    });
+
+    it("lets an explicit mode win over a conflicting sessionId", () => {
+      expect(
+        resolveSessionMode({ sessionId: "ses_1", sessionMode: "ephemeral" }),
+      ).toBe("ephemeral");
+      expect(
+        resolveSessionMode({ sessionId: "ses_1", sessionMode: "persistent" }),
+      ).toBe("persistent");
+    });
+
+    it('falls back to ephemeral for "existing" without a sessionId', () => {
+      expect(resolveSessionMode({ sessionMode: "existing" })).toBe("ephemeral");
+    });
+
+    it('resolves "existing" with a sessionId as existing', () => {
+      expect(
+        resolveSessionMode({ sessionId: "ses_1", sessionMode: "existing" }),
+      ).toBe("existing");
     });
   });
 
