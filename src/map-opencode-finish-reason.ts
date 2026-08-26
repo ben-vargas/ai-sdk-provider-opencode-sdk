@@ -1,170 +1,82 @@
 import type { LanguageModelV4FinishReason } from "@ai-sdk/provider";
-import { isAbortError, isOutputLengthError } from "./errors.js";
+import type {
+  SessionExecutionInterrupted,
+  SessionStepEnded,
+  SessionStructuredError,
+} from "@opencode-ai/client";
 
 /**
- * Message info from OpenCode SDK.
+ * Native OpenCode v2 finish value (closed union, aligned with the AI SDK
+ * except for `"unknown"`). Carried on `SessionStepEnded.data.finish` and
+ * assistant messages.
  */
-export interface MessageInfo {
-  error?: {
-    name: string;
-    data?: unknown;
-  };
-  finish?: string;
-}
+export type OpencodeV2Finish = SessionStepEnded["data"]["finish"];
 
 /**
- * Map OpenCode message info to AI SDK finish reason.
+ * Interrupt reason from `session.execution.interrupted`.
+ */
+export type OpencodeInterruptReason =
+  SessionExecutionInterrupted["data"]["reason"];
+
+const FINISH_TABLE: Record<
+  OpencodeV2Finish,
+  LanguageModelV4FinishReason["unified"]
+> = {
+  stop: "stop",
+  length: "length",
+  "tool-calls": "tool-calls",
+  "content-filter": "content-filter",
+  error: "error",
+  unknown: "other",
+};
+
+/**
+ * Map a native OpenCode v2 finish value to an AI SDK finish reason.
+ * Five values map 1:1; `"unknown"` (and anything outside the closed union,
+ * for forward compatibility) maps to `other`. The raw value prefers the
+ * provider-native `rawFinish` when the server reports one.
  */
 export function mapOpencodeFinishReason(
-  message: MessageInfo | undefined,
+  finish: string | undefined,
+  rawFinish?: string,
 ): LanguageModelV4FinishReason {
-  if (!message) {
-    return { unified: "other", raw: undefined };
-  }
-
-  // Check for errors first
-  if (message.error) {
-    return mapErrorToFinishReason(message.error);
-  }
-
-  // Check finish reason
-  if (message.finish) {
-    return mapFinishToReason(message.finish);
-  }
-
-  // Default to stop if no specific reason
-  return { unified: "stop", raw: undefined };
+  const unified =
+    finish !== undefined && finish in FINISH_TABLE
+      ? FINISH_TABLE[finish as OpencodeV2Finish]
+      : "other";
+  return { unified, raw: rawFinish ?? finish };
 }
 
 /**
- * Map an error to a finish reason.
+ * Normalize a v2 `SessionStructuredError` (execution/step/tool failures) to
+ * an AI SDK finish reason. v2 has no error-name taxonomy to switch on —
+ * `type` is a free-form string — so every structured error is `error` with
+ * the native type preserved as the raw value.
  */
-function mapErrorToFinishReason(error: {
-  name: string;
-  data?: unknown;
-}): LanguageModelV4FinishReason {
-  const { name } = error;
-
-  switch (name) {
-    case "MessageAbortedError":
-      // User cancelled - treat as normal stop
-      return { unified: "stop", raw: name };
-
-    case "MessageOutputLengthError":
-      // Token limit exceeded
-      return { unified: "length", raw: name };
-
-    case "ContextOverflowError":
-      return { unified: "length", raw: name };
-
-    case "StructuredOutputError":
-      return { unified: "error", raw: name };
-
-    case "ProviderAuthError":
-    case "APIError":
-    case "UnknownError":
-      // Various API/provider errors
-      return { unified: "error", raw: name };
-
-    default:
-      // Unknown error type
-      return { unified: "error", raw: name };
-  }
-}
-
-/**
- * Map finish string to finish reason.
- */
-function mapFinishToReason(finish: string): LanguageModelV4FinishReason {
-  const normalizedFinish = finish.toLowerCase();
-
-  // Normal completion
-  if (
-    normalizedFinish === "end_turn" ||
-    normalizedFinish === "stop" ||
-    normalizedFinish === "end"
-  ) {
-    return { unified: "stop", raw: finish };
-  }
-
-  // Token limit
-  if (normalizedFinish === "max_tokens" || normalizedFinish === "length") {
-    return { unified: "length", raw: finish };
-  }
-
-  // Tool use. OpenCode stores AI SDK-style hyphenated reasons ("tool-calls")
-  // alongside provider-style raw values ("tool_use", "tool_calls").
-  if (
-    normalizedFinish === "tool_use" ||
-    normalizedFinish === "tool_calls" ||
-    normalizedFinish === "tool-calls"
-  ) {
-    return { unified: "tool-calls", raw: finish };
-  }
-
-  // Content filter
-  if (
-    normalizedFinish === "content_filter" ||
-    normalizedFinish === "content-filter" ||
-    normalizedFinish === "safety"
-  ) {
-    return { unified: "content-filter", raw: finish };
-  }
-
-  // Error states
-  if (normalizedFinish === "error") {
-    return { unified: "error", raw: finish };
-  }
-
-  // Default to stop for unknown values
-  return { unified: "other", raw: finish };
-}
-
-/**
- * Map an error object to a finish reason.
- */
-export function mapErrorToFinishReasonFromUnknown(
-  error: unknown,
+export function mapStructuredErrorToFinishReason(
+  error: SessionStructuredError,
 ): LanguageModelV4FinishReason {
-  if (isAbortError(error)) {
-    return { unified: "stop", raw: "abort" };
-  }
-
-  if (isOutputLengthError(error)) {
-    return { unified: "length", raw: "output-length" };
-  }
-
-  return { unified: "error", raw: "error" };
+  return { unified: "error", raw: error.type };
 }
 
 /**
- * Determine if a message has tool calls.
- * Used to determine 'tool-calls' finish reason.
- */
-export function hasToolCalls(parts: Array<{ type: string }>): boolean {
-  return parts.some((part) => part.type === "tool");
-}
-
-/**
- * Resolve the finish reason for a turn that delivered structured output.
+ * Map a `session.execution.interrupted` reason to an AI SDK finish reason.
  *
- * When a json_schema format is requested, OpenCode ends the turn on the
- * StructuredOutput tool call, so the message finishes with "tool-calls".
- * The provider flattens that tool call into text content, and the AI SDK
- * only parses `Output.object()` / `Output.array()` results when the finish
- * reason is "stop" — so a tool-call finish would make `generateText` discard
- * the structured output and throw NoOutputGeneratedError.
+ * Provisional (upstream does not document these semantics yet):
+ * - `"user"` → `stop`: the user deliberately ended the turn.
+ * - `"superseded"` → `other`: another inbox item steered over this turn;
+ *   surfaced in provider metadata so callers can distinguish it.
+ * - `"shutdown"` → `error`: the server went away mid-turn.
  */
-export function resolveStructuredOutputFinishReason(
-  finishReason: LanguageModelV4FinishReason,
-  structuredOutputCompleted: boolean,
+export function mapInterruptReasonToFinishReason(
+  reason: OpencodeInterruptReason,
 ): LanguageModelV4FinishReason {
-  if (
-    structuredOutputCompleted &&
-    (finishReason.unified === "tool-calls" || finishReason.unified === "other")
-  ) {
-    return { unified: "stop", raw: finishReason.raw };
+  switch (reason) {
+    case "user":
+      return { unified: "stop", raw: "interrupted:user" };
+    case "superseded":
+      return { unified: "other", raw: "interrupted:superseded" };
+    case "shutdown":
+      return { unified: "error", raw: "interrupted:shutdown" };
   }
-
-  return finishReason;
 }
