@@ -80,6 +80,10 @@ export type {
   V2StreamUsage,
 } from "./convert-from-opencode-events.js";
 
+// Language-model exports
+export { OpencodeLanguageModel } from "./opencode-language-model.js";
+export type { OpencodeLanguageModelConfig } from "./opencode-language-model.js";
+
 // Finish-reason exports
 export {
   mapInterruptReasonToFinishReason,
