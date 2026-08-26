@@ -1,7 +1,7 @@
 {
   "name": "ai-sdk-provider-opencode-sdk",
-  "version": "4.1.0",
-  "description": "AI SDK v7 provider for OpenCode via @opencode-ai/sdk",
+  "version": "5.0.0-beta.0",
+  "description": "AI SDK v7 provider for OpenCode v2 via @opencode-ai/client",
   "keywords": [
     "ai-sdk",
     "opencode",
@@ -57,11 +57,10 @@
   "dependencies": {
     "@ai-sdk/provider": "^4.0.4",
     "@ai-sdk/provider-utils": "^5.0.18",
-    "@opencode-ai/sdk": "^1.18.11"
+    "@opencode-ai/client": "0.0.0-beta-18286"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
-    "@opencode-ai/client": "0.0.0-beta-18286",
     "@types/node": "^22.10.0",
     "@typescript-eslint/eslint-plugin": "8.34.0",
     "@typescript-eslint/parser": "8.34.0",
