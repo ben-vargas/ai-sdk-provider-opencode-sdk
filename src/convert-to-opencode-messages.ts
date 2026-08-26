@@ -1,435 +1,143 @@
+/**
+ * AI SDK prompt → OpenCode v2 prompt-input conversion.
+ *
+ * v2's `session.prompt` accepts one user `text` plus `files[]` as URIs —
+ * there is no multi-role `parts[]` history injection and no `system` field.
+ * This module therefore produces `{text, files, warnings, systemBlock}`:
+ *
+ * - `text`: the latest user turn (persistent/existing sessions — OpenCode
+ *   owns the transcript) or the full history serialized as a delimited
+ *   transcript (ephemeral sessions, where the target session is fresh).
+ * - `files`: `data:` URIs only (the one scheme verified to reach the model
+ *   end-to-end; see {@link OpencodeDataUri}). Anything non-convertible warns
+ *   and is skipped BEFORE prompting — a bad attachment does not reject the
+ *   prompt, it fails the whole turn late at the model provider.
+ * - `systemBlock`: system messages separated out so the orchestration layer
+ *   can degrade them network-mode ({@link prependSystemBlock} + an
+ *   `{type: "unsupported"}` warning) while a future embedded mode injects
+ *   them properly via plugin hooks.
+ *
+ * Tool results/approvals in history render as delimited text context only:
+ * OpenCode executes tools server-side and cannot consume client-provided
+ * tool results.
+ */
 import type {
-  LanguageModelV4Prompt,
-  LanguageModelV4TextPart,
   LanguageModelV4FilePart,
-  LanguageModelV4ToolCallPart,
+  LanguageModelV4Prompt,
   LanguageModelV4ToolResultPart,
-  LanguageModelV4ReasoningPart,
-  LanguageModelV4ReasoningFilePart,
-  LanguageModelV4CustomPart,
-  LanguageModelV4ToolApprovalResponsePart,
 } from "@ai-sdk/provider";
-import type { Logger } from "./types.js";
+import type {
+  Logger,
+  OpencodeDataUri,
+  OpencodeResolveFileToUri,
+  OpencodeSessionMode,
+} from "./types.js";
+import { isDataUri } from "./validation.js";
 
 /**
- * Input part types for OpenCode SDK.
- * Based on SessionPromptData.body.parts in the SDK.
+ * A prompt file attachment: a `data:` URI (MIME travels in the URI's
+ * mediatype — that is what the server stores and trusts) plus an optional
+ * display name. Matches `SessionPromptInput.files[]` minus the unused
+ * description/mention fields.
  */
-export interface TextPartInput {
-  id?: string;
-  type: "text";
+export interface OpencodePromptFile {
+  uri: OpencodeDataUri;
+  name?: string;
+}
+
+/**
+ * Result of converting an AI SDK prompt to v2 prompt input.
+ */
+export interface OpencodePromptConversion {
+  /** The prompt `text` value (may be empty when nothing was serializable). */
   text: string;
-  synthetic?: boolean;
-  ignored?: boolean;
-}
-
-export interface FilePartInput {
-  id?: string;
-  type: "file";
-  mime: string;
-  filename?: string;
-  url: string;
-}
-
-export type OpencodePartInput = TextPartInput | FilePartInput;
-
-/**
- * Result of converting AI SDK messages to OpenCode format.
- */
-export interface ConversionResult {
-  parts: OpencodePartInput[];
-  systemPrompt?: string;
+  /** `data:`-URI attachments for `files[]`. */
+  files: OpencodePromptFile[];
+  /** Human-readable conversion warnings (degradations, skipped content). */
   warnings: string[];
+  /**
+   * Concatenated system messages, separated from `text`. Absent when the
+   * prompt carries no system content. The converter never merges this into
+   * `text` itself — the orchestration layer decides how to degrade it.
+   */
+  systemBlock?: string;
 }
 
 /**
- * Convert AI SDK prompt to OpenCode format.
+ * Options for {@link convertToOpencodePrompt}.
  */
-export function convertToOpencodeMessages(
-  prompt: LanguageModelV4Prompt,
-  options?: {
-    logger?: Logger | false;
-    mode?: { type: "regular" } | { type: "object-json"; schema?: unknown };
-    includeToolApprovalResponsesAsContext?: boolean;
-  },
-): ConversionResult {
-  const parts: OpencodePartInput[] = [];
-  const warnings: string[] = [];
-  let systemPrompt: string | undefined;
-  const logger = options?.logger;
-
-  for (const message of prompt) {
-    switch (message.role) {
-      case "system":
-        // Collect system messages into system prompt
-        if (systemPrompt) {
-          systemPrompt += "\n\n" + message.content;
-        } else {
-          systemPrompt = message.content;
-        }
-        break;
-
-      case "user":
-        // Convert user message parts
-        for (const part of message.content) {
-          const converted = convertUserPart(part, warnings, logger);
-          if (converted) {
-            parts.push(converted);
-          }
-        }
-        break;
-
-      case "assistant": {
-        // Convert assistant message parts (for context in multi-turn)
-        const assistantParts = convertAssistantContent(
-          message.content,
-          warnings,
-          logger,
-        );
-        parts.push(...assistantParts);
-        break;
-      }
-
-      case "tool": {
-        // Tool results - include as context text
-        const toolResultParts = convertToolResults(
-          message.content,
-          warnings,
-          logger,
-          options?.includeToolApprovalResponsesAsContext ?? false,
-        );
-        parts.push(...toolResultParts);
-        break;
-      }
-    }
-  }
-
-  // Add JSON mode instruction if needed
-  if (options?.mode?.type === "object-json") {
-    const jsonInstruction = createJsonModeInstruction(options.mode.schema);
-    parts.push({
-      type: "text",
-      text: jsonInstruction,
-    });
-  }
-
-  return { parts, systemPrompt, warnings };
+export interface ConvertToOpencodePromptOptions {
+  /**
+   * Session binding of the target session (see `resolveSessionMode`).
+   * - "persistent"/"existing": OpenCode owns the transcript — only the
+   *   latest user turn (the last user message and anything after it) is
+   *   serialized.
+   * - "ephemeral" (default): the session is fresh — the full history is
+   *   serialized as a delimited transcript.
+   */
+  sessionMode?: OpencodeSessionMode;
+  /**
+   * Hook to resolve non-`data:` file references (URLs, provider files) to a
+   * `data:` URI. Without it — or when it returns undefined or a non-`data:`
+   * scheme — the file warns and is skipped.
+   */
+  resolveFileToUri?: OpencodeResolveFileToUri;
+  /**
+   * Append the JSON-mode instruction ({@link createJsonModeInstruction}) —
+   * the structured-output degradation path. v2 has no server-side
+   * `responseFormat` enforcement; this only embeds the schema as a prompt
+   * instruction.
+   */
+  jsonMode?: { schema?: unknown };
+  /**
+   * Render tool-approval-response parts in history as delimited context.
+   * @default false
+   */
+  includeToolApprovalResponsesAsContext?: boolean;
+  logger?: Logger | false;
 }
 
 /**
- * Convert a user message part to OpenCode format.
+ * Transcript delimiters. Stable, greppable, and unlikely in organic content;
+ * organic lines that DO start with the marker are escaped with a leading
+ * backslash. This is a lossy plaintext serialization for model consumption,
+ * not a reversible encoding.
  */
-function convertUserPart(
-  part: LanguageModelV4TextPart | LanguageModelV4FilePart,
-  warnings: string[],
-  logger?: Logger | false,
-): OpencodePartInput | null {
-  switch (part.type) {
-    case "text":
-      return {
-        type: "text",
-        text: part.text,
-      };
+const DELIM_PREFIX = "<<<opencode:";
 
-    case "file":
-      return convertFilePart(part, warnings, logger);
+function openDelimiter(role: string): string {
+  return `${DELIM_PREFIX}${role}>>>`;
+}
 
-    default: {
-      // Unknown part type
-      const unknownPart = part as { type: string };
-      const warning = `Unknown user message part type: ${unknownPart.type}`;
-      warnings.push(warning);
-      if (logger) {
-        logger.warn(warning);
-      }
-      return null;
-    }
-  }
+const END_DELIMITER = `${DELIM_PREFIX}end>>>`;
+
+/** Escape organic content lines that would collide with the delimiters. */
+function escapeTranscriptContent(content: string): string {
+  return content.replace(/^(<{3}opencode:)/gm, "\\$1");
+}
+
+/** One serialized transcript entry. */
+function transcriptEntry(role: string, content: string): string {
+  return `${openDelimiter(role)}\n${escapeTranscriptContent(content)}\n${END_DELIMITER}`;
 }
 
 /**
- * Convert a file part to OpenCode format.
+ * Prepend the separated system block to a prompt text as a delimited system
+ * entry — the network-mode degradation (system-role priority is lost; the
+ * caller must emit the `{type: "unsupported"}` warning alongside).
  */
-function convertFilePart(
-  part: LanguageModelV4FilePart,
-  warnings: string[],
-  logger?: Logger | false,
-): OpencodePartInput | null {
-  const { mediaType, filename } = part;
-
-  switch (part.data.type) {
-    case "data": {
-      // Raw bytes or base64-encoded string.
-      const data = part.data.data;
-
-      if (typeof data === "string") {
-        if (data.startsWith("data:")) {
-          // Data URL - use as-is
-          return {
-            type: "file",
-            mime: mediaType,
-            filename,
-            url: data,
-          };
-        }
-
-        if (data.startsWith("http://") || data.startsWith("https://")) {
-          // Remote URL - not supported by OpenCode
-          const warning = `Remote URLs are not supported for file input: ${data.substring(0, 50)}...`;
-          warnings.push(warning);
-          if (logger) {
-            logger.warn(warning);
-          }
-          return null;
-        }
-
-        // Assume base64 - convert to data URL
-        return {
-          type: "file",
-          mime: mediaType,
-          filename,
-          url: `data:${mediaType};base64,${normalizeBase64(data)}`,
-        };
-      }
-
-      // Binary data - convert to base64 data URL
-      const base64 = uint8ArrayToBase64(data);
-      return {
-        type: "file",
-        mime: mediaType,
-        filename,
-        url: `data:${mediaType};base64,${base64}`,
-      };
-    }
-
-    case "url": {
-      const urlString = part.data.url.toString();
-      if (urlString.startsWith("data:")) {
-        return {
-          type: "file",
-          mime: mediaType,
-          filename,
-          url: urlString,
-        };
-      }
-
-      const warning = `Remote URLs are not supported for file input: ${urlString.substring(0, 50)}...`;
-      warnings.push(warning);
-      if (logger) {
-        logger.warn(warning);
-      }
-      return null;
-    }
-
-    case "text":
-      // Inline text content - send as a plain text part.
-      return {
-        type: "text",
-        text: part.data.text,
-      };
-
-    case "reference": {
-      // Provider file references cannot be resolved by OpenCode.
-      const warning =
-        "File references are not supported for file input; the part was skipped.";
-      warnings.push(warning);
-      if (logger) {
-        logger.warn(warning);
-      }
-      return null;
-    }
-  }
+export function prependSystemBlock(text: string, systemBlock: string): string {
+  const entry = transcriptEntry("system", systemBlock);
+  return text ? `${entry}\n\n${text}` : entry;
 }
 
 /**
- * Convert assistant message content to OpenCode parts.
- * Used for providing context in multi-turn conversations.
+ * Create instruction text for the JSON-output degradation path. The schema
+ * is embedded verbatim; there is no server-side enforcement in v2, so this
+ * is a best-effort prompt instruction the caller pairs with client-side
+ * parse/validate.
  */
-function convertAssistantContent(
-  content: Array<
-    | LanguageModelV4TextPart
-    | LanguageModelV4FilePart
-    | LanguageModelV4ReasoningPart
-    | LanguageModelV4ReasoningFilePart
-    | LanguageModelV4ToolCallPart
-    | LanguageModelV4ToolResultPart
-    | LanguageModelV4CustomPart
-  >,
-  warnings: string[],
-  logger?: Logger | false,
-): OpencodePartInput[] {
-  const parts: OpencodePartInput[] = [];
-
-  for (const part of content) {
-    switch (part.type) {
-      case "text":
-        // Include assistant text as context
-        parts.push({
-          type: "text",
-          text: `[Assistant]: ${part.text}`,
-          synthetic: true,
-        });
-        break;
-
-      case "reasoning":
-        // Include reasoning as context (marked as synthetic)
-        parts.push({
-          type: "text",
-          text: `[Reasoning]: ${part.text}`,
-          synthetic: true,
-        });
-        break;
-
-      case "tool-call":
-        // Include tool call as context
-        parts.push({
-          type: "text",
-          text: `[Tool Call: ${part.toolName}]: ${JSON.stringify(part.input)}`,
-          synthetic: true,
-        });
-        break;
-
-      case "tool-result": {
-        // Include tool result as context
-        const resultText = formatToolResult(part);
-        parts.push({
-          type: "text",
-          text: `[Tool Result: ${part.toolName}]: ${resultText}`,
-          synthetic: true,
-        });
-        break;
-      }
-
-      case "reasoning-file": {
-        // Files produced as part of a reasoning trace - skip for now
-        if (logger) {
-          logger.debug?.(
-            "Reasoning-file parts in assistant messages are not yet supported",
-          );
-        }
-        break;
-      }
-
-      case "custom":
-        // Provider-specific custom parts cannot be represented - skip
-        break;
-
-      case "file": {
-        // Files from assistant are typically generated - skip for now
-        const warning =
-          "File parts in assistant messages are not yet supported";
-        warnings.push(warning);
-        if (logger) {
-          logger.warn(warning);
-        }
-        break;
-      }
-    }
-  }
-
-  return parts;
-}
-
-/**
- * Convert tool result messages to OpenCode parts.
- */
-function convertToolResults(
-  content: Array<
-    LanguageModelV4ToolResultPart | LanguageModelV4ToolApprovalResponsePart
-  >,
-  warnings: string[],
-  logger?: Logger | false,
-  includeToolApprovalResponsesAsContext = false,
-): OpencodePartInput[] {
-  const parts: OpencodePartInput[] = [];
-
-  // Note: OpenCode executes tools server-side, so we can only include
-  // tool results as context. The server won't use these as actual tool results.
-  const warning =
-    "Tool results in prompts are included as context only. " +
-    "OpenCode executes tools server-side and cannot use client-provided results.";
-
-  const hasToolResult = content.some((part) => part.type === "tool-result");
-  if (hasToolResult && !warnings.includes(warning)) {
-    warnings.push(warning);
-    if (logger) {
-      logger.warn(warning);
-    }
-  }
-
-  for (const part of content) {
-    if (part.type === "tool-result") {
-      const resultText = formatToolResult(part);
-      parts.push({
-        type: "text",
-        text: `[Tool Result: ${part.toolName}]: ${resultText}`,
-        synthetic: true,
-      });
-      continue;
-    }
-
-    if (
-      part.type === "tool-approval-response" &&
-      includeToolApprovalResponsesAsContext
-    ) {
-      const reasonText = part.reason ? ` (${part.reason})` : "";
-      parts.push({
-        type: "text",
-        text: `[Tool Approval: ${part.approvalId}]: ${part.approved ? "approved" : "denied"}${reasonText}`,
-        synthetic: true,
-      });
-      continue;
-    }
-  }
-
-  return parts;
-}
-
-/**
- * Format a tool result for text representation.
- */
-function formatToolResult(part: LanguageModelV4ToolResultPart): string {
-  const output = part.output;
-
-  switch (output.type) {
-    case "text":
-      return output.value;
-
-    case "json":
-      return JSON.stringify(output.value, null, 2);
-
-    case "error-text":
-      return `Error: ${output.value}`;
-
-    case "error-json":
-      return `Error: ${JSON.stringify(output.value)}`;
-
-    case "content":
-      return output.value
-        .map((item) => {
-          if (item.type === "text") {
-            return item.text;
-          }
-          if (item.type === "file") {
-            return `[File: ${item.mediaType}]`;
-          }
-          return "[Custom content]";
-        })
-        .join("\n");
-    case "execution-denied":
-      return output.reason
-        ? `Execution denied: ${output.reason}`
-        : "Execution denied";
-
-    default:
-      return JSON.stringify(output);
-  }
-}
-
-/**
- * Create instruction text for JSON mode.
- */
-function createJsonModeInstruction(schema?: unknown): string {
+export function createJsonModeInstruction(schema?: unknown): string {
   let instruction =
     "IMPORTANT: You must respond with valid JSON only. " +
     "Do not include any text before or after the JSON. " +
@@ -445,6 +153,404 @@ function createJsonModeInstruction(schema?: unknown): string {
 }
 
 /**
+ * Convert an AI SDK prompt to OpenCode v2 prompt input.
+ *
+ * Async because file resolution may call the `resolveFileToUri` hook.
+ */
+export async function convertToOpencodePrompt(
+  prompt: LanguageModelV4Prompt,
+  options?: ConvertToOpencodePromptOptions,
+): Promise<OpencodePromptConversion> {
+  const warnings: string[] = [];
+  const logger = options?.logger;
+  const files: OpencodePromptFile[] = [];
+
+  const addWarning = (message: string): void => {
+    if (!warnings.includes(message)) {
+      warnings.push(message);
+      if (logger) {
+        logger.warn(message);
+      }
+    }
+  };
+
+  // System messages are collected globally (any position, either mode) and
+  // returned separately.
+  const systemParts = prompt
+    .filter((message) => message.role === "system")
+    .map((message) => message.content);
+  const systemBlock =
+    systemParts.length > 0 ? systemParts.join("\n\n") : undefined;
+
+  const history = prompt.filter((message) => message.role !== "system");
+
+  // Persistent/existing sessions: OpenCode owns the transcript, so only the
+  // latest user turn — the last user message and anything after it (e.g.
+  // tool results the session has not seen) — is serialized. Ephemeral
+  // sessions get the full history.
+  const mode = options?.sessionMode ?? "ephemeral";
+  let scope: typeof history;
+  if (mode === "ephemeral") {
+    scope = history;
+  } else {
+    let lastUserIndex = -1;
+    for (let i = history.length - 1; i >= 0; i--) {
+      if (history[i]!.role === "user") {
+        lastUserIndex = i;
+        break;
+      }
+    }
+    if (lastUserIndex === -1) {
+      scope = history;
+      if (history.length > 0) {
+        addWarning(
+          "Prompt has no user message; serializing trailing non-user content as context",
+        );
+      }
+    } else {
+      scope = history.slice(lastUserIndex);
+    }
+  }
+
+  const entries: Array<{ role: string; content: string }> = [];
+
+  for (const message of scope) {
+    switch (message.role) {
+      case "user": {
+        const textParts: string[] = [];
+        for (const part of message.content) {
+          if (part.type === "text") {
+            textParts.push(part.text);
+          } else {
+            const converted = await convertUserFilePart(
+              part,
+              options?.resolveFileToUri,
+              addWarning,
+            );
+            if (converted === undefined) {
+              continue;
+            }
+            if (converted.kind === "file") {
+              files.push(converted.file);
+              textParts.push(
+                `[attached file: ${converted.file.name ?? part.mediaType}]`,
+              );
+            } else {
+              // Inline text documents stay in the prompt text (verified
+              // path); a data:text/* attachment is unproven on live builds.
+              textParts.push(
+                transcriptEntry(
+                  `file${part.filename ? ` name="${part.filename}"` : ""}`,
+                  converted.text,
+                ),
+              );
+            }
+          }
+        }
+        entries.push({ role: "user", content: textParts.join("\n") });
+        break;
+      }
+
+      case "assistant": {
+        const lines: string[] = [];
+        for (const part of message.content) {
+          switch (part.type) {
+            case "text":
+              lines.push(part.text);
+              break;
+            case "reasoning":
+              lines.push(`[reasoning]: ${part.text}`);
+              break;
+            case "tool-call":
+              lines.push(
+                `[tool call: ${part.toolName}]: ${safeJson(part.input)}`,
+              );
+              break;
+            case "tool-result":
+              addToolResultContextWarning(addWarning);
+              lines.push(
+                `[tool result: ${part.toolName}]: ${formatToolResultOutput(part)}`,
+              );
+              break;
+            case "file":
+            case "reasoning-file":
+              addWarning(
+                "Assistant file parts in the prompt cannot be attached to an OpenCode prompt and were skipped",
+              );
+              break;
+            case "custom":
+              // Provider-specific content with no standardized payload.
+              break;
+          }
+        }
+        entries.push({ role: "assistant", content: lines.join("\n") });
+        break;
+      }
+
+      case "tool": {
+        const lines: string[] = [];
+        for (const part of message.content) {
+          if (part.type === "tool-result") {
+            addToolResultContextWarning(addWarning);
+            lines.push(
+              `[tool result: ${part.toolName}]: ${formatToolResultOutput(part)}`,
+            );
+          } else if (options?.includeToolApprovalResponsesAsContext) {
+            const reason = part.reason ? ` (${part.reason})` : "";
+            lines.push(
+              `[tool approval: ${part.approvalId}]: ${part.approved ? "approved" : "denied"}${reason}`,
+            );
+          }
+        }
+        if (lines.length > 0) {
+          entries.push({ role: "tool", content: lines.join("\n") });
+        }
+        break;
+      }
+    }
+  }
+
+  // Single plain user message: send its text directly, no delimiters (the
+  // overwhelmingly common case, and the one live-verified shape).
+  let text: string;
+  if (entries.length === 1 && entries[0]!.role === "user") {
+    text = entries[0]!.content;
+  } else {
+    text = entries
+      .map((entry) => transcriptEntry(entry.role, entry.content))
+      .join("\n\n");
+  }
+
+  if (options?.jsonMode) {
+    const instruction = createJsonModeInstruction(options.jsonMode.schema);
+    text = text ? `${text}\n\n${instruction}` : instruction;
+  }
+
+  if (!text && files.length === 0) {
+    addWarning("Prompt conversion produced no text and no files");
+  }
+
+  return {
+    text,
+    files,
+    warnings,
+    ...(systemBlock !== undefined ? { systemBlock } : {}),
+  };
+}
+
+const TOOL_RESULT_CONTEXT_WARNING =
+  "Tool results in prompts are included as context only. " +
+  "OpenCode executes tools server-side and cannot use client-provided results.";
+
+function addToolResultContextWarning(
+  addWarning: (message: string) => void,
+): void {
+  addWarning(TOOL_RESULT_CONTEXT_WARNING);
+}
+
+type ConvertedUserFilePart =
+  | { kind: "file"; file: OpencodePromptFile }
+  | { kind: "inline-text"; text: string };
+
+/**
+ * Convert one user file part to a `data:` URI attachment (or inline text).
+ * Returns undefined when the part is skipped (a warning has been emitted).
+ *
+ * The pre-prompt rejection policy: anything that cannot become a `data:`
+ * URI with a full mediatype is warned about and skipped here — never
+ * attached. The server admits any URI scheme without validation and hands it
+ * verbatim to the model provider, where a bad attachment fails the whole
+ * turn (spike Q1).
+ */
+async function convertUserFilePart(
+  part: LanguageModelV4FilePart,
+  resolveFileToUri: OpencodeResolveFileToUri | undefined,
+  addWarning: (message: string) => void,
+): Promise<ConvertedUserFilePart | undefined> {
+  const { mediaType, filename } = part;
+  const name = filename !== undefined ? { name: filename } : {};
+
+  switch (part.data.type) {
+    case "data": {
+      const data = part.data.data;
+
+      if (typeof data === "string") {
+        if (isDataUri(data)) {
+          // Caller-supplied data URI: the URI's own mediatype is what the
+          // server stores and trusts — use as-is.
+          return { kind: "file", file: { uri: data, ...name } };
+        }
+        if (!hasFullMediaType(mediaType)) {
+          return skipForMediaType(mediaType, filename, addWarning);
+        }
+        // Base64 payload → data URI with the part's mediaType.
+        return {
+          kind: "file",
+          file: {
+            uri: `data:${mediaType};base64,${normalizeBase64(data)}`,
+            ...name,
+          },
+        };
+      }
+
+      if (!hasFullMediaType(mediaType)) {
+        return skipForMediaType(mediaType, filename, addWarning);
+      }
+      return {
+        kind: "file",
+        file: {
+          uri: `data:${mediaType};base64,${uint8ArrayToBase64(data)}`,
+          ...name,
+        },
+      };
+    }
+
+    case "url": {
+      const urlString = part.data.url.toString();
+      if (isDataUri(urlString)) {
+        return { kind: "file", file: { uri: urlString, ...name } };
+      }
+      // A non-data: URL reaching the provider means the AI SDK did not
+      // download it (`supportedUrls` is `{}`, so it downloads what it can).
+      // Only the resolver hook can turn it into an attachable URI.
+      return resolveViaHook(
+        {
+          mediaType,
+          ...(filename !== undefined ? { filename } : {}),
+          url: urlString,
+        },
+        urlString,
+        resolveFileToUri,
+        addWarning,
+        name,
+      );
+    }
+
+    case "text":
+      // Inline text document: keep it in the prompt text. data:text/*
+      // attachments are unverified on live builds; inline text is lossless.
+      return { kind: "inline-text", text: part.data.text };
+
+    case "reference": {
+      // Provider file references carry neither bytes nor a URL — nothing the
+      // resolver hook could work with.
+      addWarning(
+        `File reference${filename ? ` "${filename}"` : ""} cannot be resolved to a data: URI and was skipped`,
+      );
+      return undefined;
+    }
+  }
+}
+
+async function resolveViaHook(
+  file: Parameters<OpencodeResolveFileToUri>[0],
+  urlString: string,
+  resolveFileToUri: OpencodeResolveFileToUri | undefined,
+  addWarning: (message: string) => void,
+  name: { name?: string },
+): Promise<ConvertedUserFilePart | undefined> {
+  const display =
+    urlString.length > 80 ? `${urlString.slice(0, 80)}…` : urlString;
+
+  if (!resolveFileToUri) {
+    addWarning(
+      `File URL ${display} is not a data: URI and no resolveFileToUri hook is configured; the file was skipped`,
+    );
+    return undefined;
+  }
+
+  let resolved: string | undefined;
+  try {
+    resolved = await resolveFileToUri(file);
+  } catch (error) {
+    addWarning(
+      `resolveFileToUri failed for ${display}: ${error instanceof Error ? error.message : String(error)}; the file was skipped`,
+    );
+    return undefined;
+  }
+
+  if (resolved === undefined) {
+    addWarning(`resolveFileToUri skipped file URL ${display}`);
+    return undefined;
+  }
+  if (!isDataUri(resolved)) {
+    // Non-data: schemes are stored verbatim and fail the turn at the model
+    // provider — reject before prompting instead of failing late.
+    addWarning(
+      `resolveFileToUri returned a non-data: URI for ${display}; the file was skipped`,
+    );
+    return undefined;
+  }
+  return { kind: "file", file: { uri: resolved, ...name } };
+}
+
+function skipForMediaType(
+  mediaType: string,
+  filename: string | undefined,
+  addWarning: (message: string) => void,
+): undefined {
+  addWarning(
+    `File${filename ? ` "${filename}"` : ""} has no full media type ("${mediaType}"); ` +
+      "a data: URI needs one (the server trusts the URI mediatype), so the file was skipped",
+  );
+  return undefined;
+}
+
+/**
+ * A data-URI mediatype must be a full `type/subtype` — the AI SDK also
+ * permits bare top-level types ("image") and normalized wildcards, which
+ * would produce a URI the model provider rejects turn-late.
+ */
+function hasFullMediaType(mediaType: string): boolean {
+  const slash = mediaType.indexOf("/");
+  return slash > 0 && slash < mediaType.length - 1 && !mediaType.includes("*");
+}
+
+/**
+ * Format a tool result output for text representation.
+ */
+function formatToolResultOutput(part: LanguageModelV4ToolResultPart): string {
+  const output = part.output;
+
+  switch (output.type) {
+    case "text":
+      return output.value;
+    case "json":
+      return safeJson(output.value);
+    case "error-text":
+      return `Error: ${output.value}`;
+    case "error-json":
+      return `Error: ${safeJson(output.value)}`;
+    case "content":
+      return output.value
+        .map((item) => {
+          if (item.type === "text") {
+            return item.text;
+          }
+          if (item.type === "file") {
+            return `[file: ${item.mediaType}]`;
+          }
+          return "[custom content]";
+        })
+        .join("\n");
+    case "execution-denied":
+      return output.reason
+        ? `Execution denied: ${output.reason}`
+        : "Execution denied";
+    default:
+      return safeJson(output);
+  }
+}
+
+function safeJson(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? "undefined";
+  } catch {
+    return "[unserializable]";
+  }
+}
+
+/**
  * Normalize base64 string by removing whitespace.
  */
 function normalizeBase64(base64: string): string {
@@ -455,25 +561,13 @@ function normalizeBase64(base64: string): string {
  * Convert Uint8Array to base64 string.
  */
 function uint8ArrayToBase64(data: Uint8Array): string {
-  // In Node.js, we can use Buffer
   if (typeof Buffer !== "undefined") {
     return Buffer.from(data).toString("base64");
   }
 
-  // Fallback for environments without Buffer
   let binary = "";
   for (let i = 0; i < data.length; i++) {
     binary += String.fromCharCode(data[i]!);
   }
   return btoa(binary);
-}
-
-/**
- * Extract the text content from an array of parts.
- */
-export function extractTextFromParts(parts: OpencodePartInput[]): string {
-  return parts
-    .filter((part): part is TextPartInput => part.type === "text")
-    .map((part) => part.text)
-    .join("\n");
 }

@@ -47,6 +47,18 @@ export {
 } from "./validation.js";
 export type { ValidationResult } from "./validation.js";
 
+// Prompt converter exports
+export {
+  convertToOpencodePrompt,
+  createJsonModeInstruction,
+  prependSystemBlock,
+} from "./convert-to-opencode-messages.js";
+export type {
+  ConvertToOpencodePromptOptions,
+  OpencodePromptConversion,
+  OpencodePromptFile,
+} from "./convert-to-opencode-messages.js";
+
 // Event reducer exports
 export {
   convertV2EventToStreamParts,
