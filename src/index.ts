@@ -41,6 +41,7 @@ export {
   validateFormAnswer,
   isValidSessionId,
   isDataUri,
+  isAttachableDataUri,
   mergeSettings,
   resolveSessionLocation,
   resolveSessionMode,

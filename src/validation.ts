@@ -442,3 +442,26 @@ export function resolveSessionLocation(
 export function isDataUri(uri: string): uri is OpencodeDataUri {
   return uri.startsWith("data:");
 }
+
+/**
+ * Strict well-formedness check for a `data:` URI destined for prompt
+ * `files[]`. {@link isDataUri} only detects the scheme; the server admits
+ * any URI verbatim and a bad attachment fails the whole turn late at the
+ * model provider, so the prompt path must additionally reject malformed
+ * `data:` URIs before prompting: no comma/payload, or a mediatype that is
+ * not a concrete `type/subtype` (the server trusts the URI mediatype;
+ * wildcards and bare top-level types are rejected).
+ */
+export function isAttachableDataUri(uri: string): uri is OpencodeDataUri {
+  if (!isDataUri(uri)) {
+    return false;
+  }
+  const comma = uri.indexOf(",");
+  if (comma === -1 || comma === uri.length - 1) {
+    return false;
+  }
+  const header = uri.slice("data:".length, comma);
+  const mediatype = header.split(";", 1)[0]!;
+  const slash = mediatype.indexOf("/");
+  return slash > 0 && slash < mediatype.length - 1 && !mediatype.includes("*");
+}

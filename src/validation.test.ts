@@ -5,6 +5,7 @@ import {
   validateModelId,
   validateFormAnswer,
   isValidSessionId,
+  isAttachableDataUri,
   isDataUri,
   mergeSettings,
   resolveSessionLocation,
@@ -618,6 +619,38 @@ describe("validation", () => {
       expect(isDataUri("https://example.com/red.png")).toBe(false);
       expect(isDataUri("/tmp/red.png")).toBe(false);
       expect(isDataUri("red.png")).toBe(false);
+    });
+  });
+
+  describe("isAttachableDataUri", () => {
+    it("accepts well-formed data URIs", () => {
+      expect(isAttachableDataUri("data:image/png;base64,iVBORw0KGgo=")).toBe(
+        true,
+      );
+      expect(isAttachableDataUri("data:text/plain,hello")).toBe(true);
+      expect(
+        isAttachableDataUri("data:text/plain;charset=utf-8;base64,aGk="),
+      ).toBe(true);
+    });
+
+    it("rejects non-data schemes", () => {
+      expect(isAttachableDataUri("https://example.com/red.png")).toBe(false);
+      expect(isAttachableDataUri("file:///tmp/red.png")).toBe(false);
+    });
+
+    it("rejects data URIs without a comma or payload", () => {
+      expect(isAttachableDataUri("data:image/png;base64")).toBe(false);
+      expect(isAttachableDataUri("data:image/png;base64,")).toBe(false);
+      expect(isAttachableDataUri("data:")).toBe(false);
+    });
+
+    it("rejects data URIs without a concrete type/subtype mediatype", () => {
+      expect(isAttachableDataUri("data:;base64,aGk=")).toBe(false);
+      expect(isAttachableDataUri("data:image;base64,aGk=")).toBe(false);
+      expect(isAttachableDataUri("data:image/*;base64,aGk=")).toBe(false);
+      expect(isAttachableDataUri("data:*/*;base64,aGk=")).toBe(false);
+      expect(isAttachableDataUri("data:/png;base64,aGk=")).toBe(false);
+      expect(isAttachableDataUri("data:image/;base64,aGk=")).toBe(false);
     });
   });
 });

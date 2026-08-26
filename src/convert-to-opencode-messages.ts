@@ -32,7 +32,7 @@ import type {
   OpencodeResolveFileToUri,
   OpencodeSessionMode,
 } from "./types.js";
-import { isDataUri } from "./validation.js";
+import { isAttachableDataUri, isDataUri } from "./validation.js";
 
 /**
  * A prompt file attachment: a `data:` URI (MIME travels in the URI's
@@ -377,7 +377,12 @@ async function convertUserFilePart(
       if (typeof data === "string") {
         if (isDataUri(data)) {
           // Caller-supplied data URI: the URI's own mediatype is what the
-          // server stores and trusts — use as-is.
+          // server stores and trusts — use as-is, but only when well-formed
+          // (the server admits malformed URIs verbatim and the turn fails
+          // late at the model provider).
+          if (!isAttachableDataUri(data)) {
+            return skipForMalformedDataUri(filename, addWarning);
+          }
           return { kind: "file", file: { uri: data, ...name } };
         }
         if (!hasFullMediaType(mediaType)) {
@@ -408,6 +413,9 @@ async function convertUserFilePart(
     case "url": {
       const urlString = part.data.url.toString();
       if (isDataUri(urlString)) {
+        if (!isAttachableDataUri(urlString)) {
+          return skipForMalformedDataUri(filename, addWarning);
+        }
         return { kind: "file", file: { uri: urlString, ...name } };
       }
       // A non-data: URL reaching the provider means the AI SDK did not
@@ -481,7 +489,24 @@ async function resolveViaHook(
     );
     return undefined;
   }
+  if (!isAttachableDataUri(resolved)) {
+    addWarning(
+      `resolveFileToUri returned a malformed data: URI for ${display}; the file was skipped`,
+    );
+    return undefined;
+  }
   return { kind: "file", file: { uri: resolved, ...name } };
+}
+
+function skipForMalformedDataUri(
+  filename: string | undefined,
+  addWarning: (message: string) => void,
+): undefined {
+  addWarning(
+    `File${filename ? ` "${filename}"` : ""} has a malformed data: URI ` +
+      "(a concrete type/subtype mediatype and a payload are required); the file was skipped",
+  );
+  return undefined;
 }
 
 function skipForMediaType(

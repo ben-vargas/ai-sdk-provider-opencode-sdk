@@ -313,6 +313,56 @@ describe("file conversion", () => {
     expect(result.warnings).toEqual([]);
   });
 
+  it("rejects malformed caller-supplied data: URIs before prompting", async () => {
+    const malformed = [
+      "data:image/png;base64", // no comma/payload
+      "data:;base64,aGVsbG8=", // no mediatype
+      "data:image;base64,aGVsbG8=", // bare top-level type
+      "data:image/*;base64,aGVsbG8=", // wildcard subtype
+      `data:image/png;base64,`, // empty payload
+    ];
+    for (const uri of malformed) {
+      const result = await convertToOpencodePrompt([
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "ctx" },
+            {
+              type: "file",
+              mediaType: "image/png",
+              filename: "bad.png",
+              data: { type: "data", data: uri },
+            },
+          ],
+        },
+      ]);
+      expect(result.files).toEqual([]);
+      expect(result.warnings).toEqual([
+        expect.stringContaining("malformed data: URI"),
+      ]);
+    }
+  });
+
+  it("rejects a malformed data: URL part before prompting", async () => {
+    const result = await convertToOpencodePrompt([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "ctx" },
+          {
+            type: "file",
+            mediaType: "image/png",
+            data: { type: "url", url: new URL("data:image/png;base64") },
+          },
+        ],
+      },
+    ]);
+    expect(result.files).toEqual([]);
+    expect(result.warnings).toEqual([
+      expect.stringContaining("malformed data: URI"),
+    ]);
+  });
+
   it("skips remote URLs with a warning when no resolver hook is set", async () => {
     const result = await convertToOpencodePrompt([
       {
@@ -391,6 +441,32 @@ describe("file conversion", () => {
     );
     expect(result.files).toEqual([]);
     expect(result.warnings).toEqual([expect.stringContaining("non-data: URI")]);
+  });
+
+  it("rejects a hook-returned malformed data: URI before prompting", async () => {
+    const result = await convertToOpencodePrompt(
+      [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "ctx" },
+            {
+              type: "file",
+              mediaType: "image/png",
+              data: { type: "url", url: new URL("https://example.com/a.png") },
+            },
+          ],
+        },
+      ],
+      {
+        resolveFileToUri: () =>
+          "data:image/png;base64" as unknown as OpencodeDataUri,
+      },
+    );
+    expect(result.files).toEqual([]);
+    expect(result.warnings).toEqual([
+      expect.stringContaining("malformed data: URI"),
+    ]);
   });
 
   it("skips with a warning when the hook returns undefined or throws", async () => {
