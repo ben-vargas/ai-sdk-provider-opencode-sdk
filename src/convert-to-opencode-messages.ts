@@ -116,6 +116,17 @@ function escapeTranscriptContent(content: string): string {
   return content.replace(/^(<{3}opencode:)/gm, "\\$1");
 }
 
+/**
+ * Sanitize text interpolated into a delimiter line (the `name="…"` attribute
+ * of inline file entries). The delimiter grammar reserves `>>>`, quotes, and
+ * newlines — organic filenames containing them would fracture the delimiter
+ * or spoof a role, so they are replaced rather than escaped (the transcript
+ * is lossy plaintext, not a reversible encoding).
+ */
+function sanitizeDelimiterAttribute(value: string): string {
+  return value.replace(/[">\n\r]/g, "_");
+}
+
 /** One serialized transcript entry. */
 function transcriptEntry(role: string, content: string): string {
   return `${openDelimiter(role)}\n${escapeTranscriptContent(content)}\n${END_DELIMITER}`;
@@ -240,7 +251,11 @@ export async function convertToOpencodePrompt(
               // path); a data:text/* attachment is unproven on live builds.
               textParts.push(
                 transcriptEntry(
-                  `file${part.filename ? ` name="${part.filename}"` : ""}`,
+                  `file${
+                    part.filename
+                      ? ` name="${sanitizeDelimiterAttribute(part.filename)}"`
+                      : ""
+                  }`,
                   converted.text,
                 ),
               );
@@ -385,8 +400,29 @@ async function convertUserFilePart(
           }
           return { kind: "file", file: { uri: data, ...name } };
         }
+        if (looksLikeUrl(data)) {
+          // A URL smuggled through the base64-string slot (v1 guarded this):
+          // base64-encoding it verbatim would attach garbage bytes. Route it
+          // through the URL path (resolver hook or warn + skip).
+          return resolveViaHook(
+            {
+              mediaType,
+              ...(filename !== undefined ? { filename } : {}),
+              url: data,
+            },
+            data,
+            resolveFileToUri,
+            addWarning,
+            name,
+          );
+        }
         if (!hasFullMediaType(mediaType)) {
-          return skipForMediaType(mediaType, filename, addWarning);
+          return resolveDataViaHookOrSkip(
+            { mediaType, filename, data },
+            resolveFileToUri,
+            addWarning,
+            name,
+          );
         }
         // Base64 payload → data URI with the part's mediaType.
         return {
@@ -399,7 +435,12 @@ async function convertUserFilePart(
       }
 
       if (!hasFullMediaType(mediaType)) {
-        return skipForMediaType(mediaType, filename, addWarning);
+        return resolveDataViaHookOrSkip(
+          { mediaType, filename, data },
+          resolveFileToUri,
+          addWarning,
+          name,
+        );
       }
       return {
         kind: "file",
@@ -448,6 +489,59 @@ async function convertUserFilePart(
       return undefined;
     }
   }
+}
+
+/**
+ * Byte/base64 parts that cannot become a `data:` URI directly (no concrete
+ * `type/subtype` media type) get one last chance through the resolver hook —
+ * with the raw bytes populated on {@link OpencodeFileToResolve.data} so the
+ * hook can supply the media type itself. Without a hook (or when it declines)
+ * the file warns and is skipped.
+ */
+async function resolveDataViaHookOrSkip(
+  file: {
+    mediaType: string;
+    filename: string | undefined;
+    data: Uint8Array | string;
+  },
+  resolveFileToUri: OpencodeResolveFileToUri | undefined,
+  addWarning: (message: string) => void,
+  name: { name?: string },
+): Promise<ConvertedUserFilePart | undefined> {
+  if (!resolveFileToUri) {
+    return skipForMediaType(file.mediaType, file.filename, addWarning);
+  }
+
+  const display = file.filename ?? `(${file.mediaType})`;
+  let resolved: string | undefined;
+  try {
+    resolved = await resolveFileToUri({
+      mediaType: file.mediaType,
+      ...(file.filename !== undefined ? { filename: file.filename } : {}),
+      data: file.data,
+    });
+  } catch (error) {
+    addWarning(
+      `resolveFileToUri failed for ${display}: ${error instanceof Error ? error.message : String(error)}; the file was skipped`,
+    );
+    return undefined;
+  }
+
+  if (resolved === undefined) {
+    return skipForMediaType(file.mediaType, file.filename, addWarning);
+  }
+  if (!isDataUri(resolved) || !isAttachableDataUri(resolved)) {
+    addWarning(
+      `resolveFileToUri returned a non-attachable URI for ${display}; the file was skipped`,
+    );
+    return undefined;
+  }
+  return { kind: "file", file: { uri: resolved, ...name } };
+}
+
+/** Detect a URL smuggled through the base64-string data slot. */
+function looksLikeUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value);
 }
 
 async function resolveViaHook(
