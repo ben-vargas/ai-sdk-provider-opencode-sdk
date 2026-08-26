@@ -243,6 +243,98 @@ describe("finalizeV2Stream", () => {
       finishReason: { unified: "stop", raw: "idle" },
     });
   });
+
+  it("never defaults to a retained tool-calls step finish", () => {
+    // Step ended tool-calls and the stream stalled before the next
+    // step.started: "tool-calls" is an intermediate finish, not a valid
+    // terminal reason for a backstopped turn.
+    const f = eventFactory();
+    const state = createV2StreamState({ sessionId: SESSION_ID });
+    convertV2EventToStreamParts(f.stepStarted("msg_bt"), state);
+    convertV2EventToStreamParts(
+      f.stepEnded("msg_bt", "tool-calls", tokens(1, 1), 0),
+      state,
+    );
+    const parts = finalizeV2Stream(state);
+    expect(parts[0]).toMatchObject({
+      type: "finish",
+      finishReason: { unified: "other", raw: "tool-calls" },
+    });
+  });
+
+  it("flushes a still-buffered approval before the finish part", () => {
+    // Last resort: permission.asked buffered against a tool that never
+    // produced input; finalize must still surface the approval (with a
+    // registered call) or the two-phase round-trip deadlocks.
+    const f = eventFactory();
+    const state = createV2StreamState({ sessionId: SESSION_ID });
+    convertV2EventToStreamParts(f.stepStarted("msg_fa"), state);
+    convertV2EventToStreamParts(
+      f.permissionAsked("perm_fa", {
+        source: { type: "tool", messageID: "msg_fa", id: "tool_fa" },
+      }),
+      state,
+    );
+    const parts = finalizeV2Stream(state);
+    expect(parts.map((part) => part.type)).toEqual([
+      "tool-input-start",
+      "tool-input-delta",
+      "tool-input-end",
+      "tool-call",
+      "tool-approval-request",
+      "finish",
+    ]);
+    expect(parts[3]).toMatchObject({
+      toolCallId: "tool_fa",
+      toolName: UNKNOWN_TOOL_NAME,
+      input: "{}",
+    });
+    expect(parts[4]).toMatchObject({
+      approvalId: "perm_fa",
+      toolCallId: "tool_fa",
+    });
+  });
+
+  it("falls back to {} when a buffered approval's input never completed", () => {
+    // A half-streamed JSON fragment must never become the published input.
+    const f = eventFactory();
+    const state = createV2StreamState({ sessionId: SESSION_ID, logger: false });
+    convertV2EventToStreamParts(
+      f.toolInputStarted("msg_pf", "tool_pf", "write_file"),
+      state,
+    );
+    convertV2EventToStreamParts(
+      f.toolInputDelta("msg_pf", "tool_pf", '{"path":'),
+      state,
+    );
+    convertV2EventToStreamParts(
+      f.permissionAsked("perm_pf", {
+        source: { type: "tool", messageID: "msg_pf", id: "tool_pf" },
+      }),
+      state,
+    );
+    const parts = finalizeV2Stream(state);
+    const call = parts.find((part) => part.type === "tool-call");
+    expect(call).toMatchObject({ toolCallId: "tool_pf", input: "{}" });
+    expect(
+      parts.find((part) => part.type === "tool-approval-request"),
+    ).toMatchObject({ approvalId: "perm_pf" });
+  });
+});
+
+describe("log.synced session scoping", () => {
+  it("ignores a foreign session's sentinel", () => {
+    const state = createV2StreamState({
+      sessionId: SESSION_ID,
+      includeRawChunks: true,
+    });
+    const foreign = {
+      type: "log.synced" as const,
+      aggregateID: OTHER_SESSION_ID,
+    };
+    expect(convertV2EventToStreamParts(foreign, state)).toEqual([]);
+    expect(state.logSynced).toBe(false);
+  });
 });
 
 describe("createStreamStartPart", () => {

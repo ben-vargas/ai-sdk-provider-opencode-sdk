@@ -29,6 +29,7 @@ import type {
   FormCreated,
   PermissionAsked,
   SessionLogItem,
+  SessionMessageAssistantRetry,
   SessionStructuredError,
   SessionToolFailed,
   SessionToolSuccess,
@@ -130,6 +131,16 @@ interface V2BlockState {
 export const UNKNOWN_TOOL_NAME = "unknown" as const;
 
 /**
+ * Tool name for the synthetic call registered for a source-less
+ * `permission.asked`. The AI SDK rejects a `tool-approval-request` whose
+ * `toolCallId` has no prior `tool-call` (`ToolCallNotFoundForApprovalError`
+ * on every consumption path), so a permission with no tool correlation gets
+ * a synthetic dynamic call — keyed by the request id, carrying the
+ * permission payload as its input — registered before the approval.
+ */
+export const PERMISSION_TOOL_NAME = "permission" as const;
+
+/**
  * Lifecycle state for one tool call, keyed by the v2 tool `id`.
  * `name` is captured at `input.started`; later events do not repeat it.
  */
@@ -227,6 +238,8 @@ export interface V2StreamState {
   lastStepFinish: V2StepFinish | undefined;
   /** Structured error from the most recent `session.step.failed`. */
   stepError: SessionStructuredError | undefined;
+  /** Most recent `session.retry.scheduled` record (→ metadata `retry`). */
+  retry: SessionMessageAssistantRetry | undefined;
   terminal: V2Terminal | undefined;
   finishEmitted: boolean;
   /** Set when the `log.synced` sentinel has been observed. */
@@ -265,6 +278,7 @@ export function createV2StreamState(options: {
     currentAssistantMessageId: undefined,
     lastStepFinish: undefined,
     stepError: undefined,
+    retry: undefined,
     terminal: undefined,
     finishEmitted: false,
     logSynced: false,
@@ -303,6 +317,12 @@ export function convertV2EventToStreamParts(
   const normalized = normalizeReducerInput(input);
 
   if (normalized.kind === "log-synced") {
+    // The sentinel is session-scoped like every other input: its
+    // aggregateID is the session's log aggregate, so a foreign sentinel
+    // must not mark THIS reducer's catch-up as complete.
+    if (normalized.aggregateID !== state.sessionId) {
+      return [];
+    }
     state.logSynced = true;
     return state.includeRawChunks ? [{ type: "raw", rawValue: input }] : [];
   }
@@ -419,6 +439,13 @@ export function convertV2EventToStreamParts(
     case "session.step.started":
       state.stepCount += 1;
       state.currentAssistantMessageId = event.data.assistantMessageID;
+      // A new step supersedes the previous step's finish and error for
+      // terminal resolution: without this, a backstopped turn after an
+      // intermediate tool step would finish as that step's "tool-calls",
+      // and a successful retry would still attach the failed attempt's
+      // error to the finish metadata.
+      state.lastStepFinish = undefined;
+      state.stepError = undefined;
       break;
     case "session.step.ended":
       accumulateUsage(state, event.data.tokens, event.data.cost);
@@ -447,6 +474,17 @@ export function convertV2EventToStreamParts(
         };
       }
       state.stepError = event.data.error;
+      break;
+
+    case "session.retry.scheduled":
+      // Durable retry record: the failed attempt's error travels here, so a
+      // turn that fails a step, retries, and succeeds surfaces the retry in
+      // metadata instead of a stale stepError on the successful finish.
+      state.retry = {
+        attempt: event.data.attempt,
+        at: event.data.at,
+        error: event.data.error,
+      };
       break;
 
     case "session.execution.succeeded":
@@ -683,8 +721,9 @@ function handleToolInputDelta(
 ): void {
   const tool = getTool(state, toolId);
   if (tool.inputEnded || tool.callEmitted) {
-    // Once the input envelope closed (possibly early, for an approval —
-    // issue #22), the exposed input is immutable.
+    // Once the input envelope closed (possibly early, when a terminal
+    // result or finalize registered the call), the exposed input is
+    // immutable.
     warn(state, `Dropping tool input delta for closed input ${toolId}`);
     return;
   }
@@ -744,6 +783,15 @@ function handleToolInputEnded(
   }
   tool.inputEnded = true;
   parts.push({ type: "tool-input-end", id: toolId });
+
+  // The input just became complete. A buffered approval for this tool
+  // (issue #22: `permission.asked` raced ahead of the input) can now be
+  // satisfied — the server will not emit `tool.called` while it is blocked
+  // waiting for the reply, so this is the flush point, not tool completion.
+  if (state.pendingApprovals.has(toolId)) {
+    registerToolCall(parts, tool, tool.inputBuffer || "{}");
+    flushPendingApproval(state, parts, toolId);
+  }
 }
 
 /**
@@ -961,8 +1009,21 @@ function handlePermissionAsked(
   };
 
   if (!sourceToolId) {
-    // No tool correlation available — emit immediately keyed by request id
-    // (nothing to register against).
+    // No tool correlation available — the approval keys on the request id,
+    // but the AI SDK requires the referenced tool call to exist, so a
+    // synthetic permission call carrying the request payload is registered
+    // first (see PERMISSION_TOOL_NAME).
+    const syntheticTool = getTool(state, data.id, PERMISSION_TOOL_NAME);
+    registerToolCall(
+      parts,
+      syntheticTool,
+      JSON.stringify({
+        action: data.action,
+        resources: data.resources,
+        ...(data.save ? { save: data.save } : {}),
+        ...(data.message !== undefined ? { message: data.message } : {}),
+      }),
+    );
     emitApproval(state, parts, approval);
     return;
   }
@@ -971,15 +1032,17 @@ function handlePermissionAsked(
   if (tool?.callEmitted) {
     // The tool call is already registered — safe to emit now.
     emitApproval(state, parts, approval);
-  } else if (tool && (tool.inputEnded || tool.inputBuffer !== "")) {
-    // Input is known but the call has not been finalized. Register it early
-    // from the buffered input so the approval lands after
+  } else if (tool?.inputEnded) {
+    // Input is complete but the call has not been finalized. Register it
+    // early from the final input so the approval lands after
     // tool-input-available (issue #22).
     registerToolCall(parts, tool, tool.inputBuffer || "{}");
     emitApproval(state, parts, approval);
   } else {
-    // The tool call is not ready (no input yet, or the tool is entirely
-    // unseen): buffer until the call is registered.
+    // The tool call is not ready: no input yet, the tool is entirely
+    // unseen, or input is still streaming (registering now would publish a
+    // partial JSON fragment as the call's input). Buffer until the input
+    // completes or the call is registered.
     state.pendingApprovals.set(sourceToolId, approval);
   }
 }
@@ -1026,6 +1089,23 @@ function flushPendingApproval(
 
 function dropPendingApproval(state: V2StreamState, toolId: string): void {
   state.pendingApprovals.delete(toolId);
+}
+
+/**
+ * The input string for a tool call registered by the finalize backstop: the
+ * buffer if it is complete JSON, else "{}" — a half-streamed fragment must
+ * never become a published `tool-call.input`.
+ */
+function parseableToolInput(buffer: string): string {
+  if (!buffer) {
+    return "{}";
+  }
+  try {
+    JSON.parse(buffer);
+    return buffer;
+  } catch {
+    return "{}";
+  }
 }
 
 function handlePermissionReplied(
@@ -1141,6 +1221,16 @@ function emitFinish(
   }
   state.finishEmitted = true;
 
+  // Last-resort approval flush: a blocked turn being finalized must surface
+  // its approval or the two-phase round-trip deadlocks (the user is never
+  // asked, the session stays blocked). If the input never completed, fall
+  // back to "{}" rather than publishing a partial JSON fragment.
+  for (const toolId of [...state.pendingApprovals.keys()]) {
+    const tool = getTool(state, toolId);
+    registerToolCall(parts, tool, parseableToolInput(tool.inputBuffer));
+    flushPendingApproval(state, parts, toolId);
+  }
+
   for (const [id, block] of state.blocks) {
     if (block.started && !block.ended) {
       block.ended = true;
@@ -1180,6 +1270,7 @@ function emitFinish(
     ...(state.lastStepFinish?.rawFinish !== undefined
       ? { rawFinish: state.lastStepFinish.rawFinish }
       : {}),
+    ...(state.retry ? { retry: state.retry as unknown as JSONValue } : {}),
   };
   const error = state.terminal?.error ?? state.stepError;
   if (error) {
@@ -1207,18 +1298,28 @@ export function finalizeV2Stream(
   finishReason?: LanguageModelV4FinishReason,
 ): LanguageModelV4StreamPart[] {
   const parts: LanguageModelV4StreamPart[] = [];
-  emitFinish(
-    state,
-    parts,
-    finishReason ??
-      (state.lastStepFinish
-        ? mapOpencodeFinishReason(
-            state.lastStepFinish.finish,
-            state.lastStepFinish.rawFinish,
-          )
-        : { unified: "other", raw: undefined }),
-  );
+  emitFinish(state, parts, finishReason ?? resolveBackstopFinishReason(state));
   return parts;
+}
+
+/**
+ * Default finish reason for a backstopped (non-terminal) turn. A retained
+ * `"tool-calls"` step finish means further steps were coming — it is never
+ * a valid terminal reason here (the contract: never finish on an
+ * intermediate step's `"tool-calls"`), so it degrades to `other` with the
+ * native value preserved as raw.
+ */
+function resolveBackstopFinishReason(
+  state: V2StreamState,
+): LanguageModelV4FinishReason {
+  const last = state.lastStepFinish;
+  if (!last) {
+    return { unified: "other", raw: undefined };
+  }
+  if (last.finish === "tool-calls") {
+    return { unified: "other", raw: last.rawFinish ?? last.finish };
+  }
+  return mapOpencodeFinishReason(last.finish, last.rawFinish);
 }
 
 /**

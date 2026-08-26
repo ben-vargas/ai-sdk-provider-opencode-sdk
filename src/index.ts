@@ -55,6 +55,7 @@ export {
   extractV2EventSessionId,
   finalizeV2Stream,
   normalizeReducerInput,
+  PERMISSION_TOOL_NAME,
   UNKNOWN_TOOL_NAME,
 } from "./convert-from-opencode-events.js";
 export type {

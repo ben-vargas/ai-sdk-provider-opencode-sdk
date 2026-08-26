@@ -5,10 +5,13 @@ import { multiStepToolTurn } from "./multi-step-tool-turn.js";
 import { toolFailure } from "./tool-failure.js";
 import { stepFailedContentFilter } from "./step-failed-content-filter.js";
 import {
+  approvalBlockedAfterIntermediateStep,
+  permissionAfterInputEnded,
   permissionBeforeInputAvailable,
   permissionBeforeToolStart,
   permissionSourceless,
 } from "./permission-approval.js";
+import { retryScheduledTurn } from "./retry-scheduled.js";
 import { formCreatedMidTurn } from "./form-created-mid-turn.js";
 import {
   executionInterruptedShutdown,
@@ -30,8 +33,11 @@ export const fixtures: V2EventFixture[] = [
   toolFailure,
   stepFailedContentFilter,
   permissionBeforeInputAvailable,
+  permissionAfterInputEnded,
   permissionBeforeToolStart,
   permissionSourceless,
+  approvalBlockedAfterIntermediateStep,
+  retryScheduledTurn,
   formCreatedMidTurn,
   executionInterruptedUser,
   executionInterruptedSuperseded,
