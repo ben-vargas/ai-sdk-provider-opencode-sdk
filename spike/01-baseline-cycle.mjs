@@ -55,7 +55,8 @@ results.inboxAfter = await capture("session.inbox.list", () =>
   client.session.inbox.list({ sessionID }),
 );
 
-// Q7: does breaking the loop close the connection? (stop aborts; observe done)
+// Q7 abort path: stop() aborts the subscribe signal (NOT a plain loop break —
+// that path is exercised in 09-service-and-stream.mjs); observe how done settles.
 collector.stop();
 results.collectorDone = await Promise.race([
   collector.done,

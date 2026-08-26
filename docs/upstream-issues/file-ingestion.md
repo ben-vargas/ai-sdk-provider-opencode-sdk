@@ -7,11 +7,11 @@
 
 v2's `session.prompt` file input is URI-only (`files: [{uri, name?, description?, …}]` — no mime, no bytes). Nothing documents which schemes are supported, and the observed behavior (dev CLI `0.0.0-dev-202608261632`, 2026-08-26) is a trap:
 
-- **Every scheme is accepted at the API boundary** — `data:`, `file://`, `https://`, absolute and workspace-relative paths were all admitted and stored on the user message verbatim (mime inferred from the _file name_, not content).
-- **Only `data:` URIs actually work.** For all other schemes the raw URI string is passed through to the model provider as media and the _turn_ later fails with `finish:"error"`, `error:{type:"unknown", message:"OpenAI Responses media must contain valid base64"}`.
+- **Every scheme is accepted at the API boundary** — `data:`, `file://`, `https://`, absolute and workspace-relative paths were all admitted and stored on the user message verbatim. For `data:` URIs the stored `mime` is taken from the URI's declared mediatype (not the file name, and not sniffed from content — a valid PNG sent as `data:application/octet-stream` is stored and forwarded as octet-stream, then rejected by the provider adapter).
+- **Only `data:` URIs actually work** (verified end-to-end: a 64×64 red PNG sent as `data:` is correctly described by two different image-capable models). For all other schemes the raw URI string is passed through to the model provider as media and the _turn_ later fails with `finish:"error"`, `error:{type:"unknown", message:"OpenAI Responses media must contain valid base64"}` (or "OpenAI Chat media must contain valid base64" — reproduced on two distinct provider adapters).
 - So an invalid attachment does not reject the prompt (where the caller could handle it) — it kills the whole generation afterward, with a provider-internal error message that never mentions the file.
 
-Repro: send a small PNG as each URI form to an image-capable model, then read `message.list`. We have captured request/response/event JSON for all five cases and can attach it.
+Repro: send a small PNG as each URI form to an image-capable model, then read `message.list`. We have captured request/response/event JSON for all cases (five schemes × plus mediatype-conflict and second-model controls) and can attach it.
 
 ## Use case
 

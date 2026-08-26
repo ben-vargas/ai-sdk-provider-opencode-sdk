@@ -1,0 +1,48 @@
+{
+  "devCliVersion": {
+    "label": "dev-cli --version",
+    "exit": 0,
+    "stdout": "0.0.0-dev-202608261632\n",
+    "stderr": ""
+  },
+  "betaCliVersion": {
+    "exit": 0,
+    "stdout": "0.0.0-beta-202608110357\n",
+    "stderr": ""
+  },
+  "serveService": {
+    "label": "serve --service",
+    "exit": 1,
+    "killed": false,
+    "stdout": "",
+    "stderr": "opencode serve\n\nstarts a headless opencode server\n\nOptions:\n  -h, --help         show help                                                             [boolean]\n  -v, --version      show version number                                                   [boolean]\n      --print-logs   print logs to stderr                                                  [boolean]\n      --log-level    log level                  [string] [choices: \"DEBUG\", \"INFO\", \"WARN\", \"ERROR\"]\n      --pure         run without external plugins                                          [boolean]\n      --port         port to listen on                                         [number] [default: 0]\n      --hostname     hostname to listen on                           [string] [default: \"127.0.0.1\"]\n      --mdns         enable mDNS service discovery (defaults hostname to 0.0.0.0)\n                                                                          [boolean] [default: false]\n      --mdns-domain  custom domain name for mDNS service (default: opencode.local)\n                                                                [string] [default: \"opencode.local\"]\n      --cors         additional domains to allow for CORS                      [array] [default: []]"
+  },
+  "serveHelp": {
+    "label": "serve --help",
+    "exit": 0,
+    "stdout": "",
+    "stderr": "opencode serve\n\nstarts a headless opencode server\n\nOptions:\n  -h, --help         show help                                                             [boolean]\n  -v, --version      show version number                                                   [boolean]\n      --print-logs   print logs to stderr                                                  [boolean]\n      --log-level    log level                  [string] [choices: \"DEBUG\", \"INFO\", \"WARN\", \"ERROR\"]\n      --pure         run without external plugins                                          [boolean]\n      --port         port to listen on                                         [number] [default: 0]\n      --hostname     hostname to listen on                           [string] [default: \"127.0.0.1\"]\n      --mdns         enable mDNS service discovery (defaults hostname to 0.0.0.0)\n                                                                          [boolean] [default: false]\n      --mdns-domain  custom domain name for mDNS service (default: opencode.local)\n                                                                [string] [default: \"opencode.local\"]\n      --cors         additional domains to allow for CORS                      [array] [default: []]"
+  },
+  "registrationFile": {
+    "path": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/state/opencode/service.json",
+    "exists": false,
+    "contents": null
+  },
+  "discover": {
+    "label": "Service.discover",
+    "ok": true,
+    "ms": 2
+  },
+  "loopBreak": {
+    "label": "for-await break",
+    "ok": true,
+    "ms": 24,
+    "value": {
+      "seen": [
+        "server.connected"
+      ],
+      "brokeAfterMs": 22,
+      "healthAfterBreak": 200
+    }
+  }
+}

@@ -9,7 +9,7 @@ v1 accepted `system` on `session.prompt`. In the v2 beta (`@opencode-ai/client@0
 
 - `SessionPromptInput` has no `system` field; `SessionCreateInput` is `{id?, title?, agent?, model?, location?}` — no system/instructions either.
 - The closest candidate, `session.instructions.entry.put({sessionID, key, value})`, is undocumented as to whether entries reach model context, with what role/priority, and whether they survive compaction. We tried to verify empirically (2026-08-26) and could not: the dev-channel CLI (`0.0.0-dev-202608261632`) does not route `session.instructions.*` at all, and on the embedded host (`@opencode-ai/sdk@0.0.0-beta-18286`) both `entry.put` and `entry.list` return empty-body 500s.
-- Plugins (`ctx.agent.transform` pushing onto `event.system`) restore this in embedded mode, but network-only clients have no equivalent.
+- Plugins restore this in embedded mode via the session `context` hook — `session.hook("context", (ctx) => { ctx.system.push(...) })`, where `SessionContext.system` is a mutable `Array<SystemPart>` (`@opencode-ai/plugin@beta-18286`) — but network-only clients have no equivalent.
 
 ## Use case
 
