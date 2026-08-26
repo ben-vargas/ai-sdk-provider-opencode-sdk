@@ -34,9 +34,11 @@ import type {
   SharedV4ProviderMetadata,
   SharedV4Warning,
 } from "@ai-sdk/provider";
-import { isSessionBusyError } from "@opencode-ai/client";
+import { isConflictError, isSessionBusyError } from "@opencode-ai/client";
 import type {
   FormCreated,
+  FormInfo,
+  PermissionRequest,
   SessionInboxUser,
   SessionMessageAssistant,
   SessionMessageInfo,
@@ -109,11 +111,24 @@ export interface OpencodeLanguageModelConfig {
    * @default 1500
    */
   approvalIdleTimeoutMs?: number;
+  /**
+   * Silence watchdog: with no approval outstanding, how long the event
+   * stream may stay silent before the turn is probed for a lost signal —
+   * pending permissions/forms the stream never delivered, or a settled
+   * execution whose terminal event was lost. The probe is non-destructive:
+   * it finalizes only when the session is provably blocked or settled, so a
+   * genuinely long-running turn just keeps being probed. @default 30000
+   */
+  silenceWatchdogMs?: number;
 }
 
 const DEFAULT_READINESS_TIMEOUT_MS = 3000;
 const DEFAULT_APPROVAL_IDLE_TIMEOUT_MS = 1500;
+const DEFAULT_SILENCE_WATCHDOG_MS = 30_000;
 const DEFAULT_SESSION_TITLE = "AI SDK Session";
+/** Bounded in-model form retry: nothing redelivers a form within a turn. */
+const MAX_FORM_ATTEMPTS = 3;
+const FORM_RETRY_BASE_DELAY_MS = 200;
 
 /** An approval decision carried in the prompt (phase-2 input). */
 interface PromptApprovalResponse {
@@ -156,17 +171,23 @@ function createEventReader(iterable: AsyncIterable<V2Event>): EventReader {
       const timeout = new Promise<"timeout">((resolve) => {
         timer = setTimeout(() => resolve("timeout"), ms);
       });
-      return Promise.race([promise, timeout]).then((result) => {
-        clearTimeout(timer);
-        if (result === "timeout") {
-          pending = promise;
-          // The stashed promise may never be re-read (the turn finalizes and
-          // the subscription is aborted, rejecting it): subscribe a no-op
-          // handler so teardown never fires an unhandled rejection.
-          promise.catch(() => undefined);
-        }
-        return result;
-      });
+      return Promise.race([promise, timeout]).then(
+        (result) => {
+          clearTimeout(timer);
+          if (result === "timeout") {
+            pending = promise;
+            // The stashed promise may never be re-read (the turn finalizes
+            // and the subscription is aborted, rejecting it): subscribe a
+            // no-op handler so teardown never fires an unhandled rejection.
+            promise.catch(() => undefined);
+          }
+          return result;
+        },
+        (error: unknown) => {
+          clearTimeout(timer);
+          throw error;
+        },
+      );
     },
   };
 }
@@ -200,7 +221,17 @@ interface TurnContext {
   requestBody: unknown;
   /** Set once server-side abort cleanup has been initiated. */
   abortHandled: boolean;
+  /**
+   * Reconcile-marked dispatch failure (uncertain prompt/reply delivery):
+   * the pump recovers through the session instead of losing the observer.
+   */
+  dispatchError: Error | undefined;
+  /** The doStream consumer canceled the stream (nobody is listening). */
+  consumerCanceled: boolean;
+  /** Approval request IDs replied during this turn (phase-2 metadata). */
+  repliedApprovalIds: string[];
   approvalIdleTimeoutMs: number;
+  silenceWatchdogMs: number;
 }
 
 /**
@@ -235,6 +266,13 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
   private readonly handledFormRequests = new Set<string>();
   /** In-flight form response attempts, keyed by form ID. */
   private readonly inFlightFormRequests = new Map<string, Promise<boolean>>();
+  /**
+   * Per-instance turn serialization: one model instance = one conversation =
+   * one pinned session, and the session admits one active generation.
+   * Concurrent calls queue behind the in-flight turn instead of racing
+   * session creation and reading each other's events.
+   */
+  private turnQueue: Promise<void> = Promise.resolve();
 
   constructor(
     modelId: string,
@@ -276,6 +314,17 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
   async doGenerate(
     options: LanguageModelV4CallOptions,
   ): Promise<LanguageModelV4GenerateResult> {
+    const release = await this.acquireTurnSlot(options.abortSignal);
+    try {
+      return await this.doGenerateSerialized(options);
+    } finally {
+      release();
+    }
+  }
+
+  private async doGenerateSerialized(
+    options: LanguageModelV4CallOptions,
+  ): Promise<LanguageModelV4GenerateResult> {
     const turn = await this.startTurn(options);
     const parts: LanguageModelV4StreamPart[] = [];
     try {
@@ -310,24 +359,90 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
   async doStream(
     options: LanguageModelV4CallOptions,
   ): Promise<LanguageModelV4StreamResult> {
-    const turn = await this.startTurn(options);
+    const release = await this.acquireTurnSlot(options.abortSignal);
+    let turn: TurnContext;
+    try {
+      turn = await this.startTurn(options);
+    } catch (error) {
+      release();
+      throw error;
+    }
 
     const stream = new ReadableStream<LanguageModelV4StreamPart>({
       start: (controller) => {
+        // close/error can themselves throw once the consumer canceled the
+        // stream — swallow, the consumer is gone either way.
         void this.runPump(turn, (part) => controller.enqueue(part))
-          .then(() => controller.close())
-          .catch((error: unknown) => controller.error(error))
-          .finally(() => turn.subscription.abort());
+          .then(() => {
+            try {
+              controller.close();
+            } catch {
+              /* stream already canceled */
+            }
+          })
+          .catch((error: unknown) => {
+            try {
+              controller.error(error);
+            } catch {
+              /* stream already canceled */
+            }
+          })
+          .finally(() => {
+            turn.subscription.abort();
+            release();
+          });
       },
       cancel: () => {
         // Consumer cancellation mid-turn: same server-side cleanup as a
         // caller abort — the execution is still running server-side.
+        turn.consumerCanceled = true;
         void this.abortServerSide(turn);
         turn.subscription.abort();
       },
     });
 
     return { stream, request: { body: turn.requestBody } };
+  }
+
+  /**
+   * Acquire the instance's single generation slot. Resolves to the release
+   * function once every previously queued turn has finished. An abort while
+   * queued releases this caller's slot (later callers still wait for the
+   * turns queued ahead of it) and rethrows the abort reason.
+   */
+  private async acquireTurnSlot(
+    signal: AbortSignal | undefined,
+  ): Promise<() => void> {
+    const previous = this.turnQueue;
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.turnQueue = previous.then(() => current);
+
+    if (!signal) {
+      await previous;
+      return release;
+    }
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const onAbort = () =>
+          reject(abortReason(signal) ?? new Error("Request aborted"));
+        if (signal.aborted) {
+          onAbort();
+          return;
+        }
+        signal.addEventListener("abort", onAbort, { once: true });
+        previous.then(() => {
+          signal.removeEventListener("abort", onAbort);
+          resolve();
+        });
+      });
+    } catch (error) {
+      release();
+      throw error;
+    }
+    return release;
   }
 
   // --- turn setup -------------------------------------------------------
@@ -357,6 +472,18 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         ? { reasoning: options.reasoning }
         : {}),
     })) {
+      warnings.push({ type: "other", message });
+    }
+
+    if (
+      (options.tools !== undefined && options.tools.length > 0) ||
+      options.toolChoice !== undefined
+    ) {
+      const message =
+        "Custom tool definitions and toolChoice are ignored: OpenCode " +
+        "executes its own tools server-side, and the v2 prompt contract has " +
+        "no field for caller-defined tools.";
+      this.logger.warn(message);
       warnings.push({ type: "other", message });
     }
 
@@ -480,8 +607,13 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       stepClosedMessageIds: new Set(),
       requestBody: undefined,
       abortHandled: false,
+      dispatchError: undefined,
+      consumerCanceled: false,
+      repliedApprovalIds: [],
       approvalIdleTimeoutMs:
         this.config.approvalIdleTimeoutMs ?? DEFAULT_APPROVAL_IDLE_TIMEOUT_MS,
+      silenceWatchdogMs:
+        this.config.silenceWatchdogMs ?? DEFAULT_SILENCE_WATCHDOG_MS,
     };
     state.onForm = (form) => {
       void this.handleFormRequest(turn, form).catch((error: unknown) => {
@@ -526,8 +658,22 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         });
       }
     } catch (error) {
-      subscription.abort();
-      throw error;
+      if (options.abortSignal?.aborted) {
+        // The signal fired mid-dispatch: the request may still have reached
+        // the server, and a listener registered now would never fire.
+        void this.abortServerSide(turn);
+        subscription.abort();
+        throw abortReason(options.abortSignal) ?? asError(error);
+      }
+      if (error instanceof Error && needsSessionReconciliation(error)) {
+        // Uncertain delivery (post-dispatch, reconcile-marked): keep the
+        // subscription alive and let the pump reconcile through the pinned
+        // session's state instead of losing the observer.
+        turn.dispatchError = error;
+      } else {
+        subscription.abort();
+        throw error;
+      }
     }
 
     this.registerAbortCleanup(turn);
@@ -625,7 +771,16 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     let catalog;
     try {
       catalog = await port.model.list(
-        location ? { location: { directory: location.directory } } : undefined,
+        location
+          ? {
+              location: {
+                directory: location.directory,
+                ...(location.workspaceID !== undefined
+                  ? { workspace: location.workspaceID }
+                  : {}),
+              },
+            }
+          : undefined,
         requestOptions,
       );
     } catch (error) {
@@ -706,10 +861,18 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
   ): Promise<void> {
     let dispatched = false;
     for (const approval of approvals) {
+      // Each reply targets the session its approval actually belongs to —
+      // NOT necessarily the turn's session: a mixed prompt (approvals + new
+      // user content) under createNewSession or an escape-hatch sessionId
+      // runs the prompt on a different session than the blocked one.
+      const approvalSessionId =
+        this.pendingApprovalSessions.get(approval.approvalId) ??
+        this.pinnedSessionId ??
+        turn.sessionId;
       try {
         await turn.port.permission.reply(
           {
-            sessionID: turn.sessionId,
+            sessionID: approvalSessionId,
             requestID: approval.approvalId,
             reply: approval.approved ? "once" : "reject",
             ...(approval.reason !== undefined
@@ -724,7 +887,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
           // not an error for the continuation.
           this.logger.warn(
             `Approval ${approval.approvalId} no longer exists on session ` +
-              `${turn.sessionId}; assuming it was already replied.`,
+              `${approvalSessionId}; assuming it was already replied.`,
           );
         } else {
           // First-reply tagged errors are definitive server verdicts
@@ -743,6 +906,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       }
       dispatched = true;
       turn.delivered = true;
+      turn.repliedApprovalIds.push(approval.approvalId);
       this.repliedApprovals.add(approval.approvalId);
       // Also mark it in THIS turn's reducer state: a redelivered
       // permission.asked for a just-replied approval must not resurface.
@@ -818,7 +982,13 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         requestOptions,
       );
     } catch (error) {
-      if (isSessionBusyError(error) && promptInput.delivery !== "queue") {
+      // Busy-session detection: the prompt route's declared thrown union
+      // carries `ConflictError` (409) for a busy session — `SessionBusyError`
+      // is declared only on other routes but kept here defensively (spike
+      // Q3: the dev OpenAPI declares 409 ConflictError on v2.session.prompt).
+      // The retry runs even when the original delivery was already "queue":
+      // a busy rejection under queue is a transient race worth one more try.
+      if (isPromptBusyError(error)) {
         this.logger.warn(
           `Session ${turn.sessionId} is busy; retrying the prompt once with ` +
             'delivery "queue".',
@@ -838,14 +1008,15 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
   }
 
   /**
-   * Prompt-failure classification. A `SessionBusyError` that survives the
-   * queue retry is surfaced non-retryable (an AI SDK retry would just race
-   * the same busy session). Other tagged errors are definitive pre-dispatch
-   * rejections; transport-class failures have uncertain delivery and follow
-   * the post-dispatch rule.
+   * Prompt-failure classification. A busy rejection (`ConflictError` /
+   * `SessionBusyError`) that survives the queue retry is surfaced
+   * non-retryable (an AI SDK retry would just race the same busy session).
+   * Other tagged errors are definitive pre-dispatch rejections;
+   * transport-class failures have uncertain delivery and follow the
+   * post-dispatch rule.
    */
   private wrapPromptError(error: unknown, turn: TurnContext): Error {
-    if (isSessionBusyError(error)) {
+    if (isPromptBusyError(error)) {
       return new APICallError({
         message:
           `OpenCode session ${turn.sessionId} is busy and the "queue" ` +
@@ -857,7 +1028,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         data: {
           phase: "pre-dispatch",
           reconcile: false,
-          errorTag: "SessionBusyError",
+          errorTag: (error as { _tag: string })._tag,
           operation: "session.prompt",
           sessionId: turn.sessionId,
           modelId: this.modelId,
@@ -899,6 +1070,13 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     };
 
     try {
+      if (turn.dispatchError) {
+        // Dispatch-time failure with uncertain delivery: reconcile through
+        // the session instead of surfacing (or losing the observer).
+        await this.recoverPumpFailure(turn, turn.dispatchError, push);
+        return;
+      }
+
       for (const buffered of turn.preBuffer) {
         this.observeEvent(turn, buffered, push);
         if (turn.state.finishEmitted) {
@@ -907,12 +1085,19 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       }
       turn.preBuffer = [];
 
+      // Approval quiescence uses a deadline that only THIS session's events
+      // reset — the subscription is server-global, and unrelated sessions'
+      // activity must not starve the phase-1 finish.
+      let quiescenceDeadline: number | undefined;
       while (!turn.state.finishEmitted) {
         let result: IteratorResult<V2Event> | "timeout";
         if (turn.outstandingApprovals.size > 0) {
-          result = await turn.reader.nextWithTimeout(
-            turn.approvalIdleTimeoutMs,
-          );
+          quiescenceDeadline ??= Date.now() + turn.approvalIdleTimeoutMs;
+          const remaining = quiescenceDeadline - Date.now();
+          result =
+            remaining > 0
+              ? await turn.reader.nextWithTimeout(remaining)
+              : "timeout";
           if (result === "timeout") {
             // Approval quiescence: the execution is blocked awaiting the
             // reply. Surface the blocked turn to the caller (phase 1).
@@ -920,15 +1105,33 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
             return;
           }
         } else {
-          result = await turn.reader.next();
+          quiescenceDeadline = undefined;
+          // Never wait unboundedly: an SSE connection that silently lost
+          // the terminal/idle events would hang the call forever. On
+          // silence, probe the session for a lost signal.
+          result = await turn.reader.nextWithTimeout(turn.silenceWatchdogMs);
+          if (result === "timeout") {
+            const settled = await this.probeSilentTurn(turn, push);
+            if (settled || turn.state.finishEmitted) {
+              return;
+            }
+            continue;
+          }
         }
         if (result.done) {
           push(finalizeV2Stream(turn.state));
           return;
         }
-        this.observeEvent(turn, result.value, push);
+        if (this.observeEvent(turn, result.value, push)) {
+          quiescenceDeadline = undefined;
+        }
       }
     } catch (error) {
+      if (turn.consumerCanceled) {
+        // The doStream consumer canceled: nobody is listening, server-side
+        // cleanup already ran from cancel(). End quietly.
+        return;
+      }
       if (isAbortError(error) || turn.callSignal?.aborted) {
         throw abortReason(turn.callSignal) ?? error;
       }
@@ -936,12 +1139,15 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     }
   }
 
-  /** Feed one event through orchestration tracking and the reducer. */
+  /**
+   * Feed one event through orchestration tracking and the reducer.
+   * Returns true when the event belongs to this turn's session.
+   */
   private observeEvent(
     turn: TurnContext,
     event: V2Event,
     push: (parts: LanguageModelV4StreamPart[]) => void,
-  ): void {
+  ): boolean {
     const sessionMatches = extractV2EventSessionId(event) === turn.sessionId;
     if (sessionMatches) {
       switch (event.type) {
@@ -980,6 +1186,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       // Hang-prevention backstop: idle without a terminal execution event.
       push(finalizeV2Stream(turn.state));
     }
+    return sessionMatches;
   }
 
   /**
@@ -1005,6 +1212,13 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       const outstanding = [...turn.outstandingApprovals];
       if (outstanding.length > 0) {
         opencode["approvalRequestId"] = outstanding[0]!;
+        opencode["approvalRequestIds"] = outstanding;
+      }
+      if (turn.repliedApprovalIds.length > 0) {
+        opencode["repliedApprovalIds"] = [...turn.repliedApprovalIds];
+      }
+      if (turn.state.handledForms.size > 0) {
+        opencode["formIds"] = [...turn.state.handledForms];
       }
       return { ...part, providerMetadata: { opencode } };
     }
@@ -1035,11 +1249,19 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
           `reconciling session ${turn.sessionId} from its message state.`,
       );
       try {
-        await this.reconcileFromMessages(turn, push);
-        if (!turn.state.finishEmitted) {
-          push(finalizeV2Stream(turn.state));
+        const outcome = await this.reconcileFromMessages(turn, push);
+        if (
+          outcome.blocked ||
+          outcome.messages > 0 ||
+          turn.state.stepCount > 0
+        ) {
+          if (!turn.state.finishEmitted) {
+            push(finalizeV2Stream(turn.state));
+          }
+          return;
         }
-        return;
+        // Nothing observed, nothing stored, no pending interaction: the
+        // failure stands — an empty "success" would mask a lost turn.
       } catch (reconcileError) {
         this.logger.warn(
           `Session reconciliation failed: ${extractErrorMessage(reconcileError)}`,
@@ -1054,41 +1276,211 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
   }
 
   /**
-   * Internal reconciliation: wait for the session to settle (best-effort),
-   * fetch its messages, and replay this turn's assistant messages through
-   * the reducer as synthesized terminal events. Already-streamed content
-   * reduces to nothing (the reducer is idempotent); missed content arrives
-   * as whole blocks.
+   * Internal reconciliation: surface interactions the stream may have lost
+   * (permission/form events are live-only — they never reach the durable
+   * log, so a blocked session has no terminal event to find), then wait for
+   * the session to settle (bounded, best-effort), fetch its messages, and
+   * replay this turn's assistant messages through the reducer as synthesized
+   * terminal events. Already-streamed content reduces to nothing (the
+   * reducer is idempotent); missed content arrives as whole blocks.
    */
   private async reconcileFromMessages(
+    turn: TurnContext,
+    push: (parts: LanguageModelV4StreamPart[]) => void,
+  ): Promise<{ blocked: boolean; messages: number }> {
+    await this.surfacePendingInteractions(turn, push);
+    if (turn.outstandingApprovals.size > 0) {
+      // The session is blocked on an approval: finalize as a phase-1 result
+      // (the caller's finalize surfaces the approval) — waiting would
+      // deadlock, the execution cannot settle until the reply.
+      return { blocked: true, messages: 0 };
+    }
+
+    await this.waitBounded(turn, turn.silenceWatchdogMs);
+
+    const messages = await this.fetchTurnMessages(turn);
+    this.replayStoredMessages(turn, messages, push);
+    return { blocked: false, messages: messages.length };
+  }
+
+  /**
+   * Poll `permission.list`/`form.list` for pending interactions this turn's
+   * event stream never delivered, and feed them through the reducer as
+   * synthesized events (its ID-based dedup makes re-observation a no-op).
+   * Best-effort: listing failures are logged and ignored.
+   */
+  private async surfacePendingInteractions(
     turn: TurnContext,
     push: (parts: LanguageModelV4StreamPart[]) => void,
   ): Promise<void> {
     const requestOptions = this.requestOptions(turn.headers, undefined);
     try {
-      await turn.port.session.wait(
+      const permissions = await turn.port.permission.list(
         { sessionID: turn.sessionId },
         requestOptions,
       );
-    } catch (waitError) {
-      // session.wait is a best-effort watchdog: current builds 503 it, and
-      // its unavailability must never fail the reconciliation.
+      for (const request of permissions) {
+        push(
+          convertV2EventToStreamParts(
+            synthesizePermissionAskedEvent(request),
+            turn.state,
+          ),
+        );
+      }
+    } catch (listError) {
       this.logger.debug?.(
-        `session.wait unavailable during reconciliation: ${extractErrorMessage(waitError)}`,
+        `permission.list unavailable during recovery: ${extractErrorMessage(listError)}`,
       );
     }
+    try {
+      const forms = await turn.port.form.list(
+        { sessionID: turn.sessionId },
+        requestOptions,
+      );
+      for (const form of forms) {
+        push(
+          convertV2EventToStreamParts(
+            synthesizeFormCreatedEvent(form),
+            turn.state,
+          ),
+        );
+      }
+    } catch (listError) {
+      this.logger.debug?.(
+        `form.list unavailable during recovery: ${extractErrorMessage(listError)}`,
+      );
+    }
+  }
 
+  /**
+   * Bounded `session.wait`: resolves "settled" when the session went idle,
+   * "unavailable" when the route failed (current builds 503 it), "timeout"
+   * when the bound elapsed first (the execution is plausibly still running).
+   * Never rejects and never leaves an unhandled rejection behind.
+   */
+  private async waitBounded(
+    turn: TurnContext,
+    boundMs: number,
+  ): Promise<"settled" | "unavailable" | "timeout"> {
+    // The dangling request (on timeout) is tied to the subscription's
+    // teardown, never to the (possibly aborted) call signal.
+    const signal = turn.subscription.signal.aborted
+      ? undefined
+      : turn.subscription.signal;
+    const wait = turn.port.session.wait(
+      { sessionID: turn.sessionId },
+      this.requestOptions(turn.headers, signal),
+    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const outcome = await Promise.race([
+      wait.then(
+        () => "settled" as const,
+        (waitError: unknown) => {
+          this.logger.debug?.(
+            `session.wait unavailable during recovery: ${extractErrorMessage(waitError)}`,
+          );
+          return "unavailable" as const;
+        },
+      ),
+      new Promise<"timeout">((resolve) => {
+        timer = setTimeout(() => resolve("timeout"), boundMs);
+      }),
+    ]);
+    clearTimeout(timer);
+    return outcome;
+  }
+
+  /** This turn's stored assistant messages, in creation order. */
+  private async fetchTurnMessages(
+    turn: TurnContext,
+  ): Promise<SessionMessageAssistant[]> {
     const response = await turn.port.message.list(
       { sessionID: turn.sessionId, order: "asc" },
-      requestOptions,
+      this.requestOptions(turn.headers, undefined),
     );
-    const messages = selectTurnAssistantMessages(response.data, turn);
+    return selectTurnAssistantMessages(response.data, turn);
+  }
+
+  /** Replay stored messages through the reducer as synthesized events. */
+  private replayStoredMessages(
+    turn: TurnContext,
+    messages: SessionMessageAssistant[],
+    push: (parts: LanguageModelV4StreamPart[]) => void,
+  ): void {
     const events = synthesizeReconciliationEvents(messages, turn);
     for (const event of events) {
       push(convertV2EventToStreamParts(event, turn.state));
       if (turn.state.finishEmitted) {
         break;
       }
+    }
+  }
+
+  /**
+   * Silence-watchdog probe: the stream produced nothing for the watchdog
+   * interval. Check for a lost blocked-state signal (pending
+   * permission/form) or a lost terminal (session settled, terminal event
+   * never arrived). Returns true when the turn was finalized; false keeps
+   * the pump listening (the execution is plausibly still running). Never
+   * throws.
+   */
+  private async probeSilentTurn(
+    turn: TurnContext,
+    push: (parts: LanguageModelV4StreamPart[]) => void,
+  ): Promise<boolean> {
+    try {
+      await this.surfacePendingInteractions(turn, push);
+      if (turn.state.finishEmitted) {
+        return true;
+      }
+      if (turn.outstandingApprovals.size > 0) {
+        // Blocked on an approval the stream never delivered: phase-1 finish.
+        push(finalizeV2Stream(turn.state));
+        return true;
+      }
+
+      const outcome = await this.waitBounded(turn, turn.silenceWatchdogMs);
+      if (outcome === "timeout") {
+        return false;
+      }
+      const messages = await this.fetchTurnMessages(turn);
+      if (outcome === "settled") {
+        this.logger.warn(
+          `Session ${turn.sessionId} settled but the event stream stayed ` +
+            "silent; finalizing from the message store.",
+        );
+        this.replayStoredMessages(turn, messages, push);
+        if (!turn.state.finishEmitted) {
+          push(finalizeV2Stream(turn.state));
+        }
+        return true;
+      }
+      // session.wait unavailable: finalize only on stored proof the turn
+      // concluded — a terminal finish or error on the last stored message.
+      const last = messages[messages.length - 1];
+      const concluded =
+        last !== undefined &&
+        (last.error !== undefined ||
+          (last.finish !== undefined &&
+            last.finish !== "tool-calls" &&
+            last.finish !== "unknown"));
+      if (!concluded) {
+        return false;
+      }
+      this.logger.warn(
+        `Session ${turn.sessionId} has a stored terminal state but the ` +
+          "event stream stayed silent; finalizing from the message store.",
+      );
+      this.replayStoredMessages(turn, messages, push);
+      if (!turn.state.finishEmitted) {
+        push(finalizeV2Stream(turn.state));
+      }
+      return true;
+    } catch (probeError) {
+      this.logger.debug?.(
+        `Silence probe failed: ${extractErrorMessage(probeError)}`,
+      );
+      return false;
     }
   }
 
@@ -1125,56 +1517,111 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       return;
     }
 
-    // Content: the reducer assembled it from deltas; if the stream produced
-    // no text at all but the stored messages have some, take the stored text.
-    const streamedText = aggregated.content.some(
-      (entry) => entry.type === "text" && entry.text.length > 0,
-    );
-    if (!streamedText) {
-      for (const message of messages) {
-        for (const entry of message.content) {
-          if (entry.type === "text" && entry.text.length > 0) {
-            aggregated.content.push({ type: "text", text: entry.text });
+    // Content: the reducer assembled it from deltas. Restore any stored
+    // block or tool call the stream never delivered — matched by the
+    // reducer's key scheme (`${messageId}:${kind}:${ordinal}` for blocks, a
+    // running ordinal over text+reasoning in array order; the v2 tool id for
+    // tools). Partially streamed blocks are left alone (the reducer's
+    // ended-event tail-fill is the recovery path for those).
+    for (const message of messages) {
+      let ordinal = 0;
+      for (const entry of message.content) {
+        if (entry.type === "text" || entry.type === "reasoning") {
+          const key = `${message.id}:${entry.type}:${ordinal}`;
+          ordinal += 1;
+          if (
+            entry.text.length > 0 &&
+            !aggregated.streamedBlockIds.has(key)
+          ) {
+            aggregated.content.push({ type: entry.type, text: entry.text });
           }
+          continue;
+        }
+        if (entry.type !== "tool") {
+          continue;
+        }
+        const state = entry.state;
+        if (
+          state.status === "streaming" ||
+          aggregated.streamedToolIds.has(entry.id)
+        ) {
+          // Streaming states carry only a partial input string — nothing
+          // safe to restore; streamed tools are already in the content.
+          continue;
+        }
+        const toolName = entry.name;
+        const providerExecuted = entry.executed ?? true;
+        aggregated.content.push({
+          type: "tool-call",
+          toolCallId: entry.id,
+          toolName,
+          input: JSON.stringify(state.input),
+          providerExecuted,
+          dynamic: true,
+        });
+        if (state.status === "completed") {
+          aggregated.content.push({
+            type: "tool-result",
+            toolCallId: entry.id,
+            toolName,
+            result: state.content as unknown as NonNullable<JSONValue>,
+            isError: false,
+            dynamic: true,
+          });
+        } else if (state.status === "error") {
+          aggregated.content.push({
+            type: "tool-result",
+            toolCallId: entry.id,
+            toolName,
+            result: {
+              error: state.error as unknown as JSONValue,
+              ...(state.content
+                ? { content: state.content as unknown as JSONValue }
+                : {}),
+            } as NonNullable<JSONValue>,
+            isError: true,
+            dynamic: true,
+          });
         }
       }
     }
 
-    // Usage/cost: step events are authoritative; message totals fill in when
-    // no step event was observed (per-message tokens equal the step's).
-    const usage = aggregated.usage;
-    const usageEmpty =
-      (usage.inputTokens.total ?? 0) === 0 &&
-      (usage.outputTokens.total ?? 0) === 0;
-    if (usageEmpty) {
-      let input = 0;
-      let output = 0;
-      let reasoning = 0;
-      let cacheRead = 0;
-      let cacheWrite = 0;
-      let sawTokens = false;
-      for (const message of messages) {
-        if (message.tokens) {
-          sawTokens = true;
-          input += message.tokens.input;
-          output += message.tokens.output;
-          reasoning += message.tokens.reasoning;
-          cacheRead += message.tokens.cache.read;
-          cacheWrite += message.tokens.cache.write;
-        }
+    // Usage/cost: step events are authoritative per step. Add message totals
+    // only for steps whose step.ended/failed was never observed (live or
+    // synthesized) — per-message tokens equal that step's.
+    let input = 0;
+    let output = 0;
+    let reasoning = 0;
+    let cacheRead = 0;
+    let cacheWrite = 0;
+    let sawTokens = false;
+    for (const message of messages) {
+      if (message.tokens && !turn.stepClosedMessageIds.has(message.id)) {
+        sawTokens = true;
+        input += message.tokens.input;
+        output += message.tokens.output;
+        reasoning += message.tokens.reasoning;
+        cacheRead += message.tokens.cache.read;
+        cacheWrite += message.tokens.cache.write;
       }
-      if (sawTokens) {
-        aggregated.usage = {
-          inputTokens: {
-            total: input + cacheRead + cacheWrite,
-            noCache: input,
-            cacheRead,
-            cacheWrite,
-          },
-          outputTokens: { total: output, text: undefined, reasoning },
-          ...(usage.raw !== undefined ? { raw: usage.raw } : {}),
-        };
-      }
+    }
+    if (sawTokens) {
+      const usage = aggregated.usage;
+      aggregated.usage = {
+        inputTokens: {
+          total:
+            (usage.inputTokens.total ?? 0) + input + cacheRead + cacheWrite,
+          noCache: (usage.inputTokens.noCache ?? 0) + input,
+          cacheRead: (usage.inputTokens.cacheRead ?? 0) + cacheRead,
+          cacheWrite: (usage.inputTokens.cacheWrite ?? 0) + cacheWrite,
+        },
+        outputTokens: {
+          total: (usage.outputTokens.total ?? 0) + output,
+          text: usage.outputTokens.text,
+          reasoning: (usage.outputTokens.reasoning ?? 0) + reasoning,
+        },
+        ...(usage.raw !== undefined ? { raw: usage.raw } : {}),
+      };
     }
 
     // Finish: prefer the streamed value; fall back to the last message's.
@@ -1194,20 +1641,30 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
   // --- abort ------------------------------------------------------------
 
   private registerAbortCleanup(turn: TurnContext): void {
-    turn.callSignal?.addEventListener(
-      "abort",
-      () => {
-        void this.abortServerSide(turn);
-        turn.subscription.abort();
-      },
-      { once: true },
-    );
+    const signal = turn.callSignal;
+    if (!signal) {
+      return;
+    }
+    const onAbort = (): void => {
+      void this.abortServerSide(turn);
+      turn.subscription.abort();
+    };
+    if (signal.aborted) {
+      // The signal fired while dispatch was in flight (a listener added now
+      // would never fire): run the cleanup immediately.
+      onAbort();
+      return;
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
   }
 
   /**
-   * Server-side abort: cancel the undelivered inbox item, else interrupt the
-   * running execution. Best-effort — the caller is leaving either way.
-   * Cleanup calls carry headers but never the (already aborted) call signal.
+   * Server-side abort: cancel the undelivered inbox item, falling back to
+   * interrupting the running execution (the `delivered` flag is client-side
+   * knowledge — the item may have been delivered in the window before its
+   * events were pumped, making the cancel fail). Best-effort — the caller
+   * is leaving either way. Cleanup calls carry headers but never the
+   * (already aborted) call signal.
    */
   private async abortServerSide(turn: TurnContext): Promise<void> {
     if (turn.abortHandled || turn.state.finishEmitted) {
@@ -1215,18 +1672,25 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     }
     turn.abortHandled = true;
     const requestOptions = this.requestOptions(turn.headers, undefined);
-    try {
-      if (turn.receipt && !turn.delivered) {
+    if (turn.receipt && !turn.delivered) {
+      try {
         await turn.port.session.inbox.cancel(
           { sessionID: turn.sessionId, inboxID: turn.receipt.id },
           requestOptions,
         );
-      } else {
-        await turn.port.session.interrupt(
-          { sessionID: turn.sessionId, continue: false },
-          requestOptions,
+        return;
+      } catch (cancelError) {
+        this.logger.warn(
+          `inbox.cancel failed for session ${turn.sessionId} ` +
+            `(${extractErrorMessage(cancelError)}); falling back to interrupt.`,
         );
       }
+    }
+    try {
+      await turn.port.session.interrupt(
+        { sessionID: turn.sessionId, continue: false },
+        requestOptions,
+      );
     } catch (error) {
       this.logger.warn(
         `Abort cleanup failed for session ${turn.sessionId}: ${extractErrorMessage(error)}`,
@@ -1237,9 +1701,12 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
   // --- forms ------------------------------------------------------------
 
   /**
-   * Ported v1 dedup/in-flight machinery keyed by form id: duplicates await
-   * the in-flight attempt, only terminal outcomes are recorded as handled,
-   * and failed attempts stay retryable for later duplicates.
+   * Ported v1 dedup/in-flight machinery keyed by form id — duplicates await
+   * the in-flight run and only terminal outcomes are recorded as handled —
+   * plus bounded in-model retries: the reducer hands each form to this
+   * callback at most once per turn (nothing redelivers it within the turn),
+   * so a transient reply/cancel failure must be retried here or the blocked
+   * execution hangs with no recovery path.
    */
   private async handleFormRequest(
     turn: TurnContext,
@@ -1250,7 +1717,10 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       return;
     }
 
-    while (!this.handledFormRequests.has(form.id)) {
+    for (;;) {
+      if (this.handledFormRequests.has(form.id)) {
+        return;
+      }
       const inFlight = this.inFlightFormRequests.get(form.id);
       if (!inFlight) {
         break;
@@ -1259,9 +1729,6 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         return;
       }
     }
-    if (this.handledFormRequests.has(form.id)) {
-      return;
-    }
     if (turn.callSignal?.aborted) {
       this.logger.debug?.(
         `Skipping OpenCode form ${form.id}: request aborted.`,
@@ -1269,17 +1736,46 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       return;
     }
 
-    const attempt = this.attemptFormResponse(turn, form);
-    this.inFlightFormRequests.set(form.id, attempt);
+    const run = this.runFormAttempts(turn, form);
+    this.inFlightFormRequests.set(form.id, run);
     try {
-      if (await attempt) {
-        this.handledFormRequests.add(form.id);
-      }
+      await run;
     } finally {
-      if (this.inFlightFormRequests.get(form.id) === attempt) {
+      if (this.inFlightFormRequests.get(form.id) === run) {
         this.inFlightFormRequests.delete(form.id);
       }
     }
+  }
+
+  /**
+   * Attempt to settle a form, retrying transient failures with backoff up
+   * to {@link MAX_FORM_ATTEMPTS}. Resolves true when terminally handled.
+   * An exhausted run leaves the form retryable for a durable redelivery
+   * (a later turn re-observing the still-pending form).
+   */
+  private async runFormAttempts(
+    turn: TurnContext,
+    form: FormCreated["data"]["form"],
+  ): Promise<boolean> {
+    for (let attempt = 1; attempt <= MAX_FORM_ATTEMPTS; attempt += 1) {
+      if (turn.callSignal?.aborted) {
+        return false;
+      }
+      if (attempt > 1) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, FORM_RETRY_BASE_DELAY_MS * (attempt - 1)),
+        );
+      }
+      if (await this.attemptFormResponse(turn, form)) {
+        this.handledFormRequests.add(form.id);
+        return true;
+      }
+    }
+    this.logger.warn(
+      `Form ${form.id} could not be settled after ${MAX_FORM_ATTEMPTS} ` +
+        "attempts; the execution may stay blocked on it.",
+    );
+    return false;
   }
 
   /**
@@ -1384,6 +1880,44 @@ function abortReason(signal: AbortSignal | undefined): Error | undefined {
   return reason instanceof Error ? reason : undefined;
 }
 
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(extractErrorMessage(error));
+}
+
+/**
+ * Busy-session rejection on the prompt route. The declared thrown union
+ * carries `ConflictError` (409) for a busy session; `SessionBusyError` is
+ * kept as a defensive alias (it exists in the tag union but is declared on
+ * other routes).
+ */
+function isPromptBusyError(error: unknown): boolean {
+  return isSessionBusyError(error) || isConflictError(error);
+}
+
+/**
+ * Synthesize a `permission.asked` event from a polled `PermissionRequest`
+ * (same data shape). The reducer's ID-based dedup makes re-observation of
+ * an already-surfaced request a no-op.
+ */
+function synthesizePermissionAskedEvent(request: PermissionRequest): V2Event {
+  return {
+    id: `probe_perm_${request.id}`,
+    created: Date.now(),
+    type: "permission.asked",
+    data: request,
+  } as V2Event;
+}
+
+/** Synthesize a `form.created` event from a polled `FormInfo`. */
+function synthesizeFormCreatedEvent(form: FormInfo): V2Event {
+  return {
+    id: `probe_form_${form.id}`,
+    created: Date.now(),
+    type: "form.created",
+    data: { form },
+  } as unknown as V2Event;
+}
+
 function nonRetryableError(message: string, operation: string): APICallError {
   return new APICallError({
     message,
@@ -1473,6 +2007,10 @@ interface AggregatedParts {
   providerMetadata: SharedV4ProviderMetadata | undefined;
   warnings: SharedV4Warning[];
   error: unknown | undefined;
+  /** Reducer block ids (`${messageId}:${kind}:${ordinal}`) seen in-stream. */
+  streamedBlockIds: Set<string>;
+  /** Tool call ids seen in-stream (calls or results). */
+  streamedToolIds: Set<string>;
 }
 
 const EMPTY_USAGE: LanguageModelV4Usage = {
@@ -1495,14 +2033,18 @@ function aggregateParts(parts: LanguageModelV4StreamPart[]): AggregatedParts {
     providerMetadata: undefined,
     warnings: [],
     error: undefined,
+    streamedBlockIds: new Set(),
+    streamedToolIds: new Set(),
   };
 
   for (const part of parts) {
     switch (part.type) {
       case "text-start":
+        aggregated.streamedBlockIds.add(part.id);
         blockIndex.set(part.id, content.push({ type: "text", text: "" }) - 1);
         break;
       case "reasoning-start":
+        aggregated.streamedBlockIds.add(part.id);
         blockIndex.set(
           part.id,
           content.push({ type: "reasoning", text: "" }) - 1,
@@ -1518,7 +2060,13 @@ function aggregateParts(parts: LanguageModelV4StreamPart[]): AggregatedParts {
         break;
       }
       case "tool-call":
+        aggregated.streamedToolIds.add(part.toolCallId);
+        content.push(part);
+        break;
       case "tool-result":
+        aggregated.streamedToolIds.add(part.toolCallId);
+        content.push(part);
+        break;
       case "tool-approval-request":
       case "file":
       case "reasoning-file":
@@ -1712,11 +2260,14 @@ function synthesizeReconciliationEvents(
     }
 
     // Step accounting, only when the live stream did not close this step
-    // (a synthesized step.ended would double-count observed usage).
+    // (a synthesized step.ended would double-count observed usage). The
+    // step is marked closed so later usage reconciliation (doGenerate's
+    // message pass) does not count it a second time either.
     if (
       message.finish !== undefined &&
       !turn.stepClosedMessageIds.has(message.id)
     ) {
+      turn.stepClosedMessageIds.add(message.id);
       events.push({
         ...envelope(),
         type: "session.step.ended",

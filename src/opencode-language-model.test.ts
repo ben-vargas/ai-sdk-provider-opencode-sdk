@@ -115,6 +115,10 @@ interface FakePortHooks {
   messages?: unknown[];
   models?: unknown[];
   waitError?: unknown;
+  /** Pending permission requests returned by permission.list. */
+  permissions?: unknown[];
+  /** Pending forms returned by form.list. */
+  forms?: unknown[];
 }
 
 interface FakePort {
@@ -235,7 +239,7 @@ function createFakePort(hooks: FakePortHooks = {}): FakePort {
       },
     },
     permission: {
-      list: fn("permission.list", () => []),
+      list: fn("permission.list", () => hooks.permissions ?? []),
       get: fn("permission.get", () => ({})),
       reply: (
         input: Record<string, unknown>,
@@ -247,7 +251,7 @@ function createFakePort(hooks: FakePortHooks = {}): FakePort {
       },
     },
     form: {
-      list: fn("form.list", () => []),
+      list: fn("form.list", () => hooks.forms ?? []),
       state: fn("form.state", () => ({ status: "pending" })),
       reply: fn("form.reply", () => undefined),
       cancel: fn("form.cancel", () => undefined),
@@ -609,6 +613,7 @@ describe("approvals: two-phase round-trip", () => {
     });
     const meta1 = phase1.providerMetadata?.opencode as Record<string, unknown>;
     expect(meta1["approvalRequestId"]).toBe("perm_1");
+    expect(meta1["approvalRequestIds"]).toEqual(["perm_1"]);
     expect(meta1["sessionId"]).toBe(SESSION_ID);
 
     // --- phase 2
@@ -680,6 +685,8 @@ describe("approvals: two-phase round-trip", () => {
       "text",
     ]);
     expect(phase2.finishReason).toEqual({ unified: "stop", raw: "stop" });
+    const meta2 = phase2.providerMetadata?.opencode as Record<string, unknown>;
+    expect(meta2["repliedApprovalIds"]).toEqual(["perm_1"]);
 
     // Replied approvals are deduped: a duplicate continuation call has
     // nothing to send and fails clearly instead of hanging.
@@ -737,6 +744,84 @@ describe("approvals: two-phase round-trip", () => {
     });
     expect(result.finishReason.unified).toBe("error");
   });
+
+  it("finishes phase 1 on quiescence despite unrelated global events", async () => {
+    const fake = createFakePort();
+    scriptBlockedTurn(fake);
+    const model = createModel(fake, {}, { approvalIdleTimeoutMs: 60 });
+
+    const promise = model.doGenerate(callOptions());
+    // Unrelated sessions keep the server-global subscription busy; only
+    // THIS session's silence may count toward the quiescence deadline.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const noise = setInterval(() => {
+      fake.emit({
+        id: "evt_noise",
+        created: Date.now(),
+        type: "session.idle",
+        data: { sessionID: "ses_other" },
+      } as V2Event);
+    }, 10);
+    try {
+      const result = await promise;
+      expect(
+        result.content.some(
+          (entry) => entry.type === "tool-approval-request",
+        ),
+      ).toBe(true);
+    } finally {
+      clearInterval(noise);
+    }
+  });
+
+  it("routes mixed-prompt approval replies to the approval's session, not the turn's", async () => {
+    const fake = createFakePort();
+    scriptBlockedTurn(fake);
+    const model = createModel(fake, {}, { approvalIdleTimeoutMs: 25 });
+    await model.doGenerate(callOptions()); // phase 1 blocks SESSION_ID
+
+    // Mixed continuation (approval + new user content) targeting a
+    // different caller-managed session via the escape hatch.
+    fake.hooks.onPrompt = () => {
+      const ev = eventFactory("ses_other");
+      fake.emit(
+        ev.stepStarted("msg_z"),
+        ev.textStarted("msg_z", 0),
+        ev.textEnded("msg_z", 0, "ok"),
+        ev.stepEnded("msg_z", "stop", tokens(1, 1), 0),
+        ev.executionSucceeded(),
+      );
+    };
+    const mixedPrompt: LanguageModelV4Prompt = [
+      ...userPrompt("Hi"),
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-approval-response",
+            approvalId: "perm_1",
+            approved: true,
+          },
+        ],
+      },
+      ...userPrompt("Also do this"),
+    ];
+    await model.doGenerate(
+      callOptions({
+        prompt: mixedPrompt,
+        providerOptions: { opencode: { sessionId: "ses_other" } },
+      }),
+    );
+
+    // The reply lands on the blocked session; the prompt on the turn's.
+    expect(fake.callsFor("permission.reply")[0]!.input).toMatchObject({
+      sessionID: SESSION_ID,
+      requestID: "perm_1",
+    });
+    expect(fake.callsFor("session.prompt")[1]!.input).toMatchObject({
+      sessionID: "ses_other",
+    });
+  });
 });
 
 describe("forms", () => {
@@ -761,7 +846,9 @@ describe("forms", () => {
     };
     const model = createModel(fake, { onForm });
 
-    await model.doGenerate(callOptions());
+    const result = await model.doGenerate(callOptions());
+    const meta = result.providerMetadata?.opencode as Record<string, unknown>;
+    expect(meta["formIds"]).toEqual(["form_1"]);
     await vi.waitFor(() => {
       expect(fake.callsFor("form.reply").length).toBe(1);
     });
@@ -826,6 +913,52 @@ describe("forms", () => {
     await vi.waitFor(() => {
       expect(fake.callsFor("form.cancel").length).toBe(1);
     });
+  });
+
+  it("retries a transiently failing form reply within the turn", async () => {
+    const fake = createFakePort();
+    // Nothing redelivers a form within a turn: a transient reply failure
+    // must be retried by the model's own machinery.
+    let replyAttempts = 0;
+    (fake.port.form as { reply: unknown }).reply = (
+      input: unknown,
+      options?: OpencodeRequestOptions,
+    ) => {
+      fake.calls.push({ method: "form.reply", input, options });
+      replyAttempts += 1;
+      return replyAttempts === 1
+        ? Promise.reject({
+            name: "ClientError",
+            reason: "Transport",
+            message: "blip",
+            cause: new Error("blip"),
+          })
+        : Promise.resolve(undefined);
+    };
+    fake.hooks.onPrompt = () => {
+      const ev = eventFactory(SESSION_ID);
+      fake.emit(
+        ev.stepStarted("msg_a"),
+        ev.formCreated("form_r", "Pick", [
+          { key: "x", type: "string", title: "X" },
+        ]),
+        ev.textStarted("msg_a", 0),
+        ev.textEnded("msg_a", 0, "ok"),
+        ev.stepEnded("msg_a", "stop", tokens(1, 1), 0),
+        ev.executionSucceeded(),
+      );
+    };
+    const model = createModel(fake, {
+      onForm: vi.fn().mockResolvedValue({ type: "answer", answer: { x: "y" } }),
+    });
+
+    await model.doGenerate(callOptions());
+    await vi.waitFor(
+      () => {
+        expect(fake.callsFor("form.reply").length).toBe(2);
+      },
+      { timeout: 2000 },
+    );
   });
 
   it("leaves the form pending under formPolicy 'wait' with no handler", async () => {
@@ -920,6 +1053,59 @@ describe("abort", () => {
     await reader.cancel().catch(() => undefined);
   });
 
+  it("falls back to interrupt when inbox.cancel fails", async () => {
+    const fake = createFakePort();
+    fake.hooks.onPrompt = () => {
+      // No events: undelivered from the client's point of view — but the
+      // item may have been delivered in the unobserved window.
+    };
+    (fake.port.session.inbox as { cancel: unknown }).cancel = (
+      input: unknown,
+      options?: OpencodeRequestOptions,
+    ) => {
+      fake.calls.push({ method: "session.inbox.cancel", input, options });
+      return Promise.reject({
+        _tag: "InvalidRequestError",
+        message: "already delivered",
+      });
+    };
+    const controller = new AbortController();
+    const model = createModel(fake);
+
+    const result = await model.doStream(
+      callOptions({ abortSignal: controller.signal }),
+    );
+    const consumed = collectStream(result).catch((error: unknown) => error);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    controller.abort();
+
+    await vi.waitFor(() => {
+      expect(fake.callsFor("session.interrupt").length).toBe(1);
+    });
+    expect(fake.callsFor("session.inbox.cancel").length).toBe(1);
+    await consumed;
+  });
+
+  it("runs server-side cleanup when the signal fires during dispatch", async () => {
+    const controller = new AbortController();
+    const fake = createFakePort({
+      promptError: () => {
+        controller.abort();
+        return { name: "AbortError", message: "aborted" };
+      },
+    });
+    const model = createModel(fake);
+
+    await expect(
+      model.doGenerate(callOptions({ abortSignal: controller.signal })),
+    ).rejects.toThrow();
+    // No receipt exists, so cleanup interrupts the session (the prompt may
+    // still have reached the server).
+    await vi.waitFor(() => {
+      expect(fake.callsFor("session.interrupt").length).toBe(1);
+    });
+  });
+
   it("throws immediately when the signal is already aborted", async () => {
     const fake = createFakePort();
     const controller = new AbortController();
@@ -973,6 +1159,52 @@ describe("busy sessions", () => {
       }),
     });
     const model = createModel(fake, { delivery: "steer" });
+
+    const error = await model
+      .doGenerate(callOptions())
+      .catch((caught: unknown) => caught);
+    expect(APICallError.isInstance(error)).toBe(true);
+    expect((error as APICallError).isRetryable).toBe(false);
+    expect(fake.callsFor("session.prompt").length).toBe(2);
+  });
+
+  it("retries once on ConflictError under the default 'queue' delivery", async () => {
+    // The prompt route's declared thrown union carries ConflictError (409)
+    // for a busy session, not SessionBusyError; and the retry must run even
+    // when the original delivery was already the provider default "queue".
+    const fake = createFakePort({
+      promptError: (attempt) =>
+        attempt === 1 ? { _tag: "ConflictError", message: "conflict" } : undefined,
+    });
+    const model = createModel(fake);
+    fake.hooks.onPrompt = () => {
+      const ev = eventFactory(SESSION_ID);
+      fake.emit(
+        ev.stepStarted("msg_a"),
+        ev.textStarted("msg_a", 0),
+        ev.textEnded("msg_a", 0, "ok"),
+        ev.stepEnded("msg_a", "stop", tokens(1, 1), 0),
+        ev.executionSucceeded(),
+      );
+    };
+
+    const result = await model.doGenerate(callOptions());
+    const prompts = fake.callsFor("session.prompt");
+    expect(prompts.length).toBe(2);
+    expect((prompts[0]!.input as Record<string, unknown>)["delivery"]).toBe(
+      "queue",
+    );
+    expect((prompts[1]!.input as Record<string, unknown>)["delivery"]).toBe(
+      "queue",
+    );
+    expect(result.finishReason.unified).toBe("stop");
+  });
+
+  it("surfaces a persistent ConflictError non-retryable after the queue retry", async () => {
+    const fake = createFakePort({
+      promptError: () => ({ _tag: "ConflictError", message: "conflict" }),
+    });
+    const model = createModel(fake);
 
     const error = await model
       .doGenerate(callOptions())
@@ -1290,5 +1522,222 @@ describe("session modes and provider options", () => {
     expect(APICallError.isInstance(error)).toBe(true);
     expect((error as APICallError).isRetryable).toBe(false);
     expect(fake.callsFor("session.create")).toEqual([]);
+  });
+});
+
+describe("turn serialization", () => {
+  it("serializes concurrent calls on one instance (no session-create race, no cross-talk)", async () => {
+    const fake = createFakePort();
+    scriptTextTurn(fake);
+    const model = createModel(fake);
+
+    const [first, second] = await Promise.all([
+      model.doGenerate(callOptions()),
+      model.doGenerate(callOptions()),
+    ]);
+
+    // Without serialization both initial calls race session.create and both
+    // pumps read the same session's events.
+    expect(fake.callsFor("session.create").length).toBe(1);
+    expect(fake.callsFor("session.prompt").length).toBe(2);
+    expect(first.finishReason.unified).toBe("stop");
+    expect(second.finishReason.unified).toBe("stop");
+  });
+});
+
+describe("dispatch-failure reconciliation", () => {
+  it("reconciles an uncertain prompt delivery through the session instead of rethrowing", async () => {
+    const fake = createFakePort({
+      promptError: () => ({
+        name: "ClientError",
+        reason: "Transport",
+        message: "socket hang up",
+        cause: new Error("hang"),
+      }),
+      messages: [
+        {
+          id: "msg_a",
+          type: "assistant",
+          time: { created: Date.now() + 10_000 },
+          agent: "default",
+          model: { id: "test-model", providerID: "test-provider" },
+          content: [{ type: "text", text: "Made it anyway" }],
+          finish: "stop",
+          cost: 0.01,
+          tokens: tokens(7, 3, 0, 0, 0),
+        },
+      ],
+    });
+    const model = createModel(fake);
+
+    const result = await model.doGenerate(callOptions());
+    expect(result.content).toEqual([{ type: "text", text: "Made it anyway" }]);
+    expect(result.finishReason).toEqual({ unified: "stop", raw: "stop" });
+    // Never retried the prompt itself, reconciled instead.
+    expect(fake.callsFor("session.prompt").length).toBe(1);
+    expect(fake.callsFor("message.list").length).toBeGreaterThan(0);
+  });
+
+  it("degrades to a non-retryable error when nothing was dispatched or stored", async () => {
+    const fake = createFakePort({
+      promptError: () => ({
+        name: "ClientError",
+        reason: "Transport",
+        message: "socket hang up",
+        cause: new Error("hang"),
+      }),
+      messages: [],
+    });
+    const model = createModel(fake);
+
+    const error = await model
+      .doGenerate(callOptions())
+      .catch((caught: unknown) => caught);
+    expect(APICallError.isInstance(error)).toBe(true);
+    expect((error as APICallError).isRetryable).toBe(false);
+  });
+});
+
+describe("silence watchdog", () => {
+  it("finalizes from the message store when the stream goes silent after the session settled", async () => {
+    const fake = createFakePort({
+      messages: [
+        {
+          id: "msg_a",
+          type: "assistant",
+          time: { created: Date.now() + 10_000 },
+          agent: "default",
+          model: { id: "test-model", providerID: "test-provider" },
+          content: [{ type: "text", text: "Hello world" }],
+          finish: "stop",
+          cost: 0.02,
+          tokens: tokens(10, 5, 0, 0, 0),
+        },
+      ],
+    });
+    fake.hooks.onPrompt = () => {
+      const ev = eventFactory(SESSION_ID);
+      // The stream loses everything after step start — no terminal, no idle.
+      fake.emit(ev.executionStarted(), ev.stepStarted("msg_a"));
+    };
+    const model = createModel(fake, {}, { silenceWatchdogMs: 20 });
+
+    const result = await model.doGenerate(callOptions());
+    expect(result.content).toEqual([{ type: "text", text: "Hello world" }]);
+    expect(result.finishReason).toEqual({ unified: "stop", raw: "stop" });
+    expect(result.usage.inputTokens.total).toBe(10);
+    expect(fake.callsFor("permission.list").length).toBeGreaterThan(0);
+    expect(fake.callsFor("form.list").length).toBeGreaterThan(0);
+    expect(fake.callsFor("session.wait").length).toBeGreaterThan(0);
+  });
+
+  it("surfaces a pending permission the stream never delivered (phase-1 finish)", async () => {
+    const fake = createFakePort({
+      permissions: [
+        {
+          id: "perm_9",
+          sessionID: SESSION_ID,
+          action: "fs.write",
+          resources: ["/x"],
+        },
+      ],
+    });
+    fake.hooks.onPrompt = () => {
+      const ev = eventFactory(SESSION_ID);
+      fake.emit(ev.executionStarted(), ev.stepStarted("msg_a"));
+    };
+    const model = createModel(fake, {}, { silenceWatchdogMs: 20 });
+
+    const result = await model.doGenerate(callOptions());
+    const approval = result.content.find(
+      (entry) => entry.type === "tool-approval-request",
+    );
+    expect(approval).toMatchObject({ approvalId: "perm_9" });
+    const meta = result.providerMetadata?.opencode as Record<string, unknown>;
+    expect(meta["approvalRequestId"]).toBe("perm_9");
+  });
+});
+
+describe("doGenerate message reconciliation", () => {
+  it("restores reasoning, tool calls/results, and usage the stream lost", async () => {
+    const fake = createFakePort({
+      messages: [
+        {
+          id: "msg_a",
+          type: "assistant",
+          time: { created: Date.now() + 10_000 },
+          agent: "default",
+          model: { id: "test-model", providerID: "test-provider" },
+          content: [
+            { type: "reasoning", text: "thinking…" },
+            {
+              type: "tool",
+              id: "tool_1",
+              name: "bash",
+              executed: true,
+              state: {
+                status: "completed",
+                input: { cmd: "ls" },
+                content: [{ type: "text", text: "files" }],
+              },
+            },
+            { type: "text", text: "Done." },
+          ],
+          finish: "stop",
+          cost: 0.02,
+          tokens: tokens(12, 6, 2, 0, 0),
+        },
+      ],
+    });
+    fake.hooks.onPrompt = () => {
+      const ev = eventFactory(SESSION_ID);
+      // Partial SSE loss: only the terminal made it through.
+      fake.emit(
+        ev.executionStarted(),
+        ev.stepStarted("msg_a"),
+        ev.executionSucceeded(),
+      );
+    };
+    const model = createModel(fake);
+
+    const result = await model.doGenerate(callOptions());
+    expect(result.content).toEqual(
+      expect.arrayContaining([
+        { type: "reasoning", text: "thinking…" },
+        { type: "text", text: "Done." },
+        expect.objectContaining({ type: "tool-call", toolCallId: "tool_1" }),
+        expect.objectContaining({
+          type: "tool-result",
+          toolCallId: "tool_1",
+          isError: false,
+        }),
+      ]),
+    );
+    expect(result.usage.inputTokens.total).toBe(12);
+    expect(result.usage.outputTokens.total).toBe(6);
+    expect(result.usage.outputTokens.reasoning).toBe(2);
+  });
+});
+
+describe("unsupported tools", () => {
+  it("warns when caller-defined tools or toolChoice are supplied", async () => {
+    const fake = createFakePort();
+    scriptTextTurn(fake);
+    const model = createModel(fake);
+
+    const result = await model.doGenerate(
+      callOptions({
+        tools: [
+          { type: "function", name: "myTool", inputSchema: {} },
+        ] as LanguageModelV4CallOptions["tools"],
+      }),
+    );
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.type === "other" &&
+          warning.message.includes("Custom tool definitions"),
+      ),
+    ).toBe(true);
   });
 });

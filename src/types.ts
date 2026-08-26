@@ -409,8 +409,14 @@ export interface OpencodeProviderMetadata {
     messageId?: string;
     /** Inbox receipt ID returned by `session.prompt`. */
     inboxId?: string;
-    /** Pending tool-approval request ID, when the turn is blocked on one. */
+    /** First pending tool-approval request ID, when the turn is blocked. */
     approvalRequestId?: string;
+    /** Every pending tool-approval request ID, when the turn is blocked. */
+    approvalRequestIds?: string[];
+    /** Approval request IDs replied during this turn (phase-2 calls). */
+    repliedApprovalIds?: string[];
+    /** Form IDs surfaced (and answered/cancelled) during this turn. */
+    formIds?: string[];
     /** Native finish value before AI SDK normalization. */
     finish?: OpencodeFinish;
     /** Provider-raw finish string, when the server reports one. */
