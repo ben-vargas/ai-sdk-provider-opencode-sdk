@@ -29,7 +29,11 @@
  *
  * Environment overrides:
  *   - `OPENCODE_BETA_URL` + `OPENCODE_BETA_PASSWORD`: use an already-running
- *     v2 server instead of spawning one (fast iteration).
+ *     v2 server instead of spawning one (fast iteration). Independent of
+ *     every local launcher — it resolves neither the devDependency binary
+ *     nor the source checkout, so attach mode works on a machine that has
+ *     neither. Tests that spawn a server variant of their own skip unless a
+ *     local binary happens to be installed.
  *   - `OPENCODE_BETA_SANDBOX_DIR`: sandbox root for XDG homes + workdir
  *     (default `$TMPDIR/opencode-beta-sandbox` — deliberately outside the
  *     real home so upward config discovery cannot reach it).
@@ -389,30 +393,43 @@ export async function startBetaServer(): Promise<BetaServerHandle> {
   const workdir = join(sandboxRoot, "workdir");
   await mkdir(workdir, { recursive: true });
 
-  // Opt-in source fallback; the published binary is the default.
-  const sourceDir = process.env.OPENCODE_BETA_SRC_DIR;
-  const serveCommand: ServeCommand =
-    sourceDir === undefined
-      ? { command: resolveOpencode2(), args: [] }
-      : sourceServeCommand(sourceDir);
-
-  // Attach mode: an external server was provided.
+  // Attach mode: an external server was provided. Resolved FIRST, and
+  // without touching any local launcher — the whole point of this path is a
+  // server that is already running, so requiring the devDependency (or
+  // worse, cloning and installing the source fallback) would defeat it.
   const externalUrl = process.env.OPENCODE_BETA_URL;
   if (externalUrl !== undefined) {
     const authHeader = basicAuthHeader(
       process.env.OPENCODE_BETA_PASSWORD ?? "",
     );
     await waitForHealth(externalUrl, authHeader);
+    // Only for the few tests that spawn a server variant of their own
+    // (e.g. `serve --service`); when no local binary is installed they skip
+    // rather than fail, because attach mode does not require one.
+    const localLauncher = ((): ServeCommand | undefined => {
+      try {
+        return { command: resolveOpencode2(), args: [] };
+      } catch {
+        return undefined;
+      }
+    })();
     return {
       baseUrl: externalUrl,
       authHeader,
       workdir,
       authAvailable: true,
       defaultModel: await fetchDefaultModel(externalUrl, authHeader),
-      serveCommand,
+      ...(localLauncher !== undefined ? { serveCommand: localLauncher } : {}),
       stop: async () => {},
     };
   }
+
+  // Opt-in source fallback; the published binary is the default.
+  const sourceDir = process.env.OPENCODE_BETA_SRC_DIR;
+  const serveCommand: ServeCommand =
+    sourceDir === undefined
+      ? { command: resolveOpencode2(), args: [] }
+      : sourceServeCommand(sourceDir);
 
   const dataHome = join(sandboxRoot, "data");
   const stateHome = join(sandboxRoot, "state");
