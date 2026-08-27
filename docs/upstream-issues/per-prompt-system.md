@@ -20,17 +20,17 @@ Against `opencode2@0.0.0-beta-18286` with the matching client
 (`spike/14b-instruction-entries.mjs`, raw capture in
 `spike/artifacts/14b-instruction-entries.json`):
 
-| Behaviour                                                         | Result |
-| ----------------------------------------------------------------- | ------ |
-| `entry.put` / `entry.list` / `entry.remove` round-trip            | works  |
-| Entry set before the first prompt reaches the model               | yes    |
-| Still applies on turn 2 of the same session                       | yes    |
-| Entry put **mid-session** applies from the next turn              | yes    |
-| A mid-session put announces a durable `system` message            | yes    |
-| `entry.remove` stops the instruction applying                     | yes    |
-| Key grammar `^[a-z0-9][a-z0-9._-]*$` enforced                     | yes    |
-| Value cap 8192 bytes, measured on the **JSON encoding**           | yes    |
-| An entry instruction overrides default agent formatting behaviour | yes    |
+| Behaviour                                               | Result                                                                                |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `entry.put` / `entry.list` / `entry.remove` round-trip  | works                                                                                 |
+| Entry set before the first prompt reaches the model     | yes                                                                                   |
+| Still applies on turn 2 of the same session             | yes                                                                                   |
+| Entry put **mid-session** applies on a later turn       | observed, but not in the committed capture (its follow-up turns timed out under load) |
+| A mid-session put announces a durable `system` message  | yes                                                                                   |
+| `entry.remove` stops the instruction applying           | yes                                                                                   |
+| Key grammar `^[a-z0-9][a-z0-9._-]*$` enforced           | yes                                                                                   |
+| Value cap 8192 bytes, measured on the **JSON encoding** | yes                                                                                   |
+| An entry overrides the agent's own system prompt        | **not established** — see below                                                       |
 
 The rendered form observed on the announcing system message is
 
@@ -41,6 +41,14 @@ The rendered form observed on the announcing system message is
 ```
 
 with `description: "Instructions updated: api/ai-sdk.system"`.
+
+One packaging note found while building that probe, in case it is
+unintentional: a config-defined `agent.<name>.system` string is surfaced as
+`Agent.Info.request.body.system` — a provider request-body override, which
+the OpenAI-compatible model package drops — so the agent never receives it.
+The same prompt written as the body of
+`$XDG_CONFIG_HOME/opencode/agent/<name>.md` populates `Agent.Info.system` and
+does reach the model.
 
 The remove test was designed to exclude transcript contamination: the entry
 was put **and removed before the session was ever prompted**, so the model
@@ -54,7 +62,13 @@ a behaviour we are relying on by observation rather than by contract:
 
 1. **Role and precedence.** Entries appear to join the instruction baseline
    _after_ the agent's own system prompt. Is that ordering guaranteed? Can an
-   entry override agent instructions, or is that incidental?
+   entry override agent instructions, or is that incidental? We could not
+   settle this by observation: a two-arm probe (an agent carrying a
+   contradicting formatting rule, run with and without a contesting entry)
+   showed the agent's rule being followed in the control arm, but the
+   contested arm did not produce a usable answer, so we have no evidence
+   either way in a reproducible capture. This is the guarantee we would most
+   like written down rather than inferred.
 2. **Compaction.** Do entries survive compaction — are they re-rendered into
    the compacted context, or can a long session silently lose them? This is
    the one we most need and could not practically test.

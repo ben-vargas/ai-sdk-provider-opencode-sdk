@@ -16,13 +16,16 @@
  * (spike/14b-instruction-entries.mjs → spike/artifacts/14b-instruction-entries.json):
  *   - a put before the first prompt is honoured on turn 1 and still honoured
  *     on turn 2 (E2/E3),
- *   - a put made mid-session takes effect on the next turn and announces
- *     itself as a durable `system` message whose text is the rendered
- *     `<context …>` block (E4),
+ *   - a put made mid-session announces itself as a durable `system` message
+ *     whose text is the rendered `<context …>` block (E4; the committed
+ *     capture's follow-up turns timed out under load, so which later turn
+ *     first obeys it is recorded there as unmeasured),
  *   - `remove` drops the entry from `list` and the instruction stops
  *     applying (E1/E5),
- *   - an entry instruction overrides default agent formatting behaviour
- *     (E7),
+ *   - whether an entry outranks the agent's own system prompt is **not**
+ *     established: E7's contested arm was inconclusive (see the probe
+ *     corrections in docs/v2-spike-findings.md); the ordering the source
+ *     suggests is undocumented upstream,
  *   - keys must match {@link INSTRUCTION_KEY_PATTERN}; uppercase, empty and
  *     leading `_`/`.` keys are rejected (E6),
  *   - values are capped at {@link INSTRUCTION_VALUE_MAX_BYTES} bytes

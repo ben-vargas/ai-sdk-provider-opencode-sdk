@@ -451,21 +451,21 @@ Two operational facts worth stating plainly:
 Every row was re-run against `opencode2`; the "previous evidence" column says
 where the earlier answer came from.
 
-| Behaviour                                        | Previous evidence            | opencode2 verdict                                                                                                         | Shipped default affected?                                 |
-| ------------------------------------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| Binary/client/server build pairing               | n/a (new)                    | **Confirmed** — all three read `0.0.0-beta-18286`                                                                         | No                                                        |
-| Server default `delivery` when omitted           | dev CLI, then source         | **Confirmed** — receipt says `delivery:"steer"`                                                                           | No — provider sends explicit `"queue"`                    |
-| `receipt.id` equals the stored user message id   | source build                 | **Confirmed** — `userMessageIdEqualsReceiptId: true`                                                                      | No — correlation logic unchanged                          |
-| `session.wait` on an **idle** session            | source build                 | **Confirmed** — resolves immediately                                                                                      | No                                                        |
-| `session.wait` on a **busy** session             | source build                 | **Confirmed with a correction** — resolves _coincident with_ turn completion, not reliably before or after it (see below) | No — wait stays a watchdog, not a turn-completion signal  |
-| Prompting a busy session with delivery omitted   | dev CLI, then source         | **Confirmed** — accepted, receipt `delivery:"steer"`                                                                      | No                                                        |
-| Prompting a busy session with `delivery:"queue"` | dev CLI, then source         | **Confirmed** — accepted; all three turns drain                                                                           | No                                                        |
-| `migration.v1.status`                            | embedded host                | **Confirmed** — `{status: "completed"}`                                                                                   | No                                                        |
-| `session.log` catch-up from `after: 0`           | source build                 | **Confirmed** — yields the `log.synced` sentinel only                                                                     | No                                                        |
-| File ingestion: `data:` URI                      | dev CLI, then source         | **Confirmed** — model answers "Red"; receipt stores `source: {type: "inline"}`                                            | No                                                        |
-| File ingestion: `file:` URI                      | source build                 | **Confirmed** — model answers "Red"; the server reads the file and stores `source: {type: "uri", uri}` with bytes inlined | No — the `data:`-only preflight is deliberate (ledger #9) |
-| File ingestion: bare absolute path               | source build                 | **Confirmed** — rejected **at prompt time**: `Invalid attachment URI: /…/red-square.png`                                  | No                                                        |
-| `session.instructions.entry.*`                   | **unimplemented** everywhere | **Contradicted — the route works.** See below; this one _did_ change a shipped default                                    | **Yes** — real system prompts shipped                     |
+| Behaviour                                        | Previous evidence            | opencode2 verdict                                                                                                                                                                                                                                                        | Shipped default affected?                                 |
+| ------------------------------------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------- |
+| Binary/client/server build pairing               | n/a (new)                    | **Confirmed** — all three read `0.0.0-beta-18286`                                                                                                                                                                                                                        | No                                                        |
+| Server default `delivery` when omitted           | dev CLI, then source         | **Confirmed** — receipt says `delivery:"steer"`                                                                                                                                                                                                                          | No — provider sends explicit `"queue"`                    |
+| `receipt.id` equals the stored user message id   | source build                 | **Confirmed** — `userMessageIdEqualsReceiptId: true`                                                                                                                                                                                                                     | No — correlation logic unchanged                          |
+| `session.wait` on an **idle** session            | source build                 | **Confirmed** — resolves immediately                                                                                                                                                                                                                                     | No                                                        |
+| `session.wait` on a **busy** session             | source build                 | **Unsettled** — the two stage-9 captures disagreed by 3 ms, and the post-review re-run timed the race out at 300 s while the turn ran ~317 s, so it observed no ordering at all (see below)                                                                              | No — wait stays a watchdog, not a turn-completion signal  |
+| Prompting a busy session with delivery omitted   | dev CLI, then source         | **Confirmed** — accepted, receipt `delivery:"steer"`                                                                                                                                                                                                                     | No                                                        |
+| Prompting a busy session with `delivery:"queue"` | dev CLI, then source         | **Confirmed with a correction** — accepted, and the queued turn does drain, but far later than the probe's window: the corrected predicate recorded `queuedAnswered: false` at 420 s and a follow-up query on the same session minutes later found the reply (see below) | No                                                        |
+| `migration.v1.status`                            | embedded host                | **Confirmed** — `{status: "completed"}`                                                                                                                                                                                                                                  | No                                                        |
+| `session.log` catch-up from `after: 0`           | source build                 | **Confirmed** — yields the `log.synced` sentinel only                                                                                                                                                                                                                    | No                                                        |
+| File ingestion: `data:` URI                      | dev CLI, then source         | **Confirmed** — model answers "Red"; receipt stores `source: {type: "inline"}`                                                                                                                                                                                           | No                                                        |
+| File ingestion: `file:` URI                      | source build                 | **Confirmed** — model answers "Red"; the server reads the file and stores `source: {type: "uri", uri}` with bytes inlined                                                                                                                                                | No — the `data:`-only preflight is deliberate (ledger #9) |
+| File ingestion: bare absolute path               | source build                 | **Confirmed** — rejected **at prompt time**: `Invalid attachment URI: /…/red-square.png`                                                                                                                                                                                 | No                                                        |
+| `session.instructions.entry.*`                   | **unimplemented** everywhere | **Contradicted — the route works.** See below; this one _did_ change a shipped default                                                                                                                                                                                   | **Yes** — real system prompts shipped                     |
 
 ### `session.wait` on a busy session: coincident, not ordered
 
@@ -483,6 +483,84 @@ This changes no shipped behaviour — the provider already treats
 `session.wait` as a watchdog raced against event-driven completion rather
 than as the completion signal (deferred-ledger item 1). It does mean the
 earlier `false` should not have been recorded as a property.
+
+The post-review re-run made the same point a third way and exposed a probe
+bug behind it. Under load the story turn ran ~317 s, the `wait` race lost to
+its 300 s timeout, and the artifact still reported
+`waitResolvedBeforeExecutionSucceeded: true` — because the flag compared the
+timestamp of a race that had _timed out_, not of a wait that resolved. The
+probe now records `waitResolved` and only computes the ordering flag when
+`wait` actually resolved; the committed capture
+(`14-opencode2-verification.json`, `waitBusy: "timeout-300s"`) predates that
+change, so read its `true` as "not observed", not as an ordering.
+
+### Probe corrections after the cross-model review (2026-08-27)
+
+A cross-model review panel found two stage-9 probes that could not support
+the conclusions drawn from them. Both were rewritten and re-run; the
+verdicts above are the corrected ones.
+
+**The busy/queue probe declared success too early.** It settled on
+`users.length >= 3 && assistants.length >= 2` — two assistant replies for
+three prompts, which the original and steered turns satisfy on their own. So
+`timedOut: false` was recorded with the `QUEUED` user message still
+unanswered, and the table read "all three turns drain". The predicate now
+anchors on the queued message's own position and requires a finished
+assistant _after_ it. Re-run under load, the corrected probe recorded
+`queuedAnswered: false` at its 420 s deadline; a follow-up query on the same
+session minutes later found the queued turn completed with the expected
+`QUEUED` reply. So the original claim is true, but the drain is much slower
+than any window stage 9 used — the script's deadline is now 900 s, which the
+committed capture predates.
+
+**E7 did not test precedence.** It planted an instruction entry, saw the
+model follow it, and concluded the entry outranks the agent prompt — but
+there was no conflicting agent instruction and no no-entry control, so it
+proved only what E2 already proves: the entry reaches the model. The probe
+now runs two arms on an agent that carries a contradicting formatting rule
+of its own: a control (no entry) that must show the agent's rule being
+followed, and a contested arm (entry present) that shows which rule wins.
+
+Getting that agent required a finding of its own: a config-defined
+`agent.<name>.system` string lands in `Agent.Info.request.body.system` — a
+provider request-body override that the OpenAI-compatible model package
+drops — and never reaches the model. Four control turns across three models
+ignored it. An agent defined as `$XDG_CONFIG_HOME/opencode/agent/<name>.md`
+populates `Agent.Info.system` instead, and that one does reach the model.
+
+**E7's verdict is INCONCLUSIVE.** In the committed capture
+(`14b-instruction-entries.json`) the control arm obeyed the agent's rule
+(`agentPromptEffective: true`, reply prefixed `AGENT:`), so the conflict was
+real and set up correctly — but the contested arm returned the model's raw
+reasoning text and followed _neither_ rule, so nothing can be read from it.
+Two earlier runs of the identical two-arm design did come out `winner:
+"entry"` with the control obeying the agent rule, but those captures were
+overwritten by later runs and are not in the repository; they are noted here
+as an observation, not as evidence. **Nothing in the committed artifacts
+establishes that an instruction entry overrides the agent's system prompt.**
+What would settle it: run the two arms repeatedly until both produce
+answers — the script does not do this — against a model that is not
+saturated. This is why `docs/upstream-issues/per-prompt-system.md` still
+asks upstream to document the ordering rather than citing ours.
+
+Probe robustness fixes applied alongside (the free-tier models were far
+slower during the re-runs than during the original stage-9 capture):
+
+- an assistant turn that finishes with **no text** is recorded as
+  `<empty>` and retried, because a regex miss over `""` is the same false
+  negative as one over `"<timeout>"`;
+- decisive turns get a 300 s deadline instead of 120 s;
+- E4 always runs a _second_ follow-up turn after the mid-session put, so
+  "applies on the very next turn" and "applies a turn later" stay
+  distinguishable;
+- E7 records the probe agent and fails loudly if that agent is missing,
+  instead of silently re-testing the default agent.
+
+The committed captures were taken before the last of these landed, which is
+why `14b-instruction-entries.json` shows E4's two follow-up turns as
+`<timeout>` at the old 120 s deadline. E2/E3 (the entry reaches the model on
+turn 1 and still applies on turn 2) and E5 (remove stops it applying, with
+no transcript confound) are green in that same capture.
 
 ### `serve --service` works, and the registration filename moved
 
@@ -538,19 +616,19 @@ its real system-prompt channel (`src/system-instruction.ts`,
 `OpencodeLanguageModel.applySystemInstruction`). Evidence:
 `spike/artifacts/14b-instruction-entries.json`.
 
-| Probe                                                   | Result                                                                                                                                |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| E1 `entry.put` / `list` / `remove` round-trip           | Works; `list` reflects the put, and is empty after the remove                                                                         |
-| E2 Entry set before the first prompt reaches the model  | Yes — the model returns the planted codeword                                                                                          |
-| E3 Still applies on turn 2 of the same session          | Yes                                                                                                                                   |
-| E4 Entry put **mid-session** applies from the next turn | Yes — turn 1 (no entry) does not know the codeword; turn 2 does                                                                       |
-| E4 A mid-session put announces a durable message        | Yes — one `system` message, text `<context key="ai-sdk.system">…</context>`, `description: "Instructions updated: api/ai-sdk.system"` |
-| E5 `remove` stops the instruction applying              | Yes — **no transcript confound** (see below)                                                                                          |
-| E6 Key grammar                                          | `^[a-z0-9][a-z0-9._-]*$`; `AI-SDK`, `ai-sdk.System`, `_leading`, `.dot` and `""` rejected                                             |
-| E6 Value cap                                            | 8192 bytes measured on the **JSON encoding** (see below)                                                                              |
-| E6 Non-string values                                    | Accepted — `value` is a `JsonValue`, not just a string                                                                                |
-| E7 Precedence vs the agent prompt                       | An entry instruction overrode default agent formatting behaviour                                                                      |
-| E9 Unknown session                                      | Clean `Session not found: <id>`                                                                                                       |
+| Probe                                                   | Result                                                                                                                                                                                         |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| E1 `entry.put` / `list` / `remove` round-trip           | Works; `list` reflects the put, and is empty after the remove                                                                                                                                  |
+| E2 Entry set before the first prompt reaches the model  | Yes — the model returns the planted codeword                                                                                                                                                   |
+| E3 Still applies on turn 2 of the same session          | Yes                                                                                                                                                                                            |
+| E4 Entry put **mid-session** applies from the next turn | **Unmeasured in the committed capture** — turn 1 (no entry) does not know the codeword; both follow-up turns timed out under load (earlier, overwritten captures had turn 2 answering with it) |
+| E4 A mid-session put announces a durable message        | Yes — one `system` message, text `<context key="ai-sdk.system">…</context>`, `description: "Instructions updated: api/ai-sdk.system"`                                                          |
+| E5 `remove` stops the instruction applying              | Yes — **no transcript confound** (see below)                                                                                                                                                   |
+| E6 Key grammar                                          | `^[a-z0-9][a-z0-9._-]*$`; `AI-SDK`, `ai-sdk.System`, `_leading`, `.dot` and `""` rejected                                                                                                      |
+| E6 Value cap                                            | 8192 bytes measured on the **JSON encoding** (see below)                                                                                                                                       |
+| E6 Non-string values                                    | Accepted — `value` is a `JsonValue`, not just a string                                                                                                                                         |
+| E7 Precedence vs the agent prompt                       | **Inconclusive** — the committed capture's contested turn obeyed neither rule (see below)                                                                                                      |
+| E9 Unknown session                                      | Clean `Session not found: <id>`                                                                                                                                                                |
 
 ### Two probe designs worth keeping
 

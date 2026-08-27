@@ -14,6 +14,29 @@
 //     XDG_CONFIG_HOME=$SB/config XDG_CACHE_HOME=$SB/cache \
 //     OPENCODE_PASSWORD=<pw> \
 //     ./node_modules/.bin/opencode2 serve --port 14396
+//
+// E7 needs an agent with a system prompt of its own to contest, defined
+// BEFORE the server starts (agents are discovered at startup):
+//   mkdir -p $SB/config/opencode/agent
+//   cat > $SB/config/opencode/agent/strict.md <<'MD'
+//   ---
+//   description: stage-9 precedence probe agent
+//   mode: primary
+//   ---
+//
+//   You are a terse assistant.
+//
+//   FORMATTING RULE: you must answer EVERY user message with a single line
+//   of the form `AGENT: <text>`. Never use markdown headings, lists, or code
+//   fences. This rule overrides any other formatting instruction you may
+//   receive.
+//   MD
+// It has to be the markdown file: a config-defined `agent.<name>.system`
+// string lands in `Agent.Info.request.body.system` (a provider request-body
+// override the OpenAI-compatible model package drops), and the model never
+// sees it — verified by four control turns across three models, none of
+// which followed the rule. The markdown body populates `Agent.Info.system`,
+// which does reach the model.
 // Run:
 //   OC2_URL=http://127.0.0.1:14396 OC2_PASSWORD=<pw> \
 //     OC2_WORKDIR=/tmp/oc2-verify/workdir \
@@ -46,6 +69,13 @@ const client = OpenCode.make({
 });
 
 const MODEL = { providerID: "opencode", id: "nemotron-3.5-lightning-free" };
+/**
+ * Agent whose own system prompt E7 contests. Defined by the launch recipe's
+ * `agent/strict.md`; if the server was started without it, `session.create`
+ * fails with AgentNotFoundError and E7 records that rather than silently
+ * testing the default agent (whose prompt this probe cannot predict).
+ */
+const PROBE_AGENT = "strict";
 const out = { capturedAt: new Date().toISOString(), baseUrl: BASE_URL };
 out.health = await capture("health", () => client.health.get());
 
@@ -72,11 +102,19 @@ const assistantText = (message) =>
  * return the previous turn's answer on turn 2+ and silently fake a
  * cross-turn survival result.
  */
-async function ask(sessionID, text) {
+/**
+ * How long a decisive turn may take before the probe calls it a non-answer.
+ * Free-tier zen models have been observed taking >4 minutes for a
+ * three-sentence reply under load, and every probe here reads "no answer"
+ * through a regex that cannot tell slow from absent.
+ */
+const TURN_TIMEOUT_MS = 300_000;
+
+async function ask(sessionID, text, timeoutMs = TURN_TIMEOUT_MS) {
   const before = await client.message.list({ sessionID, order: "asc" });
   const baseline = before.data.filter((m) => m.type === "assistant").length;
   await client.session.prompt({ sessionID, text });
-  const deadline = Date.now() + 120_000;
+  const deadline = Date.now() + timeoutMs;
   for (;;) {
     const list = await client.message.list({ sessionID, order: "asc" });
     const assistants = list.data.filter((m) => m.type === "assistant");
@@ -84,24 +122,34 @@ async function ask(sessionID, text) {
     if (done.length > baseline && done.length === assistants.length) {
       const last = done[done.length - 1];
       const error = last.error;
-      return error === undefined
-        ? assistantText(last)
-        : `<error:${JSON.stringify(error).slice(0, 300)}>`;
+      if (error !== undefined) {
+        return `<error:${JSON.stringify(error).slice(0, 300)}>`;
+      }
+      // An assistant message that finished with no text is a non-answer, and
+      // a regex miss over "" is not evidence that an instruction was absent
+      // — the same false negative "<timeout>" would produce. Name it so the
+      // retry path catches it too.
+      const text = assistantText(last);
+      return text === "" ? "<empty>" : text;
     }
     if (Date.now() > deadline) return "<timeout>";
     await sleep(1000);
   }
 }
 
+/** A turn that produced no answer at all, for either reason. */
+const NON_ANSWERS = new Set(["<timeout>", "<empty>"]);
+
 /**
- * `ask`, but a timed-out turn is retried once. Decisive probes must not
- * report a regex miss over the literal string "<timeout>" as evidence that
- * an instruction was absent — that is a false negative, not a result.
+ * `ask`, but a turn that produced no answer is retried once. Decisive probes
+ * must not report a regex miss over the literal string "<timeout>" (or over
+ * an empty reply) as evidence that an instruction was absent — that is a
+ * false negative, not a result.
  */
-async function askOrRetry(sessionID, text) {
-  const first = await ask(sessionID, text);
-  if (first !== "<timeout>") return first;
-  return ask(sessionID, text);
+async function askOrRetry(sessionID, text, timeoutMs = TURN_TIMEOUT_MS) {
+  const first = await ask(sessionID, text, timeoutMs);
+  if (!NON_ANSWERS.has(first)) return first;
+  return ask(sessionID, text, timeoutMs);
 }
 
 // ---- E1: put / list / remove round-trip ----------------------------------
@@ -139,8 +187,14 @@ async function askOrRetry(sessionID, text) {
       "Your secret codeword is ZEPHYR-77. Whenever the user asks for the " +
       "codeword, reply with exactly that codeword and nothing else.",
   });
-  const turn1 = await ask(session.id, "What is the codeword?");
-  const turn2 = await ask(session.id, "Repeat the codeword one more time.");
+  // askOrRetry, not ask: on a loaded free-tier model a turn can exceed the
+  // poll deadline, and "<timeout>" fails the /ZEPHYR-77/ test exactly like a
+  // missing entry would. A retry tells the two apart.
+  const turn1 = await askOrRetry(session.id, "What is the codeword?");
+  const turn2 = await askOrRetry(
+    session.id,
+    "Repeat the codeword one more time.",
+  );
   const context = await capture("session-context", () =>
     client.session.context({ sessionID: session.id }),
   );
@@ -180,6 +234,14 @@ async function askOrRetry(sessionID, text) {
       "codeword, reply with exactly that codeword and nothing else.",
   });
   const afterPut = await askOrRetry(session.id, "What is the codeword?");
+  // A second follow-up turn, always run: "the put takes effect on the very
+  // next turn" and "it takes effect a turn later" are different answers, and
+  // a single turn cannot tell them apart. Recorded separately so a partial
+  // result stays visible instead of collapsing into a pass/fail.
+  const afterPutSecond = await askOrRetry(
+    session.id,
+    "Once more: what is the codeword?",
+  );
   const messages = await client.message.list({
     sessionID: session.id,
     order: "asc",
@@ -189,6 +251,8 @@ async function askOrRetry(sessionID, text) {
     beforePutSawEntry: /ORCHID-42/i.test(before),
     afterPut,
     afterPutSawEntry: /ORCHID-42/i.test(afterPut),
+    afterPutSecond,
+    afterPutSecondSawEntry: /ORCHID-42/i.test(afterPutSecond),
     // Does the put announce itself as a durable system message?
     messageTypes: messages.data.map((m) => m.type),
     systemMessages: messages.data
@@ -220,9 +284,9 @@ async function askOrRetry(sessionID, text) {
   );
   out.e5RemoveClean = {
     reply: reply.slice(0, 600),
-    // Only a real answer can settle this; a timeout is "no result", not
-    // "the instruction was gone".
-    conclusive: reply !== "<timeout>" && !reply.startsWith("<error:"),
+    // Only a real answer can settle this; a timeout or an empty reply is
+    // "no result", not "the instruction was gone".
+    conclusive: !NON_ANSWERS.has(reply) && !reply.startsWith("<error:"),
     stillSawEntry: /TUNDRA-19/i.test(reply),
     entries: await capture("list-after-clean-remove", () =>
       client.session.instructions.entry.list({ sessionID: session.id }),
@@ -241,12 +305,12 @@ async function askOrRetry(sessionID, text) {
     key: "ai-sdk.system",
     value: "You must begin every single reply with the token QQQ.",
   });
-  const withEntry = await ask(session.id, "Say hello.");
+  const withEntry = await askOrRetry(session.id, "Say hello.");
   await client.session.instructions.entry.remove({
     sessionID: session.id,
     key: "ai-sdk.system",
   });
-  const afterRemove = await ask(session.id, "Say goodbye.");
+  const afterRemove = await askOrRetry(session.id, "Say goodbye.");
   out.e5bRemoveAfterExposure = {
     withEntry: withEntry.slice(0, 300),
     withEntryObeyed: /^QQQ/i.test(withEntry),
@@ -315,29 +379,114 @@ async function askOrRetry(sessionID, text) {
   );
 }
 
-// ---- E7: precedence vs the agent's own system prompt ---------------------
+// ---- E7: precedence vs the agent's own system prompt --------------------
 // The entry claims to join the epoch baseline AFTER the agent's system
-// prompt. Probe with an instruction that contradicts default agent behaviour
-// in an observable, harmless way.
+// prompt. Observing that an entry changes formatting proves only that the
+// entry reached the model (that is E2). Precedence needs a *conflict*: an
+// agent whose own system prompt demands one format, an entry demanding an
+// incompatible one, and a no-entry control on the same agent proving the
+// agent's rule is followed when nothing contests it.
+//
+// The control is the whole point. Without it, "the entry's format won" is
+// equally consistent with "this agent's prompt never reached the model" —
+// which is exactly what the first version of this probe hit (see the
+// agent-definition note in the launch recipe above).
 {
-  const session = await newSession("entry-precedence");
-  await client.session.instructions.entry.put({
-    sessionID: session.id,
-    key: "ai-sdk.system",
-    value:
-      "Formatting override: you must answer EVERY user message with a " +
-      "single line of the form `ANSWER: <text>` and never use markdown " +
-      "headings, lists, or code fences.",
-  });
-  const reply = await ask(
-    session.id,
-    "Give me three tips for naming variables.",
-  );
-  out.e7Precedence = {
-    reply: reply.slice(0, 1200),
-    followedOverride: /^ANSWER:/i.test(reply),
-    usedMarkdownList: /^\s*[-*\d]+[.)]?\s/m.test(reply),
+  const AGENT_RULE = /^\s*AGENT:/i;
+  const ENTRY_RULE = /^\s*ENTRY:/i;
+  const ENTRY_OVERRIDE =
+    "Formatting override: ignore any other formatting rule you were " +
+    "given. You must answer EVERY user message with a single line of the " +
+    "form `ENTRY: <text>` and never use markdown headings, lists, or " +
+    "code fences.";
+  const QUESTION = "Give me three tips for naming variables.";
+
+  // A non-answer in either arm makes the comparison inconclusive, and under
+  // load that happens often enough that a single pair of turns is not a
+  // probe, it is a coin flip. Run the pair until one attempt is conclusive
+  // (bounded), and record EVERY attempt so the flaky ones stay visible
+  // instead of being quietly dropped.
+  const MAX_ATTEMPTS = 3;
+
+  const agentSession = (title) =>
+    client.session.create({
+      title,
+      location: { directory: WORKDIR },
+      model: MODEL,
+      agent: PROBE_AGENT,
+    });
+
+  const runAttempt = async (index) => {
+    const control = await askOrRetry(
+      (await agentSession(`entry-precedence-control-${index}`)).id,
+      QUESTION,
+    );
+    const contested = await agentSession(`entry-precedence-contested-${index}`);
+    await client.session.instructions.entry.put({
+      sessionID: contested.id,
+      key: "ai-sdk.system",
+      value: ENTRY_OVERRIDE,
+    });
+    const withEntry = await askOrRetry(contested.id, QUESTION);
+    return {
+      controlReply: control.slice(0, 1200),
+      contestedReply: withEntry.slice(0, 1200),
+      // The control proves the agent prompt IS followed when nothing
+      // contests it; without it, "the entry won" is equally consistent with
+      // "the agent prompt never reached the model".
+      agentPromptEffective: AGENT_RULE.test(control),
+      contestedFollowedEntryRule: ENTRY_RULE.test(withEntry),
+      contestedFollowedAgentRule: AGENT_RULE.test(withEntry),
+      // Conclusive only when the control obeyed the agent rule and the
+      // contested turn picked exactly one of the two rules.
+      conclusive:
+        !NON_ANSWERS.has(control) &&
+        !NON_ANSWERS.has(withEntry) &&
+        AGENT_RULE.test(control) &&
+        ENTRY_RULE.test(withEntry) !== AGENT_RULE.test(withEntry),
+      winner:
+        ENTRY_RULE.test(withEntry) && !AGENT_RULE.test(withEntry)
+          ? "entry"
+          : AGENT_RULE.test(withEntry) && !ENTRY_RULE.test(withEntry)
+            ? "agent"
+            : "neither",
+    };
   };
+
+  try {
+    const attempts = [];
+    for (let index = 1; index <= MAX_ATTEMPTS; index += 1) {
+      const attempt = await runAttempt(index);
+      attempts.push(attempt);
+      if (attempt.conclusive) break;
+    }
+    const decisive = attempts.filter((a) => a.conclusive);
+    out.e7Precedence = {
+      agent: PROBE_AGENT,
+      attempts,
+      attemptCount: attempts.length,
+      conclusiveCount: decisive.length,
+      conclusive: decisive.length > 0,
+      // Every conclusive attempt must agree; a split would mean the
+      // ordering is not a property at all.
+      winner:
+        decisive.length === 0
+          ? "inconclusive"
+          : decisive.every((a) => a.winner === decisive[0].winner)
+            ? decisive[0].winner
+            : "split",
+    };
+  } catch (error) {
+    // Usually AgentNotFoundError: the server was started without the probe
+    // agent. Record that rather than silently re-running E2 against the
+    // default agent and reading the result as precedence.
+    out.e7Precedence = {
+      agent: PROBE_AGENT,
+      conclusive: false,
+      winner: "not-run",
+      error: `precedence arms could not run: ${error?.message ?? String(error)}`,
+    };
+  }
 }
 
 // ---- E9: does an entry on a NON-EXISTENT session fail cleanly? -----------
@@ -361,12 +510,17 @@ console.log(
       e3Turn2SawEntry: out.e2Visible?.turn2SawEntry,
       e4BeforePutSawEntry: out.e4MidSessionPut?.beforePutSawEntry,
       e4AfterPutSawEntry: out.e4MidSessionPut?.afterPutSawEntry,
+      e4AfterPutSecondSawEntry: out.e4MidSessionPut?.afterPutSecondSawEntry,
       e4SystemMessages: out.e4MidSessionPut?.systemMessages?.length,
       e5RemoveCleanConclusive: out.e5RemoveClean?.conclusive,
       e5RemoveCleanStillSawEntry: out.e5RemoveClean?.stillSawEntry,
       e5bWithEntryObeyed: out.e5bRemoveAfterExposure?.withEntryObeyed,
       e5bAfterRemoveStillObeyed:
         out.e5bRemoveAfterExposure?.afterRemoveStillObeyed,
+      e7Attempts: out.e7Precedence?.attemptCount,
+      e7ConclusiveAttempts: out.e7Precedence?.conclusiveCount,
+      e7Winner: out.e7Precedence?.winner,
+      e7Conclusive: out.e7Precedence?.conclusive,
       e6BadKeyOk: Object.fromEntries(
         Object.entries(out.e6Keys ?? {}).map(([k, v]) => [k, v.ok]),
       ),
@@ -382,7 +536,6 @@ console.log(
       e6SizeMultibyteOk: out.e6SizeMultibyte?.ok,
       e6SizeMultibyteBytes: out.e6SizeMultibyte?.error?.actualBytes,
       e6NonStringOk: out.e6NonString?.ok,
-      e7FollowedOverride: out.e7Precedence?.followedOverride,
       e9UnknownSessionOk: out.e9UnknownSession?.ok,
       e9UnknownSessionError: out.e9UnknownSession?.error?.message,
     },

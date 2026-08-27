@@ -182,19 +182,27 @@ const strip = (event) => {
     45_000,
   );
   const startedAt = Date.now();
+  let waitResolved = false;
+  // The deadline has to outlast the turn, not the patience of whoever is
+  // watching: a probe that gives up early records "timeout" where the
+  // question was "when does wait resolve relative to completion", and that
+  // reads as a behaviour change when it is only a slow model. The same
+  // 150-word story turn has been observed taking >5 minutes on a loaded
+  // free-tier model.
   out.v4WaitBusy = await capture("wait-on-busy-session", () =>
     Promise.race([
-      client.session
-        .wait({ sessionID: session.id })
-        .then(() => `resolved after ${Date.now() - startedAt}ms`),
-      sleep(120_000).then(() => "timeout-120s"),
+      client.session.wait({ sessionID: session.id }).then(() => {
+        waitResolved = true;
+        return `resolved after ${Date.now() - startedAt}ms`;
+      }),
+      sleep(600_000).then(() => "timeout-600s"),
     ]),
   );
   const waitResolvedAt = Date.now();
   const succeeded = await waitFor(
     mine.events,
     (e) => e.type === "session.execution.succeeded",
-    120_000,
+    600_000,
   );
   mine.stop();
   await mine.done;
@@ -202,8 +210,14 @@ const strip = (event) => {
   out.v4WaitBusy.waitResolvedDeltaMs = waitResolvedAt - startedAt;
   out.v4WaitBusy.executionSucceededDeltaMs =
     succeeded === undefined ? undefined : succeeded.receivedAt - startedAt;
+  // Only a wait that actually RESOLVED can be ordered against completion. A
+  // race lost to the timeout still produces a timestamp, and comparing that
+  // one reports an ordering the probe never observed.
+  out.v4WaitBusy.waitResolved = waitResolved;
   out.v4WaitBusy.waitResolvedBeforeExecutionSucceeded =
-    succeeded === undefined ? undefined : waitResolvedAt < succeeded.receivedAt;
+    !waitResolved || succeeded === undefined
+      ? undefined
+      : waitResolvedAt < succeeded.receivedAt;
   out.v4WaitBusy.eventSequence = mine.events.map((e) => e.type);
 }
 
@@ -231,7 +245,13 @@ const strip = (event) => {
       delivery: "queue",
     }),
   );
-  const deadline = Date.now() + 150_000;
+  // Long enough for THREE turns of a slow model, not just the first: the
+  // question is whether the queued turn drains, and a deadline that expires
+  // mid-story answers a different, uninteresting question. 420s was still
+  // short enough to expire between the queued item's delivery and its
+  // execution on a loaded free tier — a follow-up check found the turn had
+  // drained minutes later — so this is deliberately generous.
+  const deadline = Date.now() + 900_000;
   for (;;) {
     const list = await client.message.list({
       sessionID: session.id,
@@ -239,9 +259,23 @@ const strip = (event) => {
     });
     const assistants = list.data.filter((m) => m.type === "assistant");
     const users = list.data.filter((m) => m.type === "user");
+    // The question this probe answers is whether the QUEUED turn drains.
+    // Counting assistants ("at least two") cannot answer it: the first two
+    // belong to the original and steered turns, so the predicate goes true
+    // while the queued message still has no reply. Anchor on the queued
+    // message's own position instead and require a finished assistant
+    // AFTER it.
+    const queuedIndex = list.data.findIndex(
+      (m) => m.type === "user" && (m.text ?? "").includes("QUEUED"),
+    );
+    const queuedAnswered =
+      queuedIndex >= 0 &&
+      list.data
+        .slice(queuedIndex + 1)
+        .some((m) => m.type === "assistant" && m.finish !== undefined);
     const settled =
       users.length >= 3 &&
-      assistants.length >= 2 &&
+      queuedAnswered &&
       assistants.every((m) => m.finish !== undefined);
     if (settled || Date.now() > deadline) {
       out.v5Busy = {
@@ -249,6 +283,9 @@ const strip = (event) => {
         whileBusyOmitted,
         queued,
         timedOut: !settled,
+        userCount: users.length,
+        assistantCount: assistants.length,
+        queuedAnswered,
         eventSequence: mine.events.map((e) => e.type),
         executionEvents: mine.events
           .filter((e) => e.type.startsWith("session.execution."))
