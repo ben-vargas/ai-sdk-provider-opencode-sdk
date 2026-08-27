@@ -45,7 +45,15 @@ describe.skipIf(!ctx.canGenerate)(suiteTitle("tool approvals", ctx), () => {
     );
     if (approval === undefined) {
       // The model answered without attempting the bash tool — nothing to
-      // approve. Not a provider defect; skip with the evidence.
+      // approve. Not a provider defect, but the skip must be LOUD: the
+      // approval round-trip (permission.asked → reply → resumed execution)
+      // went completely untested this run.
+      console.warn(
+        `[integration] APPROVAL PATH UNTESTED: ${ctx.modelId} answered without ` +
+          `calling the bash tool, so the permission.asked → approval-reply → ` +
+          `resume round-trip was NOT exercised. Re-run with a model that ` +
+          `tool-calls (OPENCODE_TEST_MODEL=providerID/modelID) to cover it.`,
+      );
       expect(phase1.finishReason.unified).toBeDefined();
       t.skip();
       return;

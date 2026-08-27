@@ -28,6 +28,13 @@
  *   - tear down cleanly.
  *
  * Environment overrides:
+ *   - `OLLAMA_API_KEY`: forwarded from the host into the sandboxed server
+ *     env (the one deliberate hole in the allowlist). It enables the
+ *     server's `ollama-cloud` provider, which the suite's pinned test model
+ *     needs (see `test-model.ts`). Without it the pin is skipped with a
+ *     message and the suite falls back to the server default model.
+ *   - `OPENCODE_TEST_MODEL`: `providerID/modelID` override for the model
+ *     generation tests use (resolved and probe-verified in `test-model.ts`).
  *   - `OPENCODE_BETA_URL` + `OPENCODE_BETA_PASSWORD`: use an already-running
  *     v2 server instead of spawning one (fast iteration). Independent of
  *     every local launcher — it resolves neither the devDependency binary
@@ -470,6 +477,11 @@ export async function startBetaServer(): Promise<BetaServerHandle> {
         XDG_CACHE_HOME: cacheHome,
         OPENCODE_PASSWORD: password,
         OPENCODE_CONFIG_CONTENT: JSON.stringify(SANDBOX_CONFIG),
+        // Enables the `ollama-cloud` provider for the pinned test model
+        // (env-gated on models.dev) — see the header and `test-model.ts`.
+        ...(process.env.OLLAMA_API_KEY !== undefined
+          ? { OLLAMA_API_KEY: process.env.OLLAMA_API_KEY }
+          : {}),
       },
       stdio: ["ignore", "pipe", "pipe"],
     },

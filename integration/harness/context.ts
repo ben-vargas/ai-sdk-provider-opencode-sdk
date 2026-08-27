@@ -2,7 +2,8 @@
  * Shared per-file plumbing for integration tests: reads the harness endpoint
  * provided by global-setup and builds real providers against it. Every test
  * file gates on `ctx.available` (harness up) and — for tests that hit a
- * model — `ctx.canGenerate` (zen credentials + a resolvable default model).
+ * model — `ctx.canGenerate` (a probe-verified test model was resolved; see
+ * `test-model.ts` for the env-override → pin → server-default order).
  */
 import { inject } from "vitest";
 import { OpenCode, type OpenCodeClient } from "@opencode-ai/client";
@@ -19,14 +20,18 @@ export interface IntegrationContext {
   available: boolean;
   /** Why the harness is unavailable (skip message). */
   reason: string;
-  /** Generation-capable: harness up + zen auth + default model known. */
+  /** Generation-capable: harness up + a probe-verified test model. */
   canGenerate: boolean;
   baseUrl: string;
   authHeader: string;
   /** Sandbox directory every session must bind to. */
   workdir: string;
-  /** `providerID/modelID` of the server default (cheapest zen free model). */
+  /** `providerID/modelID` of the resolved, probe-verified test model. */
   modelId: string;
+  /** `providerID/modelID` of the server's own default model (canary only). */
+  defaultModelId: string;
+  /** Zen credentials were copied into the sandbox (default model usable). */
+  authAvailable: boolean;
   /** Model settings every test should start from (sandbox location). */
   baseSettings: OpencodeSettings;
   /** How the harness starts a server, for tests that spawn a variant. */
@@ -48,21 +53,22 @@ export function integrationContext(): IntegrationContext {
   const workdir = inject("opencodeWorkdir");
   const authAvailable = inject("opencodeAuthAvailable");
   const defaultModel = inject("opencodeDefaultModel");
+  const testModel = inject("opencodeTestModel");
   const serveCommand = inject("opencodeServeCommand");
   const unavailableReason = inject("opencodeUnavailableReason");
 
   const available = baseUrl !== null;
   const modelId =
+    testModel === null ? "" : `${testModel.providerID}/${testModel.modelID}`;
+  const defaultModelId =
     defaultModel === null
       ? ""
       : `${defaultModel.providerID}/${defaultModel.modelID}`;
   const reason = !available
     ? `opencode2 harness unavailable: ${unavailableReason ?? "unknown"}`
-    : !authAvailable
-      ? "no zen credentials in the local opencode data home — generation tests skip"
-      : modelId === ""
-        ? "server default model unavailable — generation tests skip"
-        : "";
+    : modelId === ""
+      ? "no probe-verified test model (see the [integration] setup log) — generation tests skip"
+      : "";
 
   const baseSettings: OpencodeSettings = {
     location: { directory: workdir },
@@ -72,11 +78,13 @@ export function integrationContext(): IntegrationContext {
   return {
     available,
     reason,
-    canGenerate: available && authAvailable && modelId !== "",
+    canGenerate: available && modelId !== "",
     baseUrl: baseUrl ?? "",
     authHeader,
     workdir,
     modelId,
+    defaultModelId,
+    authAvailable,
     baseSettings,
     serveCommand,
     makeProvider: (overrides = {}) =>

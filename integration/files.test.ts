@@ -24,7 +24,13 @@ suite(suiteTitle("file attach (data: URI)", ctx), () => {
   });
 
   it("attaches an image as a data: URI and the model sees its content", async (t) => {
-    // Needs an image-capable zen model; skip when the catalog has none.
+    // Needs an image-capable zen model (zen auth) — the resolved test model
+    // is text-focused and may not be image-capable, so this test picks its
+    // own model from the catalog and skips without zen credentials.
+    if (!ctx.authAvailable) {
+      t.skip();
+      return;
+    }
     const raw = ctx.makeRawClient();
     const catalog = await raw.model.list({});
     const imageModel = catalog.data.find(
