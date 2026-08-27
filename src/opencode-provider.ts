@@ -135,16 +135,27 @@ export const opencode = createOpencode();
 /**
  * Common model shortcuts for convenience.
  *
- * Every ID below was verified present in a live OpenCode v2 catalog
- * (`model.list`) served by the beta-source server at commit `f4a9b930`
- * (the build matching the pinned `@opencode-ai/client@0.0.0-beta-18286`),
- * snapshot 2026-08-27 UTC. The catalog is server- and credential-dependent:
- * this snapshot covers the zen free tier (`opencode/*`, needs zen
- * credentials) plus the built-in ollama cloud entries — models from other
- * providers (Anthropic, OpenAI, Google, …) appear only once their
- * credentials are configured on the server, so the v4-era shortcuts for
- * them were dropped as unverifiable. Any `providerID/modelID` string your
- * server's catalog lists works directly; these shortcuts are not a limit.
+ * Every ID below is an OpenCode zen free-tier model, cross-checked two ways
+ * (snapshot 2026-08-27 UTC):
+ *
+ * 1. present in a live `model.list` from the beta-source server at commit
+ *    `f4a9b930` (the build matching the pinned
+ *    `@opencode-ai/client@0.0.0-beta-18286`), stable across repeated polls;
+ * 2. present in the upstream models.dev catalog under the `opencode`
+ *    provider — i.e. they exist independently of this machine.
+ *
+ * A live catalog alone is NOT sufficient evidence: it is server-, host- and
+ * credential-dependent. Two classes of host-local contamination were found
+ * and excluded here — the built-in `ollama` provider plugin discovers models
+ * from a local ollama daemon over `http://127.0.0.1:11434` (a channel no
+ * XDG/HOME isolation blocks), and the `ollama-cloud` provider unlocks from
+ * an ambient `OLLAMA_API_KEY`. Neither yields IDs a user would have. Models
+ * from other providers (Anthropic, OpenAI, Google, …) surface only once
+ * their credentials are configured on the server, so the v4-era shortcuts
+ * for them stay dropped as unverifiable.
+ *
+ * These shortcuts need zen credentials on the server and are a convenience,
+ * not a limit: any `providerID/modelID` string your catalog lists works.
  */
 export const OpencodeModels = {
   // OpenCode zen free tier (requires zen credentials on the server)
@@ -154,10 +165,6 @@ export const OpencodeModels = {
   "nemotron-3-ultra-free": "opencode/nemotron-3-ultra-free",
   "mimo-v2.5-free": "opencode/mimo-v2.5-free",
   "big-pickle": "opencode/big-pickle",
-
-  // Ollama cloud entries (built-in catalog)
-  "glm-5.2": "ollama/glm-5.2:cloud",
-  "kimi-k3": "ollama/kimi-k3:cloud",
 } as const;
 
 export type OpencodeModelShortcut = keyof typeof OpencodeModels;

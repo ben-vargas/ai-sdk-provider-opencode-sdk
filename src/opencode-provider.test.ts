@@ -210,9 +210,19 @@ describe("OpencodeModels", () => {
       "opencode/nemotron-3.5-lightning-free",
     );
     expect(OpencodeModels["big-pickle"]).toBe("opencode/big-pickle");
-    expect(OpencodeModels["glm-5.2"]).toBe("ollama/glm-5.2:cloud");
     for (const id of Object.values(OpencodeModels)) {
       expect(id).toMatch(/^[^/]+\/[^/]+$/);
+    }
+  });
+
+  // Regression guard for the stage-8 catalog-contamination finding: a live
+  // `model.list` also carries host-local providers (the `ollama` plugin
+  // discovers a local daemon on 127.0.0.1:11434; `ollama-cloud` unlocks from
+  // an ambient OLLAMA_API_KEY). Those IDs do not exist for users, so every
+  // shipped shortcut must come from the `opencode` provider.
+  it("ships only IDs verifiable independently of the capture host", () => {
+    for (const id of Object.values(OpencodeModels)) {
+      expect(id.split("/")[0]).toBe("opencode");
     }
   });
 });

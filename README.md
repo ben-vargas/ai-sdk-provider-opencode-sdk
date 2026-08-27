@@ -86,7 +86,7 @@ Every backend runs a connection preflight (`health.get` + `migration.v1.status`)
 
 ### Model IDs
 
-Models are `providerID/modelID` strings from your server's catalog (`model.list`); a bare `modelID` omits the model at session create so the server default applies. `OpencodeModels` exports shortcuts for IDs verified against a live beta catalog (server- and credential-dependent — any catalog ID works, shortcuts are a convenience):
+Models are `providerID/modelID` strings from your server's catalog (`model.list`); a bare `modelID` omits the model at session create so the server default applies. `OpencodeModels` exports shortcuts for six OpenCode zen free-tier IDs, each cross-checked against both a live beta catalog and the upstream models.dev catalog (they need zen credentials on your server; catalogs are server- and credential-dependent, so any ID your own catalog lists works — the shortcuts are a convenience, not a limit):
 
 ```typescript
 import { OpencodeModels } from "ai-sdk-provider-opencode-sdk";

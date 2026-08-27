@@ -98,15 +98,22 @@ started` is observed (the one case whose wait semantics stage 6 pinned)
    _Re-examined stage 7, still deferred:_ no demonstrated need — no skew
    incident has surfaced on `baseUrl`/caller-client backends, and the
    preflight already logs the server version for diagnosis.
-7. **Model shortcut refresh.** **Resolved (stage 8).** `OpencodeModels`
-   was refreshed against the live beta-source harness catalog
-   (`model.list`, commit `f4a9b930`, snapshot 2026-08-27 UTC): only the
-   eight IDs verified present remain (six zen free-tier `opencode/*`
-   models plus the two built-in ollama cloud entries), with the snapshot
-   date and the catalog's server/credential dependence noted in the JSDoc.
-   The v4-era Anthropic/OpenAI/Google IDs were dropped — no reachable v2
-   catalog could verify them (they only appear once those providers'
-   credentials are configured on a server).
+7. **Model shortcut refresh.** **Resolved (stage 8; corrected in the
+   stage-8 fix phase).** `OpencodeModels` ships the **six** zen free-tier
+   `opencode/*` IDs verified two ways (snapshot 2026-08-27 UTC): present
+   in a live beta-source `model.list` (commit `f4a9b930`), stable across
+   repeated polls, **and** present in the upstream models.dev catalog
+   under the `opencode` provider. The first refresh also shipped
+   `ollama/glm-5.2:cloud` and `ollama/kimi-k3:cloud` as "built-in ollama
+   cloud entries" — that was wrong: both were host-local contamination of
+   the capture (the built-in `ollama` plugin discovers models from a local
+   daemon on `http://127.0.0.1:11434`, which XDG/HOME isolation cannot
+   block). They were removed; a control run with the ollama origin
+   redirected to a dead port produced a catalog with zero ollama entries.
+   See the stage-8 addendum in `docs/v2-spike-findings.md`. The v4-era
+   Anthropic/OpenAI/Google IDs stay dropped — no reachable v2 catalog can
+   verify them (they only appear once those providers' credentials are
+   configured on a server).
 8. **Examples + README rewrite.** **Resolved (stage 8).** README rewritten
    around the v5 surface (status banner with the no-published-binary
    caveat, backends, sessions/exclusivity, approvals, forms,
