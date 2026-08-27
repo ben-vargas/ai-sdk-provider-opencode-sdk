@@ -135,6 +135,8 @@ interface FakePortHooks {
   instructionEntries?: boolean;
   /** Make `session.instructions.entry.put` reject with this. */
   instructionPutError?: unknown;
+  /** Make `session.instructions.entry.remove` reject with this. */
+  instructionRemoveError?: unknown;
   /**
    * Make `session.create` mint a distinct id per call, as a real server
    * does. Off by default so existing tests keep asserting on `SESSION_ID`.
@@ -268,10 +270,15 @@ function createFakePort(hooks: FakePortHooks = {}): FakePort {
                     ? Promise.reject(hooks.instructionPutError)
                     : Promise.resolve(undefined);
                 },
-                remove: fn(
-                  "session.instructions.entry.remove",
-                  () => undefined,
-                ),
+                remove: (
+                  input: Record<string, unknown>,
+                  options?: OpencodeRequestOptions,
+                ) => {
+                  record("session.instructions.entry.remove", input, options);
+                  return hooks.instructionRemoveError !== undefined
+                    ? Promise.reject(hooks.instructionRemoveError)
+                    : Promise.resolve(undefined);
+                },
                 list: fn("session.instructions.entry.list", () => []),
               },
             },
@@ -1685,6 +1692,181 @@ describe("call-option degradations", () => {
     await model.doGenerate(callOptions());
 
     expect(fake.callsFor("session.instructions.entry.put").length).toBe(1);
+  });
+
+  it("clears the written entry when a later prompt is too large to write", async () => {
+    const fake = createFakePort({ instructionEntries: true });
+    scriptTextTurn(fake);
+    const model = createModel(fake);
+
+    await model.doGenerate(
+      callOptions({
+        prompt: [
+          { role: "system", content: "Answer in French." },
+          ...userPrompt("Bonjour?"),
+        ],
+      }),
+    );
+    scriptTextTurn(fake);
+    // 8191 raw chars encode to 8193 JSON bytes — one over the server's cap.
+    const oversized = "y".repeat(8191);
+    const result = await model.doGenerate(
+      callOptions({
+        prompt: [
+          { role: "system", content: oversized },
+          ...userPrompt("Encore?"),
+        ],
+      }),
+    );
+
+    // Leaving "Answer in French." in the entry would keep a stale system
+    // prompt outranking the prepended one the caller actually asked for.
+    expect(fake.callsFor("session.instructions.entry.remove").length).toBe(1);
+    const second = fake.callsFor("session.prompt")[1]!.input as Record<
+      string,
+      unknown
+    >;
+    expect(String(second["text"])).toContain(oversized);
+    const warning = result.warnings.find(
+      (candidate) =>
+        candidate.type === "unsupported" &&
+        candidate.feature === "system prompt",
+    );
+    expect(warning).toBeDefined();
+    expect(JSON.stringify(warning)).not.toContain("may still apply");
+  });
+
+  it("clears the written entry when a later write fails", async () => {
+    const fake = createFakePort({ instructionEntries: true });
+    scriptTextTurn(fake);
+    const model = createModel(fake);
+
+    await model.doGenerate(
+      callOptions({
+        prompt: [
+          { role: "system", content: "Answer in French." },
+          ...userPrompt("Bonjour?"),
+        ],
+      }),
+    );
+    fake.hooks.instructionPutError = {
+      _tag: "SessionBusyError",
+      message: "busy",
+    };
+    scriptTextTurn(fake);
+    await model.doGenerate(
+      callOptions({
+        prompt: [
+          { role: "system", content: "Answer in German." },
+          ...userPrompt("Hallo?"),
+        ],
+      }),
+    );
+
+    expect(fake.callsFor("session.instructions.entry.remove").length).toBe(1);
+    const second = fake.callsFor("session.prompt")[1]!.input as Record<
+      string,
+      unknown
+    >;
+    expect(String(second["text"])).toContain("Answer in German.");
+  });
+
+  it("warns when the stale entry could not be removed", async () => {
+    const fake = createFakePort({ instructionEntries: true });
+    scriptTextTurn(fake);
+    const model = createModel(fake);
+
+    await model.doGenerate(
+      callOptions({
+        prompt: [
+          { role: "system", content: "Answer in French." },
+          ...userPrompt("Bonjour?"),
+        ],
+      }),
+    );
+    fake.hooks.instructionRemoveError = {
+      _tag: "SessionBusyError",
+      message: "busy",
+    };
+    scriptTextTurn(fake);
+    const result = await model.doGenerate(callOptions());
+
+    // No system content to prepend, but the session is still governed by an
+    // entry this call asked to drop — silence would be a lie.
+    const warning = result.warnings.find(
+      (candidate) =>
+        candidate.type === "unsupported" &&
+        candidate.feature === "system prompt",
+    );
+    expect(warning).toBeDefined();
+    expect(JSON.stringify(warning)).toContain("could not be removed");
+  });
+
+  it("does not clear the entry on a fresh session that carries no system content", async () => {
+    const fake = createFakePort({ instructionEntries: true });
+    scriptTextTurn(fake);
+    const model = createModel(fake);
+
+    await model.doGenerate(callOptions());
+
+    // A session created a moment ago has no entries: no request needed.
+    expect(fake.callsFor("session.instructions.entry.remove")).toEqual([]);
+  });
+
+  it("reconciles a session of unknown entry state instead of assuming it is empty", async () => {
+    const fake = createFakePort({ instructionEntries: true });
+    scriptTextTurn(fake);
+    const model = createModel(fake);
+
+    // A caller-supplied session this instance never wrote to — the same
+    // state an evicted cache entry leaves behind. Assuming "empty" would
+    // let an `ai-sdk.system` entry written earlier keep governing the turn.
+    await model.doGenerate(
+      callOptions({
+        providerOptions: { opencode: { sessionId: "ses_unknown" } },
+      }),
+    );
+
+    const remove = fake.callsFor("session.instructions.entry.remove")[0]!
+      .input as Record<string, unknown>;
+    expect(remove["sessionID"]).toBe("ses_unknown");
+    expect(remove["key"]).toBe("ai-sdk.system");
+  });
+
+  it("survives cache eviction: a revisited session is still reconciled", async () => {
+    const fake = createFakePort({ instructionEntries: true });
+    const model = createModel(fake);
+    const withSystem = (system: string, sessionId: string) =>
+      callOptions({
+        prompt: [{ role: "system", content: system }, ...userPrompt("Hi")],
+        providerOptions: { opencode: { sessionId } },
+      });
+
+    scriptTextTurn(fake);
+    await model.doGenerate(withSystem("Answer in French.", "ses_first"));
+    // 32 further sessions push `ses_first` out of the 32-entry cache.
+    for (let index = 0; index < 32; index += 1) {
+      scriptTextTurn(fake);
+      await model.doGenerate(withSystem("Be terse.", `ses_${index}`));
+    }
+    scriptTextTurn(fake);
+    await model.doGenerate(
+      callOptions({
+        providerOptions: { opencode: { sessionId: "ses_first" } },
+      }),
+    );
+
+    // Eviction must degrade to "unknown", not "empty": reading a forgotten
+    // session as empty would leave "Answer in French." governing the turn.
+    expect(
+      fake
+        .callsFor("session.instructions.entry.remove")
+        .some(
+          (call) =>
+            (call.input as Record<string, unknown>)["sessionID"] ===
+            "ses_first",
+        ),
+    ).toBe(true);
   });
 });
 

@@ -260,6 +260,11 @@ function createEventReader(iterable: AsyncIterable<V2Event>): EventReader {
 }
 
 /** Per-generation orchestration state threaded through the pump. */
+/** The optional session-instruction-entry surface of the client port. */
+type InstructionEntryPort = NonNullable<
+  OpencodeClientPort["session"]["instructions"]
+>["entry"];
+
 interface TurnContext {
   port: OpencodeClientPort;
   sessionId: string;
@@ -351,19 +356,23 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
   /** In-flight form response attempts, keyed by form ID. */
   private readonly inFlightFormRequests = new Map<string, Promise<boolean>>();
   /**
-   * sessionId → the system-prompt value currently written to that session's
-   * `ai-sdk.system` instruction entry. Lets a turn skip a redundant `put`
-   * (which would announce another durable system message) and, when a later
-   * call carries no system content, remove the entry the previous call left
-   * behind instead of leaking a stale system prompt into the conversation.
+   * sessionId → what that session's `ai-sdk.system` instruction entry holds:
+   * the written value, or `undefined` when the entry is known to be empty
+   * (freshly created session, or one this instance cleared). A session
+   * **absent** from the map has unknown state and is never assumed empty.
+   *
+   * Lets a turn skip a redundant `put` (which would announce another
+   * durable system message) and, when a later call carries no system
+   * content, remove the entry the previous call left behind instead of
+   * leaking a stale system prompt into the conversation.
    *
    * Bounded FIFO: under `createNewSession` every call binds a *new* session,
    * so an unbounded map would grow for the life of the model instance.
-   * Eviction is harmless — a forgotten session just costs one redundant
-   * `put` if it is ever revisited — and insertion order evicts exactly the
-   * sessions `createNewSession` will never touch again.
+   * Eviction costs correctness nothing because it produces "unknown", not
+   * "empty": a revisited evicted session is reconciled with one extra
+   * request rather than silently keeping a stale entry.
    */
-  private readonly systemEntryValues = new Map<string, string>();
+  private readonly systemEntryValues = new Map<string, string | undefined>();
   private static readonly SYSTEM_ENTRY_CACHE_LIMIT = 32;
   /**
    * Sticky feature-detection for the instruction-entry route: set to false
@@ -845,6 +854,9 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       // Always pin the newly created session: approval continuation must be
       // able to reattach even under createNewSession per-call isolation.
       this.pinnedSessionId = session.id;
+      // A session created a moment ago holds no instruction entries, so a
+      // turn without system content can skip the reconciling `remove`.
+      this.rememberSystemEntry(session.id, undefined);
       return { sessionId: session.id, fresh: true };
     } catch (error) {
       throw wrapError(error, {
@@ -1051,15 +1063,30 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
    *   - route or client missing, value over the cap, or the write fails →
    *     report why, and the caller degrades to the delimited prepend.
    *
+   * A turn that cannot write its value into the entry (over the cap, failed
+   * write) must still **clear** whatever the entry holds. Leaving the old
+   * value in place would keep a stale, higher-priority system prompt
+   * governing the session while this turn's content only reaches the model
+   * as prepended user text — the model would obey the wrong prompt. The
+   * clear is idempotent server-side (verified: removing an absent key
+   * succeeds), so it is safe to attempt whenever the entry's state is not
+   * known to be empty.
+   *
    * Returns `{viaEntry: true}` when the session's entry state now matches
-   * this turn (including the "nothing to do" cases).
+   * this turn (including the "nothing to do" cases). `staleEntry` is true
+   * when a previous value could not be cleared and may still apply.
    */
   private async applySystemInstruction(
     turn: TurnContext,
     systemText: string | undefined,
-  ): Promise<{ viaEntry: boolean; reason: string }> {
+  ): Promise<{ viaEntry: boolean; reason: string; staleEntry?: boolean }> {
+    // `has` and the value are distinct facts: an absent key means "unknown
+    // state" (a session this instance never wrote, or one evicted from the
+    // cache while holding a value), while a stored `undefined` means "known
+    // to hold no entry". Only the latter may skip a clear.
+    const known = this.systemEntryValues.has(turn.sessionId);
     const previous = this.systemEntryValues.get(turn.sessionId);
-    if (systemText === previous) {
+    if (known && systemText === previous) {
       return { viaEntry: true, reason: "unchanged" };
     }
 
@@ -1073,64 +1100,109 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
 
     const requestOptions = this.requestOptions(turn.headers, turn.callSignal);
 
-    // System content withdrawn: clear what a previous call left behind.
-    if (systemText === undefined) {
-      try {
-        await entries.remove(
-          { sessionID: turn.sessionId, key: SYSTEM_INSTRUCTION_KEY },
-          requestOptions,
-        );
-        this.systemEntryValues.delete(turn.sessionId);
-      } catch (error) {
-        // Non-fatal: the stale entry stays, but this call carries no system
-        // content of its own, so there is nothing to degrade to a prepend.
-        this.logger.warn(
-          `Failed to clear the system instruction entry on session ` +
-            `${turn.sessionId}: ${extractErrorMessage(error)}`,
-        );
-      }
-      return { viaEntry: true, reason: "cleared" };
-    }
-
-    if (!fitsInstructionValue(systemText)) {
-      return {
-        viaEntry: false,
-        reason:
+    // Reason this turn's content could not be written into the entry, if it
+    // had content at all.
+    let failure: string | undefined;
+    if (systemText !== undefined) {
+      if (!fitsInstructionValue(systemText)) {
+        failure =
           `the system prompt is ${instructionValueBytes(systemText)} bytes ` +
           `and the server caps an instruction entry at ` +
-          `${INSTRUCTION_VALUE_MAX_BYTES}`,
-      };
+          `${INSTRUCTION_VALUE_MAX_BYTES}`;
+      } else {
+        try {
+          await entries.put(
+            {
+              sessionID: turn.sessionId,
+              key: SYSTEM_INSTRUCTION_KEY,
+              value: systemText,
+            },
+            requestOptions,
+          );
+          this.instructionEntriesSupported = true;
+          this.rememberSystemEntry(turn.sessionId, systemText);
+          return { viaEntry: true, reason: "written" };
+        } catch (error) {
+          // Only an explicitly absent route earns the sticky disable. Any
+          // other failure (transport blip, busy session, unknown status)
+          // gets retried on the next turn rather than silently downgrading
+          // the whole conversation to prepends.
+          if (isMissingRouteError(error)) {
+            this.instructionEntriesSupported = false;
+          }
+          failure = `the write failed: ${extractErrorMessage(error)}`;
+        }
+      }
     }
 
+    // Fall through: this turn either dropped its system content or could not
+    // write it. Either way the entry must not keep serving the old value.
+    const cleared = await this.clearSystemEntry(
+      entries,
+      turn,
+      requestOptions,
+      known && previous === undefined,
+    );
+
+    if (failure === undefined) {
+      return cleared.ok
+        ? { viaEntry: true, reason: "cleared" }
+        : {
+            viaEntry: false,
+            reason: `a previously written system prompt could not be removed (${cleared.error})`,
+            staleEntry: true,
+          };
+    }
+    return {
+      viaEntry: false,
+      reason: failure,
+      ...(cleared.ok ? {} : { staleEntry: true }),
+    };
+  }
+
+  /**
+   * Best-effort removal of this provider's instruction entry.
+   *
+   * `alreadyEmpty` short-circuits the request for a session whose entry
+   * state is known-empty (freshly created, or cleared by an earlier turn);
+   * every other case issues the `remove`, because an unknown state may be a
+   * session still carrying a value this instance wrote before the cache
+   * evicted it.
+   */
+  private async clearSystemEntry(
+    entries: InstructionEntryPort,
+    turn: TurnContext,
+    requestOptions: OpencodeRequestOptions,
+    alreadyEmpty: boolean,
+  ): Promise<{ ok: boolean; error?: string }> {
+    if (alreadyEmpty) {
+      return { ok: true };
+    }
     try {
-      await entries.put(
-        {
-          sessionID: turn.sessionId,
-          key: SYSTEM_INSTRUCTION_KEY,
-          value: systemText,
-        },
+      await entries.remove(
+        { sessionID: turn.sessionId, key: SYSTEM_INSTRUCTION_KEY },
         requestOptions,
       );
-      this.instructionEntriesSupported = true;
-      this.rememberSystemEntry(turn.sessionId, systemText);
-      return { viaEntry: true, reason: "written" };
+      this.rememberSystemEntry(turn.sessionId, undefined);
+      return { ok: true };
     } catch (error) {
-      // Only an explicitly absent route earns the sticky disable. Any other
-      // failure (transport blip, busy session, unknown status) gets retried
-      // on the next turn rather than silently downgrading the whole
-      // conversation to prepends.
-      if (isMissingRouteError(error)) {
-        this.instructionEntriesSupported = false;
-      }
-      return {
-        viaEntry: false,
-        reason: `the write failed: ${extractErrorMessage(error)}`,
-      };
+      const message = extractErrorMessage(error);
+      this.logger.warn(
+        `Failed to clear the system instruction entry on session ` +
+          `${turn.sessionId}: ${message}`,
+      );
+      // Forget the session rather than record a value: the entry's state is
+      // now unknown, so the next turn must try to reconcile it again.
+      this.systemEntryValues.delete(turn.sessionId);
+      return { ok: false, error: message };
     }
   }
 
-  /** Record a written entry value, evicting the oldest session when full. */
-  private rememberSystemEntry(sessionId: string, value: string): void {
+  /** Record entry state for a session, evicting the oldest when full. */
+  private rememberSystemEntry(
+    sessionId: string,
+    value: string | undefined,
+  ): void {
     this.systemEntryValues.delete(sessionId);
     this.systemEntryValues.set(sessionId, value);
     while (
@@ -1172,6 +1244,11 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     const systemText =
       systemParts.length > 0 ? systemParts.join("\n\n") : undefined;
     const applied = await this.applySystemInstruction(turn, systemText);
+    const stale =
+      applied.staleEntry === true
+        ? ` A system prompt written to this session earlier could not be ` +
+          `removed and may still apply.`
+        : "";
     if (!applied.viaEntry && systemText !== undefined) {
       // Fallback: no instruction-entry channel, so degrade to the delimited
       // prepend. On a reused session the prepend still reaches the model as
@@ -1183,7 +1260,19 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         details:
           `System content could not be written as a session instruction ` +
           `entry (${applied.reason}); it was prepended to this turn's text ` +
-          `as a delimited block instead (system-role priority is lost).`,
+          `as a delimited block instead (system-role priority is lost).` +
+          stale,
+      });
+    } else if (!applied.viaEntry && applied.staleEntry === true) {
+      // This call carries no system content of its own, so there is nothing
+      // to prepend — but the session is still governed by the entry we could
+      // not remove, and the caller has to be told.
+      turn.warnings.push({
+        type: "unsupported",
+        feature: "system prompt",
+        details:
+          `This call carries no system content, but ${applied.reason}, so ` +
+          `the session may still be governed by it.`,
       });
     }
 
