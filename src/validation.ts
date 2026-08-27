@@ -59,6 +59,8 @@ const serviceOptionsSchema = z.object({
   file: z.string().optional(),
   version: z.union([z.string(), z.function()]).optional(),
   command: z.array(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  onStart: z.function().optional(),
 });
 
 /**
@@ -66,6 +68,7 @@ const serviceOptionsSchema = z.object({
  */
 export const opcodeProviderSettingsSchema = z.object({
   client: z.object({}).passthrough().optional(),
+  clientManager: z.object({}).passthrough().optional(),
   baseUrl: z.string().url().optional(),
   service: serviceOptionsSchema.optional(),
   autoStart: z.boolean().optional(),
@@ -158,8 +161,8 @@ export function validateSettings(
 
 /**
  * Validate OpencodeProviderSettings, enforcing backend exclusivity:
- * exactly one of `client`, `baseUrl`, or service discovery is used, with
- * precedence client > baseUrl > service.
+ * exactly one of `client`, `clientManager`, `baseUrl`, or service discovery
+ * is used, with precedence client > clientManager > baseUrl > service.
  */
 export function validateProviderSettings(
   settings: OpencodeProviderSettings | undefined,
@@ -184,6 +187,30 @@ export function validateProviderSettings(
   }
 
   // Backend exclusivity
+  if (settings.client && settings.clientManager) {
+    warnings.push(
+      "Both client and clientManager were provided; client takes precedence and clientManager will be ignored",
+    );
+  }
+
+  if (settings.clientManager && !settings.client && settings.baseUrl) {
+    warnings.push(
+      "Both clientManager and baseUrl were provided; clientManager takes precedence and baseUrl will be ignored",
+    );
+  }
+
+  if (settings.clientManager && !settings.client && settings.service) {
+    warnings.push(
+      "Both clientManager and service were provided; clientManager takes precedence and service discovery will be skipped",
+    );
+  }
+
+  if (settings.clientManager && settings.clientOptions) {
+    warnings.push(
+      "Both clientManager and clientOptions were provided; clientOptions will be ignored because a manager backend supplies its own client",
+    );
+  }
+
   if (settings.client && settings.baseUrl) {
     warnings.push(
       "Both client and baseUrl were provided; client takes precedence and baseUrl will be ignored",
@@ -208,7 +235,10 @@ export function validateProviderSettings(
     );
   }
 
-  if (settings.autoStart && (settings.client || settings.baseUrl)) {
+  if (
+    settings.autoStart &&
+    (settings.client || settings.clientManager || settings.baseUrl)
+  ) {
     warnings.push(
       "autoStart only applies to the service-discovery backend and will be ignored",
     );

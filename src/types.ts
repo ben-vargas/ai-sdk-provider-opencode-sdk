@@ -13,6 +13,7 @@ import type {
   TokenUsageInfo,
 } from "@opencode-ai/client";
 import type { EnsureOptions } from "@opencode-ai/client/service";
+import type { OpencodeClientPort } from "./client-port.js";
 
 /**
  * Model ID format for OpenCode provider.
@@ -44,8 +45,56 @@ export type OpencodeClientOptions = Omit<
  */
 export type OpencodeServiceOptions = Pick<
   EnsureOptions,
-  "file" | "version" | "command"
+  "file" | "version" | "command" | "env" | "onStart"
 >;
+
+/**
+ * Backend abstraction that produces the client-port the language model runs
+ * against. `createOpencode` builds one from provider settings (or accepts a
+ * caller-supplied instance via `clientManager`); a future `./embedded`
+ * entrypoint injects a port through the same seam
+ * (`createClientManagerFromPort`).
+ */
+export interface OpencodeClientManager {
+  /**
+   * Resolve the client-port for a generation. The first call performs backend
+   * acquisition (client construction / service discovery) plus a preflight
+   * (`health.get` + `migration.v1.status`); the result is cached, and a
+   * failed acquisition is retried on the next call.
+   */
+  getPort(): Promise<OpencodeClientPort>;
+
+  /**
+   * Server base URL, when the backend exposes one: the configured `baseUrl`,
+   * or the discovered service endpoint URL after the first successful
+   * acquisition. Undefined for caller-supplied clients and injected ports
+   * (no endpoint is knowable).
+   */
+  getServerUrl(): string | undefined;
+
+  /**
+   * Whether this manager started the server process itself (`Service.ensure`
+   * spawned it). Always false for discover-only, baseUrl, and caller-supplied
+   * backends.
+   */
+  isServerManaged(): boolean;
+
+  /**
+   * Explicitly stop the registered local service (`Service.stop`). This is a
+   * user-invoked action and is allowed even on the shared default
+   * registration; it throws on non-service backends. `dispose()` never does
+   * this unless the manager runs in owned mode (dedicated registration
+   * `file` + `autoStart`).
+   */
+  stopService(): Promise<void>;
+
+  /**
+   * Release provider-owned resources. Never closes caller-supplied clients
+   * and never stops a shared registered service; stops the service only in
+   * owned mode (dedicated registration `file` + `autoStart`).
+   */
+  dispose(): Promise<void>;
+}
 
 /**
  * Logger interface for the OpenCode provider.
@@ -282,20 +331,30 @@ export interface OpencodeSettings {
  * Backend selection (mutually exclusive; precedence in this order):
  * 1. `client` — caller-supplied v2 client, used as-is (never disposed by the
  *    provider).
- * 2. `baseUrl` — `OpenCode.make({baseUrl, ...clientOptions})`.
- * 3. service discovery — `Service.discover()` (or `Service.ensure()` when
+ * 2. `clientManager` — caller-supplied manager, used as-is (never disposed
+ *    by the provider).
+ * 3. `baseUrl` — `OpenCode.make({baseUrl, ...clientOptions})`.
+ * 4. service discovery — `Service.discover()` (or `Service.ensure()` when
  *    `autoStart` is true) using `service` options; endpoint auth headers are
- *    merged automatically.
+ *    merged under user headers automatically.
  *
- * v4's `hostname`/`port`/`serverTimeout` probing and the injectable
- * `clientManager` have no v2 equivalent and were removed (v5 break).
+ * v4's `hostname`/`port`/`serverTimeout` probing has no v2 equivalent and
+ * was removed (v5 break).
  */
 export interface OpencodeProviderSettings {
   /**
    * Preconfigured OpenCode v2 client. When provided, backend management is
-   * bypassed and `baseUrl`/`service`/`autoStart`/`clientOptions` are ignored.
+   * bypassed and `clientManager`/`baseUrl`/`service`/`autoStart`/
+   * `clientOptions` are ignored.
    */
   client?: OpencodeClient;
+
+  /**
+   * Caller-supplied client manager (retyped v4 injection seam). Used as-is:
+   * the provider never disposes it — `provider.dispose()` is a no-op for
+   * injected managers.
+   */
+  clientManager?: OpencodeClientManager;
 
   /**
    * Base URL of an OpenCode v2 server. Takes precedence over service
@@ -359,9 +418,15 @@ export interface OpencodeProvider extends ProviderV4 {
   chat(modelId: OpencodeModelId, settings?: OpencodeSettings): LanguageModelV4;
 
   /**
+   * The client manager backing this provider (advanced usage: server URL,
+   * explicit `stopService()`).
+   */
+  getClientManager(): OpencodeClientManager;
+
+  /**
    * Dispose provider-owned resources (embedded host, event subscriptions).
-   * Never stops a shared registered service or closes caller-supplied
-   * clients.
+   * Never stops a shared registered service, never closes caller-supplied
+   * clients, and never disposes an injected `clientManager`.
    */
   dispose(): Promise<void>;
 }
