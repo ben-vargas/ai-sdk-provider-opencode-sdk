@@ -430,7 +430,7 @@ _harness_ (now spawns the published binary; the source build survives as an
 opt-in fallback behind `OPENCODE_BETA_SRC_DIR`) and the _claims_ in the docs.
 
 Residual, verified packaging problems are written up in
-`docs/upstream-issues/client-cli-version-skew.md`: `@opencode-ai/cli`'s
+`docs/known-upstream-issues/client-cli-version-skew.md`: `@opencode-ai/cli`'s
 `latest`/`next` point at `0.0.0-beta-17823`, **behind** its own `beta`
 (`18314`); the same dist-tag does not pair across packages (`client@beta` is
 `18371` while `cli@beta` is `18314`); and no documented rule says the build
@@ -541,7 +541,7 @@ as an observation, not as evidence. **Nothing in the committed artifacts
 establishes that an instruction entry overrides the agent's system prompt.**
 What would settle it: run the two arms repeatedly until both produce
 answers — the script does not do this — against a model that is not
-saturated. This is why `docs/upstream-issues/per-prompt-system.md` still
+saturated. This is why `docs/known-upstream-issues/per-prompt-system.md` still
 asks upstream to document the ordering rather than citing ours.
 
 Probe robustness fixes applied alongside (the free-tier models were far
@@ -695,7 +695,7 @@ UTF-8 length, and JSON-escaped characters their escaped length.
 
 What remains undocumented upstream — precedence guarantees, **compaction
 survival**, key-namespacing conventions, whether a no-op put is suppressed
-server-side — is written up in `docs/upstream-issues/per-prompt-system.md`,
+server-side — is written up in `docs/known-upstream-issues/per-prompt-system.md`,
 which is now a docs request rather than the API-change request it was.
 
 ## Reproduction (stage 9)
