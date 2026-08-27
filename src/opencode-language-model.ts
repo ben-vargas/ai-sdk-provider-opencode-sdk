@@ -65,12 +65,19 @@ import {
 import {
   extractErrorMessage,
   isAbortError,
+  isMissingRouteError,
   isTaggedError,
   needsSessionReconciliation,
   wrapError,
   type OpencodeErrorData,
 } from "./errors.js";
 import { getLogger, logUnsupportedCallOptions } from "./logger.js";
+import {
+  fitsInstructionValue,
+  instructionValueBytes,
+  INSTRUCTION_VALUE_MAX_BYTES,
+  SYSTEM_INSTRUCTION_KEY,
+} from "./system-instruction.js";
 import { mapOpencodeFinishReason } from "./map-opencode-finish-reason.js";
 import type {
   Logger,
@@ -343,6 +350,20 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
   private readonly handledFormRequests = new Set<string>();
   /** In-flight form response attempts, keyed by form ID. */
   private readonly inFlightFormRequests = new Map<string, Promise<boolean>>();
+  /**
+   * sessionId → the system-prompt value currently written to that session's
+   * `ai-sdk.system` instruction entry. Lets a turn skip a redundant `put`
+   * (which would announce another durable system message) and, when a later
+   * call carries no system content, remove the entry the previous call left
+   * behind instead of leaking a stale system prompt into the conversation.
+   */
+  private readonly systemEntryValues = new Map<string, string>();
+  /**
+   * Sticky feature-detection for the instruction-entry route: set to false
+   * only when the server answers a `put` with "this route does not exist",
+   * so one absent route does not cost a failed request on every later turn.
+   */
+  private instructionEntriesSupported: boolean | undefined;
   /**
    * Per-instance turn serialization: one model instance = one conversation =
    * one pinned session, and the session admits one active generation.
@@ -1005,6 +1026,102 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     }
   }
 
+  /**
+   * Reconcile this turn's system content with the session's `ai-sdk.system`
+   * instruction entry.
+   *
+   * The entry is the real system-prompt channel: it renders as a
+   * `<context key="ai-sdk.system">…</context>` block into the instruction
+   * baseline after the agent's own system prompt, and is re-rendered on
+   * every turn — so unlike the v4-era prepend it works on reused sessions
+   * too (verified live; see `src/system-instruction.ts`).
+   *
+   * Reconciliation, not blind writing:
+   *   - value unchanged since the last turn → no request, because a
+   *     redundant `put` announces another durable system message,
+   *   - system content dropped by this call → `remove`, so a previous
+   *     call's system prompt cannot leak into later turns,
+   *   - route or client missing, value over the cap, or the write fails →
+   *     report why, and the caller degrades to the delimited prepend.
+   *
+   * Returns `{viaEntry: true}` when the session's entry state now matches
+   * this turn (including the "nothing to do" cases).
+   */
+  private async applySystemInstruction(
+    turn: TurnContext,
+    systemText: string | undefined,
+  ): Promise<{ viaEntry: boolean; reason: string }> {
+    const previous = this.systemEntryValues.get(turn.sessionId);
+    if (systemText === previous) {
+      return { viaEntry: true, reason: "unchanged" };
+    }
+
+    const entries = turn.port.session.instructions?.entry;
+    if (entries === undefined || this.instructionEntriesSupported === false) {
+      return {
+        viaEntry: false,
+        reason: "the server does not expose session instruction entries",
+      };
+    }
+
+    const requestOptions = this.requestOptions(turn.headers, turn.callSignal);
+
+    // System content withdrawn: clear what a previous call left behind.
+    if (systemText === undefined) {
+      try {
+        await entries.remove(
+          { sessionID: turn.sessionId, key: SYSTEM_INSTRUCTION_KEY },
+          requestOptions,
+        );
+        this.systemEntryValues.delete(turn.sessionId);
+      } catch (error) {
+        // Non-fatal: the stale entry stays, but this call carries no system
+        // content of its own, so there is nothing to degrade to a prepend.
+        this.logger.warn(
+          `Failed to clear the system instruction entry on session ` +
+            `${turn.sessionId}: ${extractErrorMessage(error)}`,
+        );
+      }
+      return { viaEntry: true, reason: "cleared" };
+    }
+
+    if (!fitsInstructionValue(systemText)) {
+      return {
+        viaEntry: false,
+        reason:
+          `the system prompt is ${instructionValueBytes(systemText)} bytes ` +
+          `and the server caps an instruction entry at ` +
+          `${INSTRUCTION_VALUE_MAX_BYTES}`,
+      };
+    }
+
+    try {
+      await entries.put(
+        {
+          sessionID: turn.sessionId,
+          key: SYSTEM_INSTRUCTION_KEY,
+          value: systemText,
+        },
+        requestOptions,
+      );
+      this.instructionEntriesSupported = true;
+      this.systemEntryValues.set(turn.sessionId, systemText);
+      return { viaEntry: true, reason: "written" };
+    } catch (error) {
+      // Only an explicitly absent route earns the sticky disable. Any other
+      // failure (transport blip, busy session, unknown status) gets retried
+      // on the next turn rather than silently downgrading the whole
+      // conversation to prepends.
+      if (isMissingRouteError(error)) {
+        this.instructionEntriesSupported = false;
+      }
+      return {
+        viaEntry: false,
+        reason: `the write failed: ${extractErrorMessage(error)}`,
+      };
+    }
+  }
+
   /** Ordinary dispatch: convert the prompt and send it (busy → queue retry). */
   private async dispatchPrompt(
     turn: TurnContext,
@@ -1029,26 +1146,22 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       ...(this.settings.systemPrompt ? [this.settings.systemPrompt] : []),
       ...(conversion.systemBlock !== undefined ? [conversion.systemBlock] : []),
     ];
-    if (systemParts.length > 0) {
-      if (flags.freshSession) {
-        text = prependSystemBlock(text, systemParts.join("\n\n"));
-        turn.warnings.push({
-          type: "unsupported",
-          feature: "system prompt",
-          details:
-            "OpenCode v2 has no per-prompt system field; the system content " +
-            "was prepended to the first turn's text as a delimited block " +
-            "(system-role priority is lost).",
-        });
-      } else {
-        turn.warnings.push({
-          type: "unsupported",
-          feature: "system prompt",
-          details:
-            "System content is only sent on a session's first prompt; this " +
-            "call reuses an existing OpenCode session, so it was skipped.",
-        });
-      }
+    const systemText =
+      systemParts.length > 0 ? systemParts.join("\n\n") : undefined;
+    const applied = await this.applySystemInstruction(turn, systemText);
+    if (!applied.viaEntry && systemText !== undefined) {
+      // Fallback: no instruction-entry channel, so degrade to the delimited
+      // prepend. On a reused session the prepend still reaches the model as
+      // ordinary user text — worse than a system entry, but not nothing.
+      text = prependSystemBlock(text, systemText);
+      turn.warnings.push({
+        type: "unsupported",
+        feature: "system prompt",
+        details:
+          `System content could not be written as a session instruction ` +
+          `entry (${applied.reason}); it was prepended to this turn's text ` +
+          `as a delimited block instead (system-role priority is lost).`,
+      });
     }
 
     const promptInput: SessionPromptInput = {
@@ -2593,7 +2706,10 @@ function checkJsonSchema(
       );
     }
   }
-  if (Array.isArray(s["enum"]) && !s["enum"].some((e) => jsonEquals(e, value))) {
+  if (
+    Array.isArray(s["enum"]) &&
+    !s["enum"].some((e) => jsonEquals(e, value))
+  ) {
     return `${path}: value is not one of the enum values`;
   }
   if ("const" in s && !jsonEquals(s["const"], value)) {
@@ -2662,7 +2778,9 @@ function checkJsonSchema(
 function matchesJsonType(value: unknown, type: string): boolean {
   switch (type) {
     case "object":
-      return value !== null && typeof value === "object" && !Array.isArray(value);
+      return (
+        value !== null && typeof value === "object" && !Array.isArray(value)
+      );
     case "array":
       return Array.isArray(value);
     case "string":

@@ -49,6 +49,26 @@ export interface OpencodeClientPort {
      * pending items (delivery-uncertainty check after a failed prompt).
      */
     readonly inbox: Pick<OpenCodeClient["session"]["inbox"], "cancel" | "list">;
+    /**
+     * Session instruction entries — the real system-prompt channel.
+     *
+     * An entry renders as `<context key="...">value</context>` into the
+     * session's instruction baseline, ahead of the user turn and after the
+     * agent's own system prompt, and is re-rendered on every turn (verified
+     * live against `opencode2@0.0.0-beta-18286`; see
+     * spike/artifacts/14b-instruction-entries.json).
+     *
+     * Optional on the port on purpose: an alternative backend (or a client
+     * build predating the route) may not implement it, and the provider
+     * feature-detects rather than assuming — falling back to the delimited
+     * prepend when the route is absent.
+     */
+    readonly instructions?: {
+      readonly entry: Pick<
+        OpenCodeClient["session"]["instructions"]["entry"],
+        "put" | "remove" | "list"
+      >;
+    };
   };
   readonly message: Pick<OpenCodeClient["message"], "list">;
   /** Catalog lookup: resolves a bare model ID + variant to a providerID. */

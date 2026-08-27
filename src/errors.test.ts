@@ -6,6 +6,7 @@ import {
   getClientErrorStatus,
   isAbortError,
   isClientError,
+  isMissingRouteError,
   isTaggedError,
   needsSessionReconciliation,
   normalizeStructuredError,
@@ -442,5 +443,43 @@ describe("extractErrorMessage", () => {
     expect(extractErrorMessage({ message: "pow" })).toBe("pow");
     expect(extractErrorMessage(null)).toBe("Unknown error");
     expect(extractErrorMessage(42)).toBe("Unknown error");
+  });
+});
+
+describe("isMissingRouteError", () => {
+  const clientError = (status?: number) =>
+    Object.assign(new Error("boom"), {
+      name: "ClientError",
+      reason: "StatusCode",
+      ...(status === undefined ? {} : { cause: { status } }),
+    });
+
+  it.each([404, 405, 501])("is true for an explicit %i", (status) => {
+    expect(isMissingRouteError(clientError(status))).toBe(true);
+  });
+
+  it.each([400, 401, 409, 429, 500, 503])(
+    "is false for %i — the route exists, the request was refused",
+    (status) => {
+      expect(isMissingRouteError(clientError(status))).toBe(false);
+    },
+  );
+
+  it("is false when the status is unknown (not proven absent)", () => {
+    expect(isMissingRouteError(clientError())).toBe(false);
+  });
+
+  it("is false for a typed API error, which says nothing about the route", () => {
+    expect(
+      isMissingRouteError({
+        _tag: "InstructionEntryValueTooLargeError",
+        message: "too large",
+      }),
+    ).toBe(false);
+  });
+
+  it("is false for a plain error", () => {
+    expect(isMissingRouteError(new Error("nope"))).toBe(false);
+    expect(isMissingRouteError(undefined)).toBe(false);
   });
 });

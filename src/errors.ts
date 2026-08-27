@@ -182,6 +182,31 @@ export function getClientErrorStatus(error: ClientError): number | undefined {
 }
 
 /**
+ * True when the server said the route itself does not exist, rather than
+ * rejecting the request it carried.
+ *
+ * Used for optional-capability feature detection (e.g. session instruction
+ * entries): a route that is absent is absent for the rest of the
+ * conversation, so the provider can stop probing it — while a rejected
+ * *request* (a typed `_tag` error such as a value-too-large or
+ * session-not-found) says nothing about the route and must not disable it.
+ *
+ * Conservative by construction: only an explicit 404/405/501 counts. An
+ * unknown status is treated as "not proven absent", which costs one failed
+ * request per turn in the worst case but never disables a working route.
+ */
+export function isMissingRouteError(error: unknown): boolean {
+  if (isTaggedError(error)) {
+    return false;
+  }
+  if (!isClientError(error)) {
+    return false;
+  }
+  const status = getClientErrorStatus(error);
+  return status === 404 || status === 405 || status === 501;
+}
+
+/**
  * Extract a human-readable message from an unknown error.
  */
 export function extractErrorMessage(error: unknown): string {

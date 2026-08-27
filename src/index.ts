@@ -90,6 +90,15 @@ export type {
   OpencodePromptFile,
 } from "./convert-to-opencode-messages.js";
 
+// System-prompt (session instruction entry) exports
+export {
+  fitsInstructionValue,
+  instructionValueBytes,
+  INSTRUCTION_KEY_PATTERN,
+  INSTRUCTION_VALUE_MAX_BYTES,
+  SYSTEM_INSTRUCTION_KEY,
+} from "./system-instruction.js";
+
 // Event reducer exports
 export {
   convertV2EventToStreamParts,

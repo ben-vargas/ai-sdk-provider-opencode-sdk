@@ -262,10 +262,18 @@ export interface OpencodeSettings {
   /**
    * Custom system prompt.
    *
-   * DEGRADED in v2: there is no per-prompt or per-session system field on the
-   * network API. The provider prepends a delimited system block to the first
-   * user turn and emits an unsupported-degraded warning (system-role priority
-   * is lost). True system semantics require the embedded host's plugin hooks.
+   * Delivered as a session **instruction entry** under the namespaced key
+   * `ai-sdk.system`: the server renders it as
+   * `<context key="ai-sdk.system">…</context>` into the session's
+   * instruction baseline, after the agent's own system prompt and ahead of
+   * the user turn, and re-renders it on every turn — so it applies to reused
+   * sessions, not just the first prompt. AI SDK `system:` messages are
+   * joined with this value (settings first) and written to the same entry.
+   *
+   * Fallback: when the server exposes no instruction-entry route, or the
+   * value exceeds the server's 8192-byte cap, or the write fails, the
+   * provider degrades to prepending a delimited system block to the turn's
+   * text and emits an `unsupported` warning naming the reason.
    */
   systemPrompt?: string;
 

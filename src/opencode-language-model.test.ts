@@ -127,6 +127,14 @@ interface FakePortHooks {
   inboxListError?: unknown;
   /** Scripted generate.text responses (throw inside to fail the call). */
   generateText?: (input: Record<string, unknown>) => { text: string };
+  /**
+   * Expose `session.instructions.entry` on the port. Off by default so the
+   * existing suite keeps exercising the no-entry fallback; the
+   * system-prompt tests turn it on.
+   */
+  instructionEntries?: boolean;
+  /** Make `session.instructions.entry.put` reject with this. */
+  instructionPutError?: unknown;
 }
 
 interface FakePort {
@@ -236,6 +244,28 @@ function createFakePort(hooks: FakePortHooks = {}): FakePort {
           return Promise.resolve(typeof items === "function" ? items() : items);
         },
       },
+      ...(hooks.instructionEntries
+        ? {
+            instructions: {
+              entry: {
+                put: (
+                  input: Record<string, unknown>,
+                  options?: OpencodeRequestOptions,
+                ) => {
+                  record("session.instructions.entry.put", input, options);
+                  return hooks.instructionPutError !== undefined
+                    ? Promise.reject(hooks.instructionPutError)
+                    : Promise.resolve(undefined);
+                },
+                remove: fn(
+                  "session.instructions.entry.remove",
+                  () => undefined,
+                ),
+                list: fn("session.instructions.entry.list", () => []),
+              },
+            },
+          }
+        : {}),
     },
     generate: {
       text: (
@@ -1437,7 +1467,7 @@ describe("call-option degradations", () => {
     expect(String(prompt["text"])).toContain('"a"');
   });
 
-  it("degrades the system prompt into the first turn's text with a warning", async () => {
+  it("degrades the system prompt into the turn's text when the server has no instruction-entry route", async () => {
     const fake = createFakePort();
     scriptTextTurn(fake);
     const model = createModel(fake, { systemPrompt: "Be terse." });
@@ -1463,6 +1493,161 @@ describe("call-option degradations", () => {
           warning.type === "unsupported" && warning.feature === "system prompt",
       ),
     ).toBe(true);
+  });
+
+  it("writes the system prompt as an instruction entry — no prepend, no warning", async () => {
+    const fake = createFakePort({ instructionEntries: true });
+    scriptTextTurn(fake);
+    const model = createModel(fake, { systemPrompt: "Be terse." });
+
+    const result = await model.doGenerate(
+      callOptions({
+        prompt: [
+          { role: "system", content: "Answer in French." },
+          ...userPrompt("Bonjour?"),
+        ],
+      }),
+    );
+
+    const put = fake.callsFor("session.instructions.entry.put")[0]!
+      .input as Record<string, unknown>;
+    expect(put["key"]).toBe("ai-sdk.system");
+    expect(put["value"]).toBe("Be terse.\n\nAnswer in French.");
+    const prompt = fake.callsFor("session.prompt")[0]!.input as Record<
+      string,
+      unknown
+    >;
+    expect(String(prompt["text"])).not.toContain("<<<opencode:system>>>");
+    expect(String(prompt["text"])).toBe("Bonjour?");
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.type === "unsupported" && warning.feature === "system prompt",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not rewrite an unchanged instruction entry on a later turn", async () => {
+    const fake = createFakePort({ instructionEntries: true });
+    scriptTextTurn(fake);
+    const model = createModel(fake, { systemPrompt: "Be terse." });
+
+    await model.doGenerate(callOptions());
+    scriptTextTurn(fake);
+    await model.doGenerate(callOptions());
+
+    // A redundant put would announce another durable system message.
+    expect(fake.callsFor("session.instructions.entry.put").length).toBe(1);
+  });
+
+  it("removes the entry when a later call carries no system content", async () => {
+    const fake = createFakePort({ instructionEntries: true });
+    scriptTextTurn(fake);
+    const model = createModel(fake);
+
+    await model.doGenerate(
+      callOptions({
+        prompt: [
+          { role: "system", content: "Answer in French." },
+          ...userPrompt("Bonjour?"),
+        ],
+      }),
+    );
+    scriptTextTurn(fake);
+    await model.doGenerate(callOptions());
+
+    const remove = fake.callsFor("session.instructions.entry.remove")[0]!
+      .input as Record<string, unknown>;
+    expect(remove["key"]).toBe("ai-sdk.system");
+    // A stale system prompt must not leak into the second turn's text.
+    const second = fake.callsFor("session.prompt")[1]!.input as Record<
+      string,
+      unknown
+    >;
+    expect(String(second["text"])).not.toContain("Answer in French.");
+  });
+
+  it("falls back to the prepend when the system prompt exceeds the entry size cap", async () => {
+    const fake = createFakePort({ instructionEntries: true });
+    scriptTextTurn(fake);
+    // 8191 raw chars encode to 8193 JSON bytes — one over the server's cap.
+    const oversized = "y".repeat(8191);
+    const model = createModel(fake, { systemPrompt: oversized });
+
+    const result = await model.doGenerate(callOptions());
+
+    expect(fake.callsFor("session.instructions.entry.put")).toEqual([]);
+    const prompt = fake.callsFor("session.prompt")[0]!.input as Record<
+      string,
+      unknown
+    >;
+    expect(String(prompt["text"])).toContain("<<<opencode:system>>>");
+    const warning = result.warnings.find(
+      (candidate) =>
+        candidate.type === "unsupported" &&
+        candidate.feature === "system prompt",
+    );
+    expect(warning).toBeDefined();
+    expect(JSON.stringify(warning)).toContain("8193 bytes");
+  });
+
+  it("falls back to the prepend when the entry write fails", async () => {
+    const fake = createFakePort({
+      instructionEntries: true,
+      instructionPutError: { _tag: "SessionBusyError", message: "busy" },
+    });
+    scriptTextTurn(fake);
+    const model = createModel(fake, { systemPrompt: "Be terse." });
+
+    const result = await model.doGenerate(callOptions());
+
+    const prompt = fake.callsFor("session.prompt")[0]!.input as Record<
+      string,
+      unknown
+    >;
+    expect(String(prompt["text"])).toContain("Be terse.");
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.type === "unsupported" && warning.feature === "system prompt",
+      ),
+    ).toBe(true);
+  });
+
+  it("retries the entry write on a later turn when the failure was not a missing route", async () => {
+    const fake = createFakePort({
+      instructionEntries: true,
+      instructionPutError: { _tag: "SessionBusyError", message: "busy" },
+    });
+    scriptTextTurn(fake);
+    const model = createModel(fake, { systemPrompt: "Be terse." });
+
+    await model.doGenerate(callOptions());
+    scriptTextTurn(fake);
+    await model.doGenerate(callOptions());
+
+    // A transient failure must not downgrade the whole conversation.
+    expect(fake.callsFor("session.instructions.entry.put").length).toBe(2);
+  });
+
+  it("stops probing the route after an explicit 404", async () => {
+    const notFound = Object.assign(new Error("no such route"), {
+      name: "ClientError",
+      reason: "StatusCode",
+      cause: { status: 404 },
+    });
+    const fake = createFakePort({
+      instructionEntries: true,
+      instructionPutError: notFound,
+    });
+    scriptTextTurn(fake);
+    const model = createModel(fake, { systemPrompt: "Be terse." });
+
+    await model.doGenerate(callOptions());
+    scriptTextTurn(fake);
+    await model.doGenerate(callOptions());
+
+    expect(fake.callsFor("session.instructions.entry.put").length).toBe(1);
   });
 });
 
@@ -2132,7 +2317,9 @@ describe("JSON validate/repair loop", () => {
           kind: { type: "string", enum: ["alpha", "beta"] },
           nested: {
             type: "object",
-            properties: { counts: { type: "array", items: { type: "integer" } } },
+            properties: {
+              counts: { type: "array", items: { type: "integer" } },
+            },
             required: ["counts"],
           },
         },
