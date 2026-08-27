@@ -1,14 +1,17 @@
 # Deferred-item ledger
 
-Items intentionally deferred by earlier stages. Stage 7 (docs, examples,
-hardening) picks these up explicitly, informed by the stage-6 beta-source
-findings; anything it defers further must stay on this list with a reason.
+Items intentionally deferred by earlier stages. Stage 7 (hardening) and
+stage 8 (ship prep) picked these up explicitly, informed by the stage-6
+beta-source findings; anything deferred further must stay on this list with
+a reason. Stage-8 status: items 1, 3, 4, 7, 8, 10 resolved; items 2, 5, 6,
+9, 11 remain open, each with a current reason (re-checked stage 8 — all
+are upstream-blocked or no-demonstrated-need, unchanged since stage 7).
 
 ## Deferred from stage 4 (language model)
 
 1. **`session.wait` watchdog.** ~~Not wired in.~~ **Resolved (stage 7).**
    The pump now arms a `session.wait` watchdog once `session.execution.
-   started` is observed (the one case whose wait semantics stage 6 pinned)
+started` is observed (the one case whose wait semantics stage 6 pinned)
    and races it against event-driven completion. Wait resolving while
    events show no terminal drains a short grace window
    (`waitWatchdogGraceMs`, default 2000 ms), then reconciles from the
@@ -45,13 +48,13 @@ findings; anything it defers further must stay on this list with a reason.
    caller-supplied id when one was sent, else exact text) is adopted as the
    turn's receipt and the pump keeps observing the running turn. Because
    the beta inbox table is **pending-only** (`projectDelivered` deletes the
-   row in the same transaction that promotes it), an inbox miss is *not*
+   row in the same transaction that promotes it), an inbox miss is _not_
    proof of non-delivery: the miss — or the check itself failing — next
    drains the live subscription for same-session activity events
    (inbox/execution/step/content/permission/form; `session.idle` excluded
    as ambiguous) for a bounded window (`deliveryEvidenceWindowMs`, default
    3 s) and keeps observing when activity is found. Only with no pending
-   row *and* no live activity does it fall through to the prior behavior
+   row _and_ no live activity does it fall through to the prior behavior
    (reconcile, else surface the non-retryable error) — reached only when
    the subscription itself is dead, where the message store is the sole
    remaining source. Unit-tested for the enqueued, delivered-before-check,
@@ -95,13 +98,26 @@ findings; anything it defers further must stay on this list with a reason.
    _Re-examined stage 7, still deferred:_ no demonstrated need — no skew
    incident has surfaced on `baseUrl`/caller-client backends, and the
    preflight already logs the server version for diagnosis.
-7. **Model shortcut refresh.** `OpencodeModels` retains the v4 catalog ids
-   (Claude 4.5 / GPT-4o / Gemini families) verbatim; no newer ids were added
-   because live-catalog ids for newer model families could not be verified
-   against a running v2 server in this stage. _Scheduled: stage 8._
-8. **Examples + README rewrite.** `examples/` and README still describe the
-   v1/v4 protocol (questions, `createOpencodeServer`, hostname/port); full
-   rewrite around the v5 surface is pending. _Scheduled: stage 8._
+7. **Model shortcut refresh.** **Resolved (stage 8).** `OpencodeModels`
+   was refreshed against the live beta-source harness catalog
+   (`model.list`, commit `f4a9b930`, snapshot 2026-08-27 UTC): only the
+   eight IDs verified present remain (six zen free-tier `opencode/*`
+   models plus the two built-in ollama cloud entries), with the snapshot
+   date and the catalog's server/credential dependence noted in the JSDoc.
+   The v4-era Anthropic/OpenAI/Google IDs were dropped — no reachable v2
+   catalog could verify them (they only appear once those providers'
+   credentials are configured on a server).
+8. **Examples + README rewrite.** **Resolved (stage 8).** README rewritten
+   around the v5 surface (status banner with the no-published-binary
+   caveat, backends, sessions/exclusivity, approvals, forms,
+   structured-output honesty, `data:`-URI files, settings reference,
+   limitations with verified steer semantics); every v1-era claim removed.
+   `examples/` replaced with six examples runnable against the harness via
+   `OPENCODE_BETA_URL`/`OPENCODE_BETA_PASSWORD` (basic-usage, streaming,
+   form-handling, tool-approval, client-options, abort-signal — all
+   executed green against a live beta-source server); v1/v4-only examples
+   deleted. Migration guide added (`docs/migrating-v4-to-v5.md`) and a real
+   5.0.0-beta.1 CHANGELOG entry written.
 
 ## Deferred from stage 6 (integration harness)
 
@@ -125,7 +141,7 @@ findings; anything it defers further must stay on this list with a reason.
     was observed in-flight: the remainder of the turn is **not** dropped
     (all steps plus the final text ran; one execution, terminal
     `session.execution.succeeded`), no `session.execution.interrupted`
-    fired with any reason, and the steered prompt was delivered *into* the
+    fired with any reason, and the steered prompt was delivered _into_ the
     in-flight turn as context (`session.inbox.delivered` mid-turn, pending
     inbox empty after) with **no separate execution and no dedicated
     answer** — whether the model honors it is model behavior (this model
