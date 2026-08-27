@@ -5,12 +5,11 @@
 > `beta` branch built from source — is **wrong**, and was wrong when written.
 > The matching server is published as **`@opencode-ai/cli`** (binary
 > **`opencode2`**) at the same build number as the pinned client. The earlier
-> conclusion came from probing **`opencode-ai`**, the *v1* package name.
+> conclusion came from probing **`opencode-ai`**, the _v1_ package name.
 > Stage 9 retargeted the harness to the published binary; the source build
 > survives only as an opt-in fallback behind `OPENCODE_BETA_SRC_DIR`. The
-> deliverables below were executed as written and their *findings* stand —
+> deliverables below were executed as written and their _findings_ stand —
 > only the "source-build-only" framing is superseded.
-
 
 ## Goal
 

@@ -9,7 +9,7 @@ server. Kept as a record, not as a draft to post.
 The draft was written from dev-CLI captures (`opencode-ai@0.0.0-dev-…`, the
 **v1** package's dev tag). It reported that `session.prompt` accepted every
 URI scheme at the API boundary, that only `data:` actually reached the model,
-and that anything else killed the turn *after* dispatch with a
+and that anything else killed the turn _after_ dispatch with a
 provider-internal error that never mentioned the file.
 
 On the server this provider actually targets — `@opencode-ai/cli@0.0.0-beta-18286`
@@ -19,14 +19,14 @@ Verified on the source build at stage 6
 published binary at stage 9 (`spike/artifacts/14-opencode2-verification.json`,
 `v6Files`), using an image-capable model:
 
-| URI form                    | Behaviour on `opencode2@0.0.0-beta-18286`                                                            |
-| --------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `data:image/png;base64,…`   | Works — model answers "Red"; stored as `source: {type: "inline"}`                                      |
-| `file:///…` (readable)      | **Works** — the server reads the file and stores `source: {type: "uri", uri}` with the bytes inlined   |
-| `file:///…` (missing)       | Rejected **at prompt time**: `Unable to read attachment: file:///…`                                    |
-| `https://…`                 | Rejected **at prompt time**: `Unsupported attachment URI: https://…`                                   |
-| Bare absolute path          | Rejected **at prompt time**: `Invalid attachment URI: /…`                                              |
-| Relative path               | Rejected **at prompt time**: `Invalid attachment URI: red-square.png`                                  |
+| URI form                  | Behaviour on `opencode2@0.0.0-beta-18286`                                                            |
+| ------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `data:image/png;base64,…` | Works — model answers "Red"; stored as `source: {type: "inline"}`                                    |
+| `file:///…` (readable)    | **Works** — the server reads the file and stores `source: {type: "uri", uri}` with the bytes inlined |
+| `file:///…` (missing)     | Rejected **at prompt time**: `Unable to read attachment: file:///…`                                  |
+| `https://…`               | Rejected **at prompt time**: `Unsupported attachment URI: https://…`                                 |
+| Bare absolute path        | Rejected **at prompt time**: `Invalid attachment URI: /…`                                            |
+| Relative path             | Rejected **at prompt time**: `Invalid attachment URI: red-square.png`                                |
 
 That is the draft's ask #2 — "validate at prompt time; reject unsupported
 schemes instead of failing the turn later" — already implemented, with
