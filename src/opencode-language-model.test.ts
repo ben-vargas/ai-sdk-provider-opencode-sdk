@@ -135,6 +135,11 @@ interface FakePortHooks {
   instructionEntries?: boolean;
   /** Make `session.instructions.entry.put` reject with this. */
   instructionPutError?: unknown;
+  /**
+   * Make `session.create` mint a distinct id per call, as a real server
+   * does. Off by default so existing tests keep asserting on `SESSION_ID`.
+   */
+  uniqueSessions?: boolean;
 }
 
 interface FakePort {
@@ -169,6 +174,7 @@ function createFakePort(hooks: FakePortHooks = {}): FakePort {
   let channel: EventChannel | undefined;
   let promptAttempts = 0;
   let inboxCounter = 0;
+  let sessionCounter = 0;
 
   const record = (
     method: string,
@@ -188,7 +194,12 @@ function createFakePort(hooks: FakePortHooks = {}): FakePort {
   const port = {
     health: { get: fn("health.get", () => ({ healthy: true })) },
     session: {
-      create: fn("session.create", () => sessionInfo(SESSION_ID)),
+      create: fn("session.create", () => {
+        sessionCounter += 1;
+        return sessionInfo(
+          hooks.uniqueSessions ? `${SESSION_ID}_${sessionCounter}` : SESSION_ID,
+        );
+      }),
       get: fn("session.get", (input: { sessionID: string }) =>
         sessionInfo(input.sessionID),
       ),
@@ -391,7 +402,11 @@ async function collectStream(result: {
 
 /** Script a complete single-step text turn on prompt delivery. */
 function scriptTextTurn(fake: FakePort, text = "Hello world"): void {
-  fake.hooks.onPrompt = (_input, receipt) => {
+  fake.hooks.onPrompt = (input, receipt) => {
+    // Echo the session the prompt actually targeted: under `uniqueSessions`
+    // each turn binds a different id, and events for the wrong session are
+    // silently ignored by the pump (the turn would just hang).
+    const SESSION_ID = String(input["sessionID"]);
     const ev = eventFactory(SESSION_ID);
     fake.emit(
       {
@@ -1628,6 +1643,28 @@ describe("call-option degradations", () => {
 
     // A transient failure must not downgrade the whole conversation.
     expect(fake.callsFor("session.instructions.entry.put").length).toBe(2);
+  });
+
+  it("bounds the per-session entry cache under createNewSession", async () => {
+    const fake = createFakePort({
+      instructionEntries: true,
+      uniqueSessions: true,
+    });
+    const model = createModel(fake, {
+      systemPrompt: "Be terse.",
+      createNewSession: true,
+    });
+
+    // 34 fresh sessions with a 32-entry cache: the first two are evicted,
+    // but every call still writes exactly once — eviction must never cause
+    // a *missing* write, only (at worst) a redundant one on revisit.
+    for (let index = 0; index < 34; index += 1) {
+      scriptTextTurn(fake);
+      await model.doGenerate(callOptions());
+    }
+
+    expect(fake.callsFor("session.create").length).toBe(34);
+    expect(fake.callsFor("session.instructions.entry.put").length).toBe(34);
   });
 
   it("stops probing the route after an explicit 404", async () => {

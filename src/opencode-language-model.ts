@@ -356,8 +356,15 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
    * (which would announce another durable system message) and, when a later
    * call carries no system content, remove the entry the previous call left
    * behind instead of leaking a stale system prompt into the conversation.
+   *
+   * Bounded FIFO: under `createNewSession` every call binds a *new* session,
+   * so an unbounded map would grow for the life of the model instance.
+   * Eviction is harmless — a forgotten session just costs one redundant
+   * `put` if it is ever revisited — and insertion order evicts exactly the
+   * sessions `createNewSession` will never touch again.
    */
   private readonly systemEntryValues = new Map<string, string>();
+  private static readonly SYSTEM_ENTRY_CACHE_LIMIT = 32;
   /**
    * Sticky feature-detection for the instruction-entry route: set to false
    * only when the server answers a `put` with "this route does not exist",
@@ -1105,7 +1112,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         requestOptions,
       );
       this.instructionEntriesSupported = true;
-      this.systemEntryValues.set(turn.sessionId, systemText);
+      this.rememberSystemEntry(turn.sessionId, systemText);
       return { viaEntry: true, reason: "written" };
     } catch (error) {
       // Only an explicitly absent route earns the sticky disable. Any other
@@ -1119,6 +1126,22 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         viaEntry: false,
         reason: `the write failed: ${extractErrorMessage(error)}`,
       };
+    }
+  }
+
+  /** Record a written entry value, evicting the oldest session when full. */
+  private rememberSystemEntry(sessionId: string, value: string): void {
+    this.systemEntryValues.delete(sessionId);
+    this.systemEntryValues.set(sessionId, value);
+    while (
+      this.systemEntryValues.size >
+      OpencodeLanguageModel.SYSTEM_ENTRY_CACHE_LIMIT
+    ) {
+      const oldest = this.systemEntryValues.keys().next();
+      if (oldest.done === true) {
+        break;
+      }
+      this.systemEntryValues.delete(oldest.value);
     }
   }
 
