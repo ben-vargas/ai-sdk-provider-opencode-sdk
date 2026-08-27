@@ -124,6 +124,12 @@ describe.skipIf(!canRun)(
             XDG_STATE_HOME: stateHome,
             XDG_CONFIG_HOME: join(sandbox, "config"),
             XDG_CACHE_HOME: join(sandbox, "cache"),
+            // Enables the `ollama-cloud` provider for the pinned test model
+            // (env-gated on models.dev): this instance generates with
+            // ctx.modelId, so it needs the same key beta-server.ts forwards.
+            ...(process.env.OLLAMA_API_KEY !== undefined
+              ? { OLLAMA_API_KEY: process.env.OLLAMA_API_KEY }
+              : {}),
           },
           stdio: "ignore",
         },
