@@ -29,9 +29,10 @@ for the full setting-by-setting migration.
   `baseUrl`, or local-service discovery (`service` options + opt-in
   `autoStart`); the provider never owns or kills a shared server, and
   process signal handlers are gone.
-- **Session model**: model/agent are session state. Default binding is
-  `sessionMode: "ephemeral"` — one model instance = one conversation = one
-  pinned session (v4's reuse-forever behavior is `"persistent"`, opt-in).
+- **Session model**: model/agent are session state, and binding is
+  model-instance-local: one model instance = one conversation = one pinned
+  session (`sessionMode: "ephemeral"`, the default; `"persistent"` is
+  accepted but currently takes the same path — see the migration guide).
   `directory`/`cwd` → `location: { directory, workspaceID? }`.
 - **Structured output**: v1's native `json_schema` and the
   `StructuredOutput` tool do not exist in v2. `responseFormat: json` is now
@@ -49,7 +50,8 @@ for the full setting-by-setting migration.
 - **Errors**: v1 named error classes and `isAuthenticationError`/
   `isTimeoutError`/`createAPICallError` helpers removed; new tagged-error
   guards and phase-aware retryability (nothing is retryable after prompt
-  dispatch — the provider reconciles internally instead).
+  dispatch; transient-class post-dispatch failures additionally attempt
+  internal reconciliation against the session's message store).
 - **`providerOptions.opencode.messageID` → `providerOptions.opencode.id`.**
 
 ### Added
@@ -66,6 +68,10 @@ for the full setting-by-setting migration.
 - Session controls: `sessionMode`, `location`, explicit
   `delivery: "queue"` default, `resume`, per-call
   `providerOptions.opencode.sessionId` escape hatch.
+- `OpencodeModels` refreshed to six OpenCode zen free-tier IDs, each
+  cross-checked against a live beta catalog and the upstream models.dev
+  catalog; the v4-era Anthropic/OpenAI/Google shortcuts were dropped as
+  unverifiable against any reachable v2 catalog.
 - Opt-in `jsonRepair` (non-streaming): client-side JSON validation with
   bounded repair via the server's session-less `generate.text` route.
 - `resolveFileToUri` hook; bytes are converted to `data:` URIs with the
