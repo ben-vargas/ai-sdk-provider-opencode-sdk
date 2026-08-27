@@ -45,10 +45,14 @@ const opencode = createOpencode({
 });
 
 // v5 — explicit endpoint (beta servers need Basic auth)
+const password = process.env.OPENCODE_PASSWORD ?? ""; // the server's password
 const opencode = createOpencode({
   baseUrl: "http://127.0.0.1:14196",
   clientOptions: {
-    headers: { Authorization: "Basic " + btoa("opencode:" + password) },
+    headers: {
+      Authorization:
+        "Basic " + Buffer.from(`opencode:${password}`).toString("base64"),
+    },
   },
 });
 
@@ -61,22 +65,22 @@ const opencode = createOpencode({
 
 ## Model settings (`opencode(modelId, {...})`)
 
-| v4 setting                          | v5 disposition                                                                                                                                                                                                                                                                            |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sessionId`                         | Kept: pins an existing v2 session (implies `sessionMode: "existing"`). Validated via `session.get` before use. **Shared-session caveat:** the beta has no inbox→execution correlation key, so another client's activity on the session can be misattributed.                              |
-| `createNewSession`                  | Kept, **semantics change**: still forces a fresh session per ordinary generation call, but tool-approval continuation calls always reattach to the blocked session regardless (v2 approvals resume a pinned session — a documented deviation from v4).                                    |
-| `sessionTitle`                      | Kept.                                                                                                                                                                                                                                                                                     |
-| `agent`                             | Kept — but agent is now **session state** (set at `session.create`), not a per-prompt field.                                                                                                                                                                                              |
-| `systemPrompt`                      | Kept, **degraded**: v2 has no per-prompt/per-session system field. The provider prepends a delimited system block to the first user turn and emits a warning (system-role priority is lost).                                                                                              |
-| `tools` (`Record<string, boolean>`) | **Removed.** No v2 per-request field exists. Tool availability is server/agent configuration. (AI SDK-level `tools`/`toolChoice` are likewise ignored with a warning.)                                                                                                                    |
-| `permission` (per-session ruleset)  | **Removed.** `session.create` has no permission field in v2; rules live on agents and server config (e.g. `OPENCODE_CONFIG_CONTENT='{"permission":{"bash":"ask"}}'`) and project-saved permissions.                                                                                       |
-| `variant`                           | Kept — rides the session's `ModelRef`. New constraint: a bare model ID (no `providerID/`) combined with `variant` must resolve a provider via the catalog, else the call rejects.                                                                                                         |
-| `directory`                         | **Deprecated alias** for `location.directory` (warns; ignored when `location` is set).                                                                                                                                                                                                    |
-| `cwd`                               | **Removed.** Use `location: { directory }`.                                                                                                                                                                                                                                               |
-| `outputFormatRetryCount`            | **Removed** — it retried v1's native `json_schema`, which no longer exists (see Structured output below). Closest v5 analog: `jsonRepair`.                                                                                                                                                |
-| `onQuestion` / `questionPolicy`     | **Removed.** v2 replaces questions with **forms**: `onForm` receives typed, keyed fields and returns a keyed answer record (not positional `string[][]`); `formPolicy` (`"cancel"`/`"wait"`) replaces `questionPolicy` (`"reject"`/`"wait"`), with cancel as the non-deadlocking default. |
-| `logger`, `verbose`                 | Kept.                                                                                                                                                                                                                                                                                     |
-| —                                   | **New:** `sessionMode` (`"ephemeral"` default / `"persistent"` / `"existing"`), `location`, `delivery` (`"queue"` default, sent explicitly), `resume`, `onForm`, `formPolicy`, `resolveFileToUri`, `jsonRepair`.                                                                          |
+| v4 setting                          | v5 disposition                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sessionId`                         | Kept: pins an existing v2 session (implies `sessionMode: "existing"`). Validated via `session.get` before use. **Shared-session caveat:** the beta has no inbox→execution correlation key, so another client's activity on the session can be misattributed.                                                                                                                                                            |
+| `createNewSession`                  | Kept, **semantics change**: still forces a fresh session per ordinary generation call, but tool-approval continuation calls always reattach to the blocked session regardless (v2 approvals resume a pinned session — a documented deviation from v4).                                                                                                                                                                  |
+| `sessionTitle`                      | Kept.                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `agent`                             | Kept — but agent is now **session state** (set at `session.create`), not a per-prompt field.                                                                                                                                                                                                                                                                                                                            |
+| `systemPrompt`                      | Kept, **degraded**: v2 has no per-prompt/per-session system field. The provider prepends a delimited system block to the first user turn and emits a warning (system-role priority is lost).                                                                                                                                                                                                                            |
+| `tools` (`Record<string, boolean>`) | **Removed.** No v2 per-request field exists. Tool availability is server/agent configuration. (AI SDK-level `tools`/`toolChoice` are likewise ignored with a warning.)                                                                                                                                                                                                                                                  |
+| `permission` (per-session ruleset)  | **Removed.** `session.create` has no permission field in v2; rules live on agents and server config (e.g. `OPENCODE_CONFIG_CONTENT='{"permission":{"bash":"ask"}}'`) and project-saved permissions.                                                                                                                                                                                                                     |
+| `variant`                           | Kept — rides the session's `ModelRef`. New constraint: a bare model ID (no `providerID/`) combined with `variant` must resolve a provider via the catalog, else the call rejects.                                                                                                                                                                                                                                       |
+| `directory`                         | **Deprecated alias** for `location.directory` (warns; ignored when `location` is set).                                                                                                                                                                                                                                                                                                                                  |
+| `cwd`                               | **Removed.** Use `location: { directory }`.                                                                                                                                                                                                                                                                                                                                                                             |
+| `outputFormatRetryCount`            | **Removed** — it retried v1's native `json_schema`, which no longer exists (see Structured output below). Closest v5 analog: `jsonRepair`.                                                                                                                                                                                                                                                                              |
+| `onQuestion` / `questionPolicy`     | **Removed.** v2 replaces questions with **forms**: `onForm` receives typed, keyed fields and returns a keyed answer record (not positional `string[][]`); `formPolicy` (`"cancel"`/`"wait"`) replaces `questionPolicy` (`"reject"`/`"wait"`), with cancel as the non-deadlocking default. Like `questionPolicy`, it applies only when **no handler is set** — a configured handler that throws always cancels the form. |
+| `logger`, `verbose`                 | Kept.                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| —                                   | **New:** `sessionMode` (`"ephemeral"` default / `"persistent"` — currently identical to it / `"existing"`), `location`, `delivery` (`"queue"` default, sent explicitly), `resume`, `onForm`, `formPolicy`, `resolveFileToUri`, `jsonRepair`.                                                                                                                                                                            |
 
 Questions → forms, before / after:
 
@@ -102,11 +106,18 @@ const model = opencode("opencode/big-pickle", {
 
 ## Session behavior
 
-- **Default binding changed.** v4 implicitly reused one session forever. v5
-  defaults to `sessionMode: "ephemeral"`: a provider-owned session per
-  conversation, where **one model instance = one conversation** (the session
-  survives approval round-trips within it). The v4 behavior is
-  `sessionMode: "persistent"`.
+- **Binding is model-instance-local.** In both v4 and v5 a model instance
+  creates or pins one session on first use and reuses it for every later
+  call on that instance; the session survives approval round-trips.
+  **One model instance = one conversation.** v5 adds `sessionMode` to name
+  which session that is — but `"ephemeral"` (the default) and
+  `"persistent"` currently take the **same** provider-created path and are
+  behaviorally identical; neither shares a session across model instances
+  or process restarts, and no session ID is persisted. If you relied on v4
+  reusing a session beyond one model instance, store the session ID
+  (`model.getSessionId()` or `providerMetadata.opencode.sessionId`) and
+  pass it back as `sessionId` (mode `"existing"`). For a fresh session per
+  call, use `createNewSession: true`.
 - `providerOptions.opencode.messageID` → **`providerOptions.opencode.id`**
   (the v2 prompt's user-message ID). New: `providerOptions.opencode.sessionId`
   as a per-call session escape hatch.
@@ -155,18 +166,24 @@ expect native enforcement.
   `getClientErrorStatus`, `extractErrorMessage`, `normalizeStructuredError`,
   `wrapError`, `needsSessionReconciliation`.
 - Retryability is **phase-aware**: once a prompt (or permission reply) has
-  been dispatched, no error surfaces as retryable — the provider reconciles
-  internally against the session instead, so the AI SDK can never re-enqueue
-  a duplicate prompt.
+  been dispatched, no error surfaces as retryable, so the AI SDK can never
+  re-enqueue a duplicate prompt. On top of that guarantee, transient-class
+  post-dispatch failures (a dropped event stream, where the turn may still
+  be running) attempt internal reconciliation against the session's message
+  store; other post-dispatch failures — and a reconciliation that recovers
+  nothing — surface as an error part plus an error finish.
 
 ## Lifecycle / disposal
 
 - v4 spawned `createOpencodeServer` and killed it on dispose (with process
   signal handlers). v5 never owns a shared server: `dispose()` releases
-  provider resources only, never stops a registered service (unless the
-  provider spawned it in owned mode: dedicated `service.file` +
-  `autoStart`), and never closes caller-supplied clients or managers.
-  Explicit stop: `provider.getClientManager().stopService()`.
+  provider resources only, never stops a registered service, and never
+  closes caller-supplied clients or managers. The single exception is a
+  service the provider itself spawned in owned mode — a dedicated
+  `service.file` + `autoStart` where `Service.ensure` actually started the
+  process; a service already registered at that file that `ensure` merely
+  reused is left running. Explicit stop:
+  `provider.getClientManager().stopService()`.
 - Process signal handlers are gone — your application owns termination.
 
 ## Metadata
@@ -193,3 +210,9 @@ and `retry` info.
 - The optional `./embedded` entrypoint did not ship (the beta embedded host
   is non-functional for generation and Node-incompatible);
   `createClientManagerFromPort` is the supported injection seam.
+- `sessionMode: "persistent"` shipped as a **name without distinct
+  behavior**: the analysis described it as reusing one session across
+  conversations, but the implementation routes it through the same
+  provider-created, instance-pinned path as `"ephemeral"`. The docs now say
+  so rather than describing the intent; whether to implement cross-instance
+  persistence or drop the value is an open question for GA.

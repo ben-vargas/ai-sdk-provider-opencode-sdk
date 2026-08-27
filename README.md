@@ -45,12 +45,15 @@ The v2 beta server requires Basic auth (`opencode:<password>`) on every route:
 import { generateText } from "ai";
 import { createOpencode } from "ai-sdk-provider-opencode-sdk";
 
+// the password the server was started with (`OPENCODE_PASSWORD`)
+const password = process.env.OPENCODE_PASSWORD ?? "";
+
 const opencode = createOpencode({
   baseUrl: "http://127.0.0.1:14196",
   clientOptions: {
     headers: {
       Authorization:
-        "Basic " + Buffer.from("opencode:" + password).toString("base64"),
+        "Basic " + Buffer.from(`opencode:${password}`).toString("base64"),
     },
   },
 });
@@ -106,11 +109,13 @@ const r2 = await generateText({ model, prompt: "What is my name?" }); // same se
 const sessionId = r1.finalStep.providerMetadata?.opencode?.sessionId;
 ```
 
-`sessionMode` controls the binding:
+Session state is **model-instance-local**: the instance creates or pins a session on first use and reuses it for every later call on that instance. Nothing outlives the instance — no session ID is persisted, and each `opencode(...)` call builds a new model. `sessionMode` selects which session that is:
 
-- `"ephemeral"` (default) — the provider creates and exclusively owns a session per conversation (it survives tool-approval round-trips within the conversation).
-- `"persistent"` — one provider-created session reused across conversations (the v4 implicit default, now opt-in).
+- `"ephemeral"` (default) — the provider creates a session on first use and owns it exclusively (it survives tool-approval round-trips).
+- `"persistent"` — **currently behaves identically to `"ephemeral"`.** Both take the same provider-created, instance-pinned path; the name does not (yet) buy you a session shared across model instances or process restarts. To reattach to a session across instances, store its ID yourself and pass it with `"existing"`.
 - `"existing"` — pin the session given by `sessionId` (implied when `sessionId` is set without a mode). **Shared-session caveat:** the v2 beta has no inbox→execution correlation key, so events from other clients on the same session (e.g. a TUI) can be misattributed to your call. Use exclusively-owned sessions unless you accept that.
+
+For a fresh session on every ordinary call, use `createNewSession: true` (approval continuations still reattach to the blocked session).
 
 Per call, `providerOptions.opencode.sessionId` targets an existing session for that one request, and `providerOptions.opencode.id` sets the prompt's user-message ID:
 
@@ -145,11 +150,13 @@ const model = opencode("opencode/big-pickle", {
     type: "answer",
     answer: { environment: "staging", confirm: true },
   }),
-  formPolicy: "cancel", // no handler (or handler throws): cancel unblocks the session; "wait" leaves it pending
+  formPolicy: "cancel", // applies when NO handler is set: "cancel" (default) settles the form, "wait" leaves it pending for an external client
 });
 ```
 
-Return `{ type: "cancel" }` to decline. Handled form IDs appear in `providerMetadata.opencode.formIds`. Note: the form wiring follows the beta contract and is unit-tested, but no live server flow has produced a form end-to-end yet — treat it as beta within the beta.
+Return `{ type: "cancel" }` to decline. A configured handler that **throws** is not covered by `formPolicy` — that form is always cancelled, under either policy. Handled form IDs appear in `providerMetadata.opencode.formIds`.
+
+Form lifecycle, per the pinned beta source (`packages/core/src/form.ts` @ `f4a9b930`): a tool that asks a form suspends on it until the form is replied to or cancelled, and both outcomes resolve that wait — so cancelling does unblock the tool, though the tool may then fail its call (the built-in websearch tool does). **Not verified live:** this repo has never driven a form end-to-end against a running server — the provider's wiring is unit-tested against the contract only, and no harness run has produced a `form.created` event. Treat forms as beta within the beta.
 
 ## Structured output: honest status
 
@@ -204,7 +211,7 @@ await generateText({
 | Setting                 | Type                                        | Notes                                                                                                                           |
 | ----------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `sessionId`             | `string`                                    | Pin an existing session (shared-session caveat)                                                                                 |
-| `sessionMode`           | `"ephemeral" \| "persistent" \| "existing"` | Default `"ephemeral"`                                                                                                           |
+| `sessionMode`           | `"ephemeral" \| "persistent" \| "existing"` | Default `"ephemeral"`; `"persistent"` currently behaves identically to it (see above)                                           |
 | `createNewSession`      | `boolean`                                   | Fresh session per ordinary call; approval continuations still reattach to the blocked session                                   |
 | `sessionTitle`          | `string`                                    | Title for created sessions                                                                                                      |
 | `agent`                 | `string`                                    | Session state, set at create                                                                                                    |
@@ -236,7 +243,7 @@ await generateText({
 
 ## Error handling
 
-Errors are normalized to AI SDK error types (`APICallError` etc.) with phase-aware retryability: nothing is surfaced as retryable once a prompt has been dispatched (an SDK-level retry would enqueue duplicate work); post-dispatch failures are reconciled internally against the session's message store. Helpers:
+Errors are normalized to AI SDK error types (`APICallError` etc.) with phase-aware retryability: **nothing is surfaced as retryable once a prompt has been dispatched** (an SDK-level retry would enqueue duplicate work). Post-dispatch failures of the transient class — a dropped event stream, where the turn may still be running server-side — additionally attempt internal reconciliation against the session's message store; every other post-dispatch failure, and a reconciliation that recovers nothing, surfaces as an `error` part plus an error finish. Non-retryable is the guarantee; reconciliation is best-effort on top of it. Helpers:
 
 ```typescript
 import {
@@ -253,7 +260,7 @@ import {
 await opencode.dispose();
 ```
 
-`dispose()` releases provider-owned resources only: it never closes caller-supplied clients, never disposes injected managers, and never stops a shared registered service (stopping a service the provider spawned in owned mode is the exception). `provider.getClientManager().stopService()` is the explicit, user-invoked stop.
+`dispose()` releases provider-owned resources only: it never closes caller-supplied clients, never disposes injected managers, and never stops a registered service — with one exception, a service the provider itself spawned in owned mode (a dedicated `service.file` + `autoStart`, where `Service.ensure` actually started the process rather than reusing one already registered there). `provider.getClientManager().stopService()` is the explicit, user-invoked stop.
 
 ## Examples
 

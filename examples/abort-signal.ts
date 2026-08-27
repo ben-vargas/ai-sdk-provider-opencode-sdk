@@ -4,13 +4,17 @@
  * Requires an OpenCode v2 beta server — see examples/env.ts for the server
  * requirement and environment variables.
  *
- * What abort does in OpenCode v2 depends on where the turn is:
+ * What abort does server-side depends on where the turn is:
  *   - before the prompt is delivered: the pending inbox item is cancelled
  *     (`session.inbox.cancel`) and nothing runs;
  *   - mid-turn: the execution is interrupted (`session.interrupt`), the
  *     server emits `session.execution.interrupted`, and the partial
  *     assistant message is kept server-side.
- * The AI SDK call rejects with an abort error either way.
+ *
+ * How it surfaces to you depends on the AI SDK call, not on the phase:
+ * `generateText()` rejects with an abort error, while consuming
+ * `streamText().textStream` just ends the iteration — the AI SDK absorbs
+ * the abort there and does not throw. Both halves are shown below.
  */
 import { generateText, streamText } from "ai";
 import { createOpencode } from "../dist/index.js";

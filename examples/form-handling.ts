@@ -5,17 +5,26 @@
  * requirement and environment variables.
  *
  * When server-side tooling needs input mid-turn it emits a `form.created`
- * event with typed, keyed fields; execution blocks until the form is
- * answered or cancelled. The provider invokes your `onForm` callback and
- * replies with the keyed answer you return (`form.reply`) or cancels
- * (`form.cancel`). Without a handler, `formPolicy` decides: "cancel"
- * (default — unblocks the session) or "wait" (leave the form pending for an
- * external client, e.g. a TUI attached to the same server).
+ * event with typed, keyed fields. The provider invokes your `onForm`
+ * callback and replies with the keyed answer you return (`form.reply`) or
+ * cancels (`form.cancel`).
  *
- * Note: whether a form actually fires depends on the server's tooling and
- * the model's choices — a plain text prompt usually completes without one.
- * This example shows the wiring; the handler logs and answers any form that
- * does arrive.
+ * Lifecycle, per the pinned beta source (`packages/core/src/form.ts` @
+ * `f4a9b930`): a tool that asks a form suspends on it until the form is
+ * replied to or cancelled — both outcomes resolve that wait, so cancelling
+ * does unblock the tool, though the tool may then fail its own call (the
+ * built-in websearch tool does exactly that).
+ *
+ * `formPolicy` applies when **no handler is set**: "cancel" (default)
+ * settles the form, "wait" leaves it pending for an external client (e.g. a
+ * TUI attached to the same server). It does NOT cover a configured handler
+ * that throws — that form is always cancelled, under either policy.
+ *
+ * Two caveats. Whether a form fires at all depends on the server's tooling
+ * and the model's choices — a plain text prompt usually completes without
+ * one. And no form flow has been driven end-to-end from this repo yet: the
+ * wiring is unit-tested against the contract, so treat a live run here as
+ * exploratory.
  */
 import { generateText } from "ai";
 import { createOpencode } from "../dist/index.js";
@@ -76,9 +85,9 @@ async function main() {
         );
         return response;
       },
-      // What happens to a form when no handler is set (or the handler
-      // throws): "cancel" (default) unblocks the session, "wait" leaves it
-      // for an external client.
+      // Applies only when no handler is set: "cancel" (default) settles the
+      // form, "wait" leaves it for an external client. A handler that throws
+      // always cancels, regardless of this policy.
       formPolicy: "cancel",
     });
 

@@ -122,12 +122,21 @@ export type OpencodeSessionLocation = LocationRef;
 export type OpencodeDelivery = SessionInboxDelivery;
 
 /**
- * How the model instance binds to an OpenCode session:
- * - "ephemeral": provider-owned session per conversation (default). The
- *   session still survives across tool-approval round-trips within the
- *   conversation.
- * - "persistent": provider creates one session and reuses it across
- *   conversations (v4's implicit default, now opt-in).
+ * How the model instance binds to an OpenCode session.
+ *
+ * Session state is model-instance-local: a model instance creates or pins
+ * one session on first use and reuses it for every later call on that same
+ * instance (unless `createNewSession` forces a fresh one per call). Nothing
+ * outlives the instance — `createOpencode(...)` builds a new model on every
+ * factory call, and no session ID is persisted anywhere.
+ *
+ * - "ephemeral": the provider creates a session on first use and owns it
+ *   exclusively (default). It survives tool-approval round-trips.
+ * - "persistent": **currently identical to "ephemeral" in behavior** —
+ *   both take the same provider-created, instance-pinned path. It does not
+ *   share a session across model instances or process restarts; there is no
+ *   session persistence to key that on. To reattach to a session you stored
+ *   yourself, pass its `sessionId` (mode "existing").
  * - "existing": pin the session given by `sessionId` (shared-session caveat:
  *   other clients on the same session can be misattributed — there is no
  *   inbox-to-execution correlation key in the v2 beta).
@@ -164,9 +173,10 @@ export type OpencodeFormResponse =
   | { type: "cancel" };
 
 /**
- * What to do when a form request has no handler (or the handler fails).
- * Cancelling unblocks the session; waiting leaves the form pending so an
- * external client can answer it.
+ * What to do when a form request has **no handler**: cancelling unblocks
+ * the session, waiting leaves the form pending so an external client can
+ * answer it. The policy does not cover a configured handler that throws —
+ * that form is always cancelled (see {@link OpencodeSettings.formPolicy}).
  */
 export type OpencodeFormPolicy = "cancel" | "wait";
 
