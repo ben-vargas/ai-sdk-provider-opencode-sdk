@@ -21,6 +21,19 @@ export type {
   OpencodeRequestOptions,
 } from "./client-port.js";
 
+// Beta-client passthrough types: the permission surface and the v2 event
+// union callers need to type `providerMetadata` payloads and any client
+// event handling of their own (design doc §2.2: index re-exports
+// form/permission/v2 event types).
+export type {
+  PermissionRequest,
+  PermissionReply,
+  PermissionAsked,
+  PermissionReplied,
+  V2Event,
+  OpenCodeEvent,
+} from "@opencode-ai/client";
+
 // Type exports
 export type {
   OpencodeModelId,
