@@ -1,113 +1,67 @@
+/**
+ * Cancellation with AbortSignal.
+ *
+ * Requires an OpenCode v2 beta server — see examples/env.ts for the server
+ * requirement and environment variables.
+ *
+ * What abort does in OpenCode v2 depends on where the turn is:
+ *   - before the prompt is delivered: the pending inbox item is cancelled
+ *     (`session.inbox.cancel`) and nothing runs;
+ *   - mid-turn: the execution is interrupted (`session.interrupt`), the
+ *     server emits `session.execution.interrupted`, and the partial
+ *     assistant message is kept server-side.
+ * The AI SDK call rejects with an abort error either way.
+ */
 import { generateText, streamText } from "ai";
 import { createOpencode } from "../dist/index.js";
-
-type TimeoutController = AbortController & { clearTimeout: () => void };
-
-function createTimeoutController(
-  ms: number,
-  reason: string,
-): TimeoutController {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => {
-    controller.abort(new Error(`${reason} after ${ms}ms`));
-  }, ms);
-  return Object.assign(controller, {
-    clearTimeout: () => clearTimeout(timeoutId),
-  });
-}
-
-function isAbortError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  return (
-    error.name === "AbortError" || error.message.toLowerCase().includes("abort")
-  );
-}
+import { exampleConfig } from "./env.js";
 
 async function main() {
-  const opencode = createOpencode({
-    autoStartServer: true,
-  });
-
-  console.log("=== OpenCode: Abort Signal Examples ===\n");
+  const { providerSettings, modelSettings, modelId } = exampleConfig();
+  const opencode = createOpencode(providerSettings);
 
   try {
-    console.log("1. Request with timeout (45 seconds):\n");
-    const controller1 = createTimeoutController(45000, "Request timeout");
-    try {
-      const { text } = await generateText({
-        model: opencode("openai/gpt-5.3-codex-spark"),
-        prompt: "What is 2 + 2? Respond with only the number.",
-        abortSignal: controller1.signal,
-      });
-      console.log("   Response:", text);
-      console.log("   Completed before timeout.\n");
-    } catch (error: unknown) {
-      if (isAbortError(error)) {
-        console.log("   Request was aborted.\n");
-      } else {
-        console.error("   Error:", error);
-      }
-    } finally {
-      controller1.clearTimeout();
-    }
+    // --- 1. Abort a stream after the first few chunks ---
+    console.log("Streaming, aborting after ~3 chunks:");
+    const controller = new AbortController();
+    const stream = streamText({
+      model: opencode(modelId, modelSettings),
+      prompt: "Count slowly from 1 to 100, one number per line.",
+      abortSignal: controller.signal,
+    });
 
-    console.log("2. Cancellation before request starts:\n");
-    const controller2 = new AbortController();
-    controller2.abort();
-
-    try {
-      await generateText({
-        model: opencode("openai/gpt-5.3-codex-spark"),
-        prompt: "This request is pre-aborted.",
-        abortSignal: controller2.signal,
-      });
-      console.log("   Unexpected success.");
-    } catch (error: unknown) {
-      if (isAbortError(error)) {
-        console.log("   Request was aborted before execution.\n");
-      } else {
-        console.error("   Error:", error);
+    // Note: streamText handles the abort itself — the stream just ends
+    // (no throw); the server-side execution is interrupted.
+    let chunks = 0;
+    for await (const chunk of stream.textStream) {
+      process.stdout.write(chunk);
+      chunks += 1;
+      if (chunks >= 3) {
+        controller.abort();
       }
     }
+    console.log(`\nStream ended after abort (${chunks} chunks consumed)`);
 
-    console.log("3. Streaming cancellation after partial output:\n");
-    const controller3 = createTimeoutController(45000, "Stream timeout");
-    let charCount = 0;
-
+    // --- 2. Abort a non-streaming call with a timeout ---
+    console.log("\ngenerateText with a 2s timeout:");
     try {
-      const { textStream } = streamText({
-        model: opencode("openai/gpt-5.3-codex-spark"),
-        prompt: "Count from 1 to 20 and briefly explain each number.",
-        abortSignal: controller3.signal,
+      const result = await generateText({
+        model: opencode(modelId, modelSettings),
+        prompt: "Write a 2000-word essay about build systems.",
+        abortSignal: AbortSignal.timeout(2000),
       });
-
-      process.stdout.write("   Streaming: ");
-      for await (const chunk of textStream) {
-        process.stdout.write(chunk);
-        charCount += chunk.length;
-
-        if (charCount >= 120) {
-          console.log(`\n   Aborting stream after ${charCount} characters...`);
-          controller3.abort();
-        }
-      }
-      console.log("\n   Stream ended.\n");
-    } catch (error: unknown) {
-      if (isAbortError(error)) {
-        console.log("\n   Stream was aborted.\n");
-      } else {
-        console.error("\n   Error:", error);
-      }
-    } finally {
-      controller3.clearTimeout();
+      console.log("Finished within the timeout:", result.text.length, "chars");
+    } catch (error) {
+      console.log(`Call aborted by timeout (${(error as Error).name})`);
     }
-
-    console.log("Done.");
-  } catch (error) {
-    console.error("Error:", error);
   } finally {
-    await opencode.dispose?.();
+    await opencode.dispose();
   }
+
+  console.log("\nDone.");
 }
 
-main().catch(console.error);
+main().catch((error) => {
+  console.error("Error:", error);
+  process.exitCode = 1;
+});
