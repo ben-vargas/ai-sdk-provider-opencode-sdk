@@ -427,6 +427,18 @@ describe("preflight", () => {
   });
 });
 
+/** `Service.ensure` that actually spawns — fires `onStart`, as a real start does. */
+function ensureSpawns(): void {
+  ensureMock.mockImplementation(
+    async (options: {
+      onStart?: (reason: string, previous?: string) => void;
+    }) => {
+      options.onStart?.("missing");
+      return { url: "http://127.0.0.1:6666", auth: undefined };
+    },
+  );
+}
+
 describe("ownership and disposal", () => {
   it("never stops the service for caller-supplied clients on dispose", async () => {
     const manager = createClientManager({
@@ -439,7 +451,8 @@ describe("ownership and disposal", () => {
     await expect(manager.getPort()).rejects.toThrow(/disposed/);
   });
 
-  it("stops the service on dispose only in owned mode (dedicated file + autoStart)", async () => {
+  it("stops the service on dispose only in owned mode (dedicated file + autoStart + actually spawned)", async () => {
+    ensureSpawns();
     const owned = createClientManager({
       autoStart: true,
       service: { file: "/owned.json" },
@@ -447,6 +460,32 @@ describe("ownership and disposal", () => {
     await owned.getPort();
     await owned.dispose();
     expect(stopMock).toHaveBeenCalledWith({ file: "/owned.json" });
+  });
+
+  it("does not stop a pre-existing service ensure reused rather than spawned", async () => {
+    // The default `ensureMock` returns an endpoint WITHOUT calling `onStart`
+    // — exactly what `Service.ensure` does when a healthy service is already
+    // registered at that file. Ownership is what `onStart` signals, not the
+    // `autoStart` + dedicated-file configuration.
+    const manager = createClientManager({
+      autoStart: true,
+      service: { file: "/owned.json" },
+    });
+    await manager.getPort();
+    await manager.dispose();
+    expect(stopMock).not.toHaveBeenCalled();
+  });
+
+  it("does not stop an owned-mode service that was never started", async () => {
+    // Configured for owned mode but disposed before any port was acquired:
+    // nothing was spawned, so nothing may be stopped.
+    const manager = createClientManager({
+      autoStart: true,
+      service: { file: "/owned.json" },
+    });
+    await manager.dispose();
+    expect(ensureMock).not.toHaveBeenCalled();
+    expect(stopMock).not.toHaveBeenCalled();
   });
 
   it("does not stop a default-registration service on dispose even with autoStart", async () => {
@@ -616,6 +655,7 @@ describe("registry identity", () => {
   });
 
   it("keeps duplicate dispose from stopping another holder's owned service", async () => {
+    ensureSpawns();
     const settings = {
       autoStart: true,
       service: { file: "/owned.json" },

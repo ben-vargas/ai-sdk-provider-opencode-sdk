@@ -17,11 +17,13 @@
  *
  * Ownership: the manager holds no subscriptions itself (event subscriptions
  * are per-generation in the language model, aborted by each call's signal),
- * so disposal only invalidates the cached port and — in owned mode only
- * (dedicated registration `file` + `autoStart`) — stops the service.
- * Disposal never closes a caller-supplied client and never stops the shared
- * default-registration service; `stopService()` is the explicit user-invoked
- * stop for that.
+ * so disposal only invalidates the cached port and — in owned mode only —
+ * stops the service. Owned means all three: a dedicated registration
+ * `file`, `autoStart`, and a `Service.ensure` that actually spawned the
+ * process (its `onStart` fired). Disposal never closes a caller-supplied
+ * client, never stops the shared default-registration service, and never
+ * stops a service `ensure` merely reused; `stopService()` is the explicit
+ * user-invoked stop for those.
  */
 import { OpenCode } from "@opencode-ai/client";
 import { Service } from "@opencode-ai/client/service";
@@ -181,9 +183,14 @@ class DefaultOpencodeClientManager implements OpencodeClientManager {
     }
     this.portPromise = undefined;
     // Owned mode only: a dedicated registration file the provider was
-    // configured to spawn into. Never the shared default registration, never
-    // a service we merely discovered.
+    // configured to spawn into AND actually did spawn — `serverManaged` is
+    // set from the `Service.ensure` `onStart` callback, which only fires
+    // when ensure starts the process. Never the shared default
+    // registration, and never a service we merely discovered: `ensure`
+    // silently reuses an already-running service at the same file, and
+    // stopping that would kill a process we do not own.
     if (
+      this.serverManaged &&
       this.backend.kind === "service" &&
       this.backend.autoStart &&
       this.backend.service?.file !== undefined
