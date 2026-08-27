@@ -58,7 +58,7 @@ describe.skipIf(!ctx.canGenerate)(suiteTitle("busy + queue", ctx), () => {
           assistant.every((message) => message.finish !== undefined);
         return settled ? list.data : undefined;
       },
-      { timeoutMs: 120_000, label: "both turns complete" },
+      { timeoutMs: 180_000, label: "both turns complete" },
     );
 
     // Order: first turn's messages fully precede the queued turn's.
@@ -81,5 +81,7 @@ describe.skipIf(!ctx.canGenerate)(suiteTitle("busy + queue", ctx), () => {
         .join("");
       expect(text).toContain("MANGO");
     }
-  });
+    // Two sequential model turns; free-tier models have run at 45-60 s per
+    // story turn, so the vitest default 120 s budget flakes.
+  }, 240_000);
 });
