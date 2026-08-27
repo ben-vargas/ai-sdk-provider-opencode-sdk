@@ -120,11 +120,21 @@ export interface OpencodeLanguageModelConfig {
    * genuinely long-running turn just keeps being probed. @default 30000
    */
   silenceWatchdogMs?: number;
+  /**
+   * `session.wait` watchdog grace: when the watchdog resolves while the
+   * event stream shows no terminal, how long to keep draining events before
+   * reconciling from the message store (stage-6 measured wait trailing the
+   * terminal event by only milliseconds on healthy turns). @default 2000
+   */
+  waitWatchdogGraceMs?: number;
 }
 
 const DEFAULT_READINESS_TIMEOUT_MS = 3000;
 const DEFAULT_APPROVAL_IDLE_TIMEOUT_MS = 1500;
 const DEFAULT_SILENCE_WATCHDOG_MS = 30_000;
+const DEFAULT_WAIT_WATCHDOG_GRACE_MS = 2000;
+/** Delivery-uncertainty inbox check: one attempt, bounded. */
+const INBOX_CHECK_TIMEOUT_MS = 3000;
 const DEFAULT_SESSION_TITLE = "AI SDK Session";
 /** Bounded in-model form retry: nothing redelivers a form within a turn. */
 const MAX_FORM_ATTEMPTS = 3;
@@ -146,12 +156,15 @@ interface SessionModelRef {
 
 /**
  * Buffered async-iterator reader. `nextWithTimeout` never loses an in-flight
- * `next()`: on timeout the pending promise is stashed and handed to the next
- * caller.
+ * `next()`: on timeout (or an external interrupt resolving) the pending
+ * promise is stashed and handed to the next caller.
  */
 interface EventReader {
   next(): Promise<IteratorResult<V2Event>>;
-  nextWithTimeout(ms: number): Promise<IteratorResult<V2Event> | "timeout">;
+  nextWithTimeout(
+    ms: number,
+    interrupt?: Promise<unknown>,
+  ): Promise<IteratorResult<V2Event> | "timeout">;
 }
 
 function createEventReader(iterable: AsyncIterable<V2Event>): EventReader {
@@ -164,14 +177,23 @@ function createEventReader(iterable: AsyncIterable<V2Event>): EventReader {
       pending = undefined;
       return promise;
     },
-    nextWithTimeout(ms: number) {
+    nextWithTimeout(ms: number, interrupt?: Promise<unknown>) {
       const promise = pending ?? iterator.next();
       pending = undefined;
       let timer: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<"timeout">((resolve) => {
         timer = setTimeout(() => resolve("timeout"), ms);
       });
-      return Promise.race([promise, timeout]).then(
+      // The read promise is listed first so a ready event always beats a
+      // simultaneously-resolved interrupt.
+      const racers: Promise<IteratorResult<V2Event> | "timeout">[] = [
+        promise,
+        timeout,
+      ];
+      if (interrupt) {
+        racers.push(interrupt.then(() => "timeout" as const));
+      }
+      return Promise.race(racers).then(
         (result) => {
           clearTimeout(timer);
           if (result === "timeout") {
@@ -207,6 +229,10 @@ interface TurnContext {
   preBuffer: V2Event[];
   /** Inbox receipt of this call's prompt (absent on approval-only calls). */
   receipt: SessionInboxUser | undefined;
+  /** The call requested `responseFormat: { type: "json" }`. */
+  jsonMode: boolean;
+  /** AI SDK-supplied JSON schema for json mode, when present. */
+  jsonSchema: unknown;
   /** Wall-clock lower bound for messages belonging to this turn. */
   turnStartedAt: number;
   /** The prompt (or first permission reply) has been delivered/observed. */
@@ -232,6 +258,18 @@ interface TurnContext {
   repliedApprovalIds: string[];
   approvalIdleTimeoutMs: number;
   silenceWatchdogMs: number;
+  waitWatchdogGraceMs: number;
+  /**
+   * `session.wait` watchdog racing the event-driven completion. Armed once
+   * the execution is confirmed started (wait's semantics are pinned only for
+   * that case — see the stage-6 `waitBusy` capture). "settled" means wait
+   * resolved while the pump was still listening; "disarmed" means the wait
+   * call failed (always internal per the phase rule) or its resolution was
+   * consumed without a terminal — either way the watchdog is inert and the
+   * silence watchdog remains the backstop.
+   */
+  waitWatchdog: Promise<void> | undefined;
+  waitWatchdogState: "unarmed" | "pending" | "settled" | "disarmed";
 }
 
 /**
@@ -339,6 +377,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     }
 
     await this.reconcileGenerateResult(turn, aggregated);
+    await this.repairJsonOutput(turn, aggregated);
 
     return {
       content: aggregated.content,
@@ -600,6 +639,11 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       warnings,
       preBuffer: [],
       receipt: undefined,
+      jsonMode,
+      jsonSchema:
+        options.responseFormat?.type === "json"
+          ? options.responseFormat.schema
+          : undefined,
       turnStartedAt: Date.now(),
       delivered: approvalOnly,
       outstandingApprovals: new Set(),
@@ -614,6 +658,10 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         this.config.approvalIdleTimeoutMs ?? DEFAULT_APPROVAL_IDLE_TIMEOUT_MS,
       silenceWatchdogMs:
         this.config.silenceWatchdogMs ?? DEFAULT_SILENCE_WATCHDOG_MS,
+      waitWatchdogGraceMs:
+        this.config.waitWatchdogGraceMs ?? DEFAULT_WAIT_WATCHDOG_GRACE_MS,
+      waitWatchdog: undefined,
+      waitWatchdogState: "unarmed",
     };
     state.onForm = (form) => {
       void this.handleFormRequest(turn, form).catch((error: unknown) => {
@@ -1071,10 +1119,17 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
 
     try {
       if (turn.dispatchError) {
-        // Dispatch-time failure with uncertain delivery: reconcile through
-        // the session instead of surfacing (or losing the observer).
-        await this.recoverPumpFailure(turn, turn.dispatchError, push);
-        return;
+        // Dispatch-time failure with uncertain delivery: first check the
+        // inbox — the prompt may have been enqueued despite the failed
+        // response, in which case the turn is running and the pump just
+        // keeps observing it. Otherwise reconcile through the session
+        // instead of surfacing (or losing the observer).
+        if (await this.recoverUncertainDelivery(turn)) {
+          turn.dispatchError = undefined;
+        } else {
+          await this.recoverPumpFailure(turn, turn.dispatchError, push);
+          return;
+        }
       }
 
       for (const buffered of turn.preBuffer) {
@@ -1106,11 +1161,34 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
           }
         } else {
           quiescenceDeadline = undefined;
+          // session.wait watchdog resolved while events show no terminal:
+          // drain a grace window, then reconcile from the message store.
+          if (turn.waitWatchdogState === "settled") {
+            const settled = await this.reconcileAfterWaitSettled(turn, push);
+            if (settled || turn.state.finishEmitted) {
+              return;
+            }
+            continue;
+          }
           // Never wait unboundedly: an SSE connection that silently lost
           // the terminal/idle events would hang the call forever. On
-          // silence, probe the session for a lost signal.
-          result = await turn.reader.nextWithTimeout(turn.silenceWatchdogMs);
+          // silence, probe the session for a lost signal. A pending
+          // session.wait watchdog interrupts the read early (handled at the
+          // top of the loop).
+          result = await turn.reader.nextWithTimeout(
+            turn.silenceWatchdogMs,
+            turn.waitWatchdogState === "pending"
+              ? turn.waitWatchdog
+              : undefined,
+          );
           if (result === "timeout") {
+            // Cast: the watchdog may have flipped to "settled" during the
+            // await, which TS's narrowing from the pre-read check misses.
+            const watchdogState =
+              turn.waitWatchdogState as TurnContext["waitWatchdogState"];
+            if (watchdogState === "settled") {
+              continue;
+            }
             const settled = await this.probeSilentTurn(turn, push);
             if (settled || turn.state.finishEmitted) {
               return;
@@ -1158,6 +1236,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
           break;
         case "session.execution.started":
           turn.delivered = true;
+          this.armWaitWatchdog(turn);
           break;
         case "session.step.started":
           turn.delivered = true;
@@ -1223,6 +1302,77 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       return { ...part, providerMetadata: { opencode } };
     }
     return part;
+  }
+
+  /**
+   * Delivery-uncertainty check after a reconcile-marked `session.prompt`
+   * failure: one bounded `session.inbox.list` attempt to learn whether the
+   * prompt was enqueued despite the failed response. A matching pending
+   * user item (by caller-supplied id when one was sent, else by exact text)
+   * is adopted as this turn's receipt and the pump keeps observing the
+   * running turn. Absent — or the check itself failing/timing out — falls
+   * back to the existing reconciliation/error path.
+   */
+  private async recoverUncertainDelivery(turn: TurnContext): Promise<boolean> {
+    const error = turn.dispatchError;
+    const data =
+      error !== undefined && APICallError.isInstance(error)
+        ? (error.data as OpencodeErrorData | undefined)
+        : undefined;
+    if (data?.operation !== "session.prompt" || turn.receipt !== undefined) {
+      return false;
+    }
+    const body = turn.requestBody as SessionPromptInput | undefined;
+    if (!body) {
+      return false;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const listPromise = turn.port.session.inbox.list(
+        { sessionID: turn.sessionId },
+        this.requestOptions(turn.headers, undefined),
+      );
+      // A rejection after the timeout won the race must not surface as an
+      // unhandled rejection.
+      listPromise.catch(() => undefined);
+      const items = await Promise.race([
+        listPromise,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("inbox delivery check timed out")),
+            INBOX_CHECK_TIMEOUT_MS,
+          );
+        }),
+      ]);
+      // Text-match caveat (documented): with no caller-supplied prompt id
+      // there is no delivery key, so an identical-text pending item from
+      // another client on a shared session could be misattributed. The
+      // provider's exclusive-session contract makes that the same caveat
+      // the rest of the turn correlation already carries.
+      const match = items.find(
+        (item): item is SessionInboxUser =>
+          item.type === "user" &&
+          (body.id !== undefined
+            ? item.id === body.id
+            : item.payload.text === body.text),
+      );
+      if (!match) {
+        return false;
+      }
+      this.logger.warn(
+        `session.prompt failed but the prompt is enqueued on session ` +
+          `${turn.sessionId} (inbox ${match.id}); continuing to observe the turn.`,
+      );
+      turn.receipt = match;
+      return true;
+    } catch (checkError) {
+      this.logger.debug?.(
+        `inbox delivery check unavailable: ${extractErrorMessage(checkError)}`,
+      );
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /**
@@ -1388,6 +1538,117 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     ]);
     clearTimeout(timer);
     return outcome;
+  }
+
+  /**
+   * Arm the `session.wait` watchdog for this turn — once, and only after the
+   * execution is confirmed started (the one case whose wait semantics the
+   * stage-6 capture pinned; steer/queue/interrupt behavior is unpinned
+   * upstream). The wait rides the subscription's lifetime, so turn teardown
+   * aborts it. Resolution only flips state the pump inspects — completion
+   * stays event-driven. A wait failure is internal by the phase rule: log at
+   * debug and disarm (the silence watchdog remains the backstop); never a
+   * surfaced or retryable error.
+   */
+  private armWaitWatchdog(turn: TurnContext): void {
+    if (turn.waitWatchdogState !== "unarmed" || turn.state.finishEmitted) {
+      return;
+    }
+    turn.waitWatchdogState = "pending";
+    turn.waitWatchdog = new Promise<void>((resolve) => {
+      turn.port.session
+        .wait(
+          { sessionID: turn.sessionId },
+          this.requestOptions(turn.headers, turn.subscription.signal),
+        )
+        .then(
+          () => {
+            if (turn.waitWatchdogState === "pending") {
+              turn.waitWatchdogState = "settled";
+              resolve();
+            }
+          },
+          (waitError: unknown) => {
+            // Failure never resolves the interrupt: the pump keeps its full
+            // silence-watchdog cadence instead of probing early.
+            if (turn.waitWatchdogState === "pending") {
+              turn.waitWatchdogState = "disarmed";
+            }
+            if (!isAbortError(waitError)) {
+              this.logger.debug?.(
+                `session.wait watchdog unavailable: ${extractErrorMessage(waitError)}`,
+              );
+            }
+          },
+        );
+    });
+  }
+
+  /**
+   * The `session.wait` watchdog resolved while the event stream shows no
+   * terminal. Events stay primary: drain the stream for a grace window (the
+   * terminal usually trails wait by milliseconds), then reconcile from the
+   * message store — finalizing only on stored proof the turn concluded,
+   * never completion-by-wait. Returns true when the turn was finalized;
+   * false disarms the watchdog and keeps the pump listening.
+   */
+  private async reconcileAfterWaitSettled(
+    turn: TurnContext,
+    push: (parts: LanguageModelV4StreamPart[]) => void,
+  ): Promise<boolean> {
+    const deadline = Date.now() + turn.waitWatchdogGraceMs;
+    for (;;) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        break;
+      }
+      const result = await turn.reader.nextWithTimeout(remaining);
+      if (result === "timeout") {
+        break;
+      }
+      if (result.done) {
+        push(finalizeV2Stream(turn.state));
+        return true;
+      }
+      this.observeEvent(turn, result.value, push);
+      if (turn.state.finishEmitted) {
+        return true;
+      }
+    }
+
+    turn.waitWatchdogState = "disarmed";
+    try {
+      const messages = await this.fetchTurnMessages(turn);
+      const last = messages[messages.length - 1];
+      const concluded =
+        last !== undefined &&
+        (last.error !== undefined ||
+          (last.finish !== undefined &&
+            last.finish !== "tool-calls" &&
+            last.finish !== "unknown"));
+      if (!concluded) {
+        this.logger.warn(
+          `session.wait resolved for session ${turn.sessionId} but neither ` +
+            "the event stream nor the message store shows a terminal; " +
+            "continuing to observe events.",
+        );
+        return false;
+      }
+      this.logger.warn(
+        `session.wait watchdog: session ${turn.sessionId} settled but the ` +
+          "event stream showed no terminal; finalizing from the message store.",
+      );
+      this.replayStoredMessages(turn, messages, push);
+      if (!turn.state.finishEmitted) {
+        push(finalizeV2Stream(turn.state));
+      }
+      return true;
+    } catch (probeError) {
+      this.logger.debug?.(
+        `Wait-watchdog reconciliation failed: ${extractErrorMessage(probeError)}`,
+      );
+      return false;
+    }
   }
 
   /** This turn's stored assistant messages, in creation order. */
@@ -1633,6 +1894,99 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         last.rawFinish,
       );
     }
+  }
+
+  /**
+   * Opt-in JSON validate/repair for doGenerate (`settings.jsonRepair`):
+   * when json mode was requested and the final text fails client-side
+   * validation, ask the server's `generate.text` route — documented
+   * upstream as session-less/tool-less/history-less, so the original turn
+   * is never replayed — to repair it. Bounded attempts; every failure here
+   * is internal (post-dispatch phase rule): the original output stands when
+   * repair is exhausted or unavailable, recorded in a warning.
+   */
+  private async repairJsonOutput(
+    turn: TurnContext,
+    aggregated: AggregatedParts,
+  ): Promise<void> {
+    const config = this.settings.jsonRepair;
+    if (
+      !config ||
+      !turn.jsonMode ||
+      aggregated.error !== undefined ||
+      aggregated.finishReason.unified === "error"
+    ) {
+      return;
+    }
+    const text = aggregated.content
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join("");
+    let failure = validateJsonText(text, turn.jsonSchema);
+    if (failure === undefined) {
+      return;
+    }
+
+    // Model ref for the side call, when one is knowable without a catalog
+    // round-trip; omitted otherwise (server default).
+    const model =
+      this.resolvedModelRef ??
+      (this.parsedProviderID
+        ? {
+            id: this.parsedModelID,
+            providerID: this.parsedProviderID,
+            ...(this.settings.variant
+              ? { variant: this.settings.variant }
+              : {}),
+          }
+        : undefined);
+
+    const maxAttempts = config.maxAttempts ?? 1;
+    let attemptsUsed = 0;
+    let candidate = text;
+    while (attemptsUsed < maxAttempts) {
+      attemptsUsed += 1;
+      let repaired: string;
+      try {
+        const response = await turn.port.generate.text(
+          {
+            prompt: buildJsonRepairPrompt(candidate, turn.jsonSchema, failure),
+            ...(model ? { model } : {}),
+          },
+          this.requestOptions(turn.headers, undefined),
+        );
+        repaired = response.text;
+      } catch (repairError) {
+        // Post-dispatch side call: internal only (phase rule) — count the
+        // attempt and keep going while the budget lasts.
+        this.logger.warn(
+          `JSON repair attempt ${attemptsUsed} failed: ${extractErrorMessage(repairError)}`,
+        );
+        continue;
+      }
+      const stripped = extractJsonCandidate(repaired);
+      const strippedFailure = validateJsonText(stripped, turn.jsonSchema);
+      if (strippedFailure === undefined) {
+        replaceTextContent(aggregated.content, stripped);
+        aggregated.warnings.push({
+          type: "other",
+          message:
+            `responseFormat json: output failed client-side validation ` +
+            `(${failure}) and was repaired via generate.text ` +
+            `(${attemptsUsed} attempt(s) used).`,
+        });
+        return;
+      }
+      candidate = stripped;
+      failure = strippedFailure;
+    }
+    aggregated.warnings.push({
+      type: "other",
+      message:
+        `responseFormat json: output failed client-side validation ` +
+        `(${failure}) and ${maxAttempts} repair attempt(s) were exhausted; ` +
+        `returning the original output.`,
+    });
   }
 
   // --- abort ------------------------------------------------------------
@@ -2089,6 +2443,83 @@ function aggregateParts(parts: LanguageModelV4StreamPart[]): AggregatedParts {
     }
   }
   return aggregated;
+}
+
+/**
+ * Client-side validation for json-mode output: `JSON.parse` plus a shallow
+ * top-level type check against the supplied JSON schema (full JSON-Schema
+ * validation would need a dependency; the AI SDK caller re-validates the
+ * object anyway). Returns an error description, or undefined when valid.
+ */
+function validateJsonText(text: string, schema: unknown): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    return `not valid JSON: ${extractErrorMessage(error)}`;
+  }
+  const declaredType =
+    schema !== null && typeof schema === "object" && "type" in schema
+      ? (schema as { type?: unknown }).type
+      : undefined;
+  if (declaredType === "object") {
+    if (
+      parsed === null ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed)
+    ) {
+      return 'top-level value is not an object (schema declares type "object")';
+    }
+  } else if (declaredType === "array" && !Array.isArray(parsed)) {
+    return 'top-level value is not an array (schema declares type "array")';
+  }
+  return undefined;
+}
+
+/** Strip a Markdown code fence when the whole output is wrapped in one. */
+function extractJsonCandidate(text: string): string {
+  const trimmed = text.trim();
+  const fenced = /^```(?:json)?\s*\n?([\s\S]*?)\n?```$/.exec(trimmed);
+  return fenced ? fenced[1]!.trim() : trimmed;
+}
+
+function buildJsonRepairPrompt(
+  invalidOutput: string,
+  schema: unknown,
+  failure: string,
+): string {
+  return [
+    "The following model output was supposed to be a single valid JSON value" +
+      (schema !== undefined ? " matching the JSON schema below" : "") +
+      `, but it failed validation: ${failure}.`,
+    "Return ONLY the corrected JSON value — no prose, no code fences.",
+    ...(schema !== undefined ? ["JSON schema:", JSON.stringify(schema)] : []),
+    "Invalid output:",
+    invalidOutput,
+  ].join("\n\n");
+}
+
+/**
+ * Replace every text part with a single text part holding `text`, at the
+ * position of the first original text part (non-text parts keep their
+ * relative order).
+ */
+function replaceTextContent(
+  content: LanguageModelV4Content[],
+  text: string,
+): void {
+  let insertAt: number | undefined;
+  const kept: LanguageModelV4Content[] = [];
+  for (const part of content) {
+    if (part.type === "text") {
+      insertAt ??= kept.length;
+      continue;
+    }
+    kept.push(part);
+  }
+  kept.splice(insertAt ?? kept.length, 0, { type: "text", text });
+  content.length = 0;
+  content.push(...kept);
 }
 
 /** Assistant messages belonging to this turn, in creation order. */

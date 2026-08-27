@@ -40,8 +40,10 @@ describe("client-port", () => {
     expect(typeof port.session.context).toBe("function");
     expect(typeof port.session.log).toBe("function");
     expect(typeof port.session.inbox.cancel).toBe("function");
+    expect(typeof port.session.inbox.list).toBe("function");
     expect(typeof port.message.list).toBe("function");
     expect(typeof port.model.list).toBe("function");
+    expect(typeof port.generate.text).toBe("function");
     expect(typeof port.event.subscribe).toBe("function");
     expect(typeof port.permission.list).toBe("function");
     expect(typeof port.permission.get).toBe("function");

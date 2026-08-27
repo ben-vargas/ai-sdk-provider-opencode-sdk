@@ -115,10 +115,18 @@ interface FakePortHooks {
   messages?: unknown[];
   models?: unknown[];
   waitError?: unknown;
+  /** Defer wait resolution: never resolves within the test (default: instant). */
+  waitHangs?: boolean;
   /** Pending permission requests returned by permission.list. */
   permissions?: unknown[];
   /** Pending forms returned by form.list. */
   forms?: unknown[];
+  /** Pending inbox items returned by session.inbox.list. */
+  inboxItems?: unknown[] | (() => unknown[]);
+  /** Make session.inbox.list reject. */
+  inboxListError?: unknown;
+  /** Scripted generate.text responses (throw inside to fail the call). */
+  generateText?: (input: Record<string, unknown>) => { text: string };
 }
 
 interface FakePort {
@@ -200,6 +208,9 @@ function createFakePort(hooks: FakePortHooks = {}): FakePort {
       },
       wait: (input: unknown, options?: OpencodeRequestOptions) => {
         record("session.wait", input, options);
+        if (hooks.waitHangs) {
+          return new Promise<undefined>(() => undefined);
+        }
         return hooks.waitError !== undefined
           ? Promise.reject(hooks.waitError)
           : Promise.resolve(undefined);
@@ -214,7 +225,35 @@ function createFakePort(hooks: FakePortHooks = {}): FakePort {
       log: () => {
         throw new Error("session.log not scripted");
       },
-      inbox: { cancel: fn("session.inbox.cancel", () => undefined) },
+      inbox: {
+        cancel: fn("session.inbox.cancel", () => undefined),
+        list: (input: unknown, options?: OpencodeRequestOptions) => {
+          record("session.inbox.list", input, options);
+          if (hooks.inboxListError !== undefined) {
+            return Promise.reject(hooks.inboxListError);
+          }
+          const items = hooks.inboxItems ?? [];
+          return Promise.resolve(typeof items === "function" ? items() : items);
+        },
+      },
+    },
+    generate: {
+      text: (
+        input: Record<string, unknown>,
+        options?: OpencodeRequestOptions,
+      ) => {
+        record("generate.text", input, options);
+        if (!hooks.generateText) {
+          return Promise.reject(new Error("generate.text not scripted"));
+        }
+        try {
+          return Promise.resolve(hooks.generateText(input));
+        } catch (error) {
+          return Promise.reject(
+            error instanceof Error ? error : new Error(String(error)),
+          );
+        }
+      },
     },
     message: {
       list: fn("message.list", () => ({
@@ -284,7 +323,10 @@ function createModel(
   return new OpencodeLanguageModel(
     "test-provider/test-model",
     { logger: false, ...settings },
-    { getPort: () => fake.port, ...config },
+    // Fast wait-watchdog grace: the fake port's wait resolves instantly, so
+    // any turn that has to wait for late events would otherwise burn the
+    // full 2 s production grace before continuing.
+    { getPort: () => fake.port, waitWatchdogGraceMs: 25, ...config },
   );
 }
 
@@ -1260,7 +1302,9 @@ describe("post-dispatch failure reconciliation", () => {
     expect(result.content).toEqual([{ type: "text", text: "Hello world" }]);
     expect(result.finishReason).toEqual({ unified: "stop", raw: "stop" });
     expect(result.usage.inputTokens.total).toBe(10);
-    expect(fake.callsFor("session.wait").length).toBe(1);
+    // Two wait calls: the execution-start watchdog (rejected by waitError,
+    // internally absorbed) and the reconciliation's bounded wait.
+    expect(fake.callsFor("session.wait").length).toBe(2);
     expect(fake.callsFor("message.list").length).toBeGreaterThan(0);
   });
 
@@ -1601,6 +1645,12 @@ describe("dispatch-failure reconciliation", () => {
 describe("silence watchdog", () => {
   it("finalizes from the message store when the stream goes silent after the session settled", async () => {
     const fake = createFakePort({
+      // Wait 503s: the execution-start wait watchdog disarms itself, so
+      // completion detection falls to the silence probe under test here.
+      waitError: {
+        _tag: "ServiceUnavailableError",
+        message: "Session wait is not available yet",
+      },
       messages: [
         {
           id: "msg_a",
@@ -1737,6 +1787,325 @@ describe("unsupported tools", () => {
         (warning) =>
           warning.type === "other" &&
           warning.message.includes("Custom tool definitions"),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("session.wait watchdog", () => {
+  it("is a no-op on a healthy turn (armed once, completion stays event-driven)", async () => {
+    const fake = createFakePort();
+    scriptTextTurn(fake);
+    const warn = vi.fn();
+    const model = createModel(fake, {
+      logger: { warn, error: vi.fn() },
+    });
+
+    const result = await model.doGenerate(callOptions());
+    expect(result.content).toEqual([{ type: "text", text: "Hello world" }]);
+    expect(result.finishReason).toEqual({ unified: "stop", raw: "stop" });
+    // Exactly the armed watchdog — no bounded re-wait, no recovery path.
+    expect(fake.callsFor("session.wait").length).toBe(1);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("finalizes from the message store when wait resolves but the terminal event was lost", async () => {
+    const fake = createFakePort({
+      messages: [
+        {
+          id: "msg_a",
+          type: "assistant",
+          time: { created: Date.now() + 10_000 },
+          agent: "default",
+          model: { id: "test-model", providerID: "test-provider" },
+          content: [{ type: "text", text: "Hello world" }],
+          finish: "stop",
+          cost: 0.02,
+          tokens: tokens(10, 5, 0, 0, 0),
+        },
+      ],
+    });
+    fake.hooks.onPrompt = () => {
+      const ev = eventFactory(SESSION_ID);
+      // Stream loses everything after the first delta — no terminal event.
+      fake.emit(
+        ev.executionStarted(),
+        ev.stepStarted("msg_a"),
+        ev.textStarted("msg_a", 0),
+        ev.textDelta("msg_a", 0, "Hello"),
+      );
+    };
+    // Silence watchdog far beyond the test timeout: completing at all
+    // proves the wait watchdog (not the silence probe) drove recovery.
+    const model = createModel(fake, {}, { silenceWatchdogMs: 60_000 });
+
+    const result = await model.doGenerate(callOptions());
+    expect(result.content).toEqual([{ type: "text", text: "Hello world" }]);
+    expect(result.finishReason).toEqual({ unified: "stop", raw: "stop" });
+    expect(result.usage.inputTokens.total).toBe(10);
+  });
+
+  it("keeps listening when wait resolves without stored proof of conclusion (events stay primary)", async () => {
+    const fake = createFakePort({ messages: [] });
+    fake.hooks.onPrompt = () => {
+      const ev = eventFactory(SESSION_ID);
+      fake.emit(ev.executionStarted(), ev.stepStarted("msg_a"));
+      // The turn is genuinely still running: the rest arrives later, after
+      // the (spuriously resolved) wait watchdog has been consumed.
+      setTimeout(() => {
+        const late = eventFactory(SESSION_ID);
+        fake.emit(
+          late.textStarted("msg_a", 0),
+          late.textDelta("msg_a", 0, "Hello world"),
+          late.textEnded("msg_a", 0, "Hello world"),
+          late.stepEnded("msg_a", "stop", tokens(10, 4, 1, 2, 0), 0.01),
+          late.executionSucceeded(),
+        );
+      }, 100);
+    };
+    const model = createModel(fake, {}, { silenceWatchdogMs: 60_000 });
+
+    const result = await model.doGenerate(callOptions());
+    expect(result.content).toEqual([{ type: "text", text: "Hello world" }]);
+    expect(result.finishReason).toEqual({ unified: "stop", raw: "stop" });
+  });
+
+  it("absorbs a wait failure internally (phase rule): the turn completes from events", async () => {
+    const fake = createFakePort({
+      waitError: {
+        _tag: "ServiceUnavailableError",
+        message: "Session wait is not available yet",
+      },
+    });
+    scriptTextTurn(fake);
+    const model = createModel(fake);
+
+    const result = await model.doGenerate(callOptions());
+    expect(result.content).toEqual([{ type: "text", text: "Hello world" }]);
+    expect(result.finishReason).toEqual({ unified: "stop", raw: "stop" });
+    expect(fake.callsFor("session.wait").length).toBe(1);
+  });
+});
+
+describe("delivery-uncertainty inbox reconciliation", () => {
+  const transportError = () => ({
+    name: "ClientError",
+    reason: "Transport",
+    message: "socket hang up",
+    cause: new Error("hang"),
+  });
+
+  function pendingUserItem(text: string): Record<string, unknown> {
+    return {
+      id: "msg_u1",
+      sessionID: SESSION_ID,
+      timeCreated: Date.now(),
+      type: "user",
+      payload: { text },
+      delivery: "queue",
+    };
+  }
+
+  it("adopts an enqueued prompt as the receipt and keeps observing the turn", async () => {
+    const fake = createFakePort({ promptError: () => transportError() });
+    fake.hooks.inboxItems = () => {
+      // The prompt WAS enqueued: the turn runs shortly after the check.
+      setTimeout(() => {
+        const ev = eventFactory(SESSION_ID);
+        fake.emit(
+          ev.executionStarted(),
+          ev.stepStarted("msg_a"),
+          ev.textStarted("msg_a", 0),
+          ev.textDelta("msg_a", 0, "Hello world"),
+          ev.textEnded("msg_a", 0, "Hello world"),
+          ev.stepEnded("msg_a", "stop", tokens(10, 4, 1, 2, 0), 0.01),
+          ev.executionSucceeded(),
+        );
+      }, 10);
+      return [pendingUserItem("Hi")];
+    };
+    const model = createModel(fake);
+
+    const result = await model.doGenerate(callOptions());
+    expect(result.content).toEqual([{ type: "text", text: "Hello world" }]);
+    expect(result.finishReason).toEqual({ unified: "stop", raw: "stop" });
+    // The pending inbox item became this turn's receipt.
+    expect(result.response?.id).toBe("msg_u1");
+    expect(fake.callsFor("session.inbox.list").length).toBe(1);
+    expect(fake.callsFor("session.prompt").length).toBe(1);
+  });
+
+  it("surfaces the non-retryable error when the inbox shows the prompt was never enqueued", async () => {
+    const fake = createFakePort({
+      promptError: () => transportError(),
+      inboxItems: [],
+      messages: [],
+    });
+    const model = createModel(fake);
+
+    const error = await model
+      .doGenerate(callOptions())
+      .catch((caught: unknown) => caught);
+    expect(APICallError.isInstance(error)).toBe(true);
+    expect((error as APICallError).isRetryable).toBe(false);
+    expect(fake.callsFor("session.inbox.list").length).toBe(1);
+  });
+
+  it("does not match a pending item with different text (foreign inbox item)", async () => {
+    const fake = createFakePort({
+      promptError: () => transportError(),
+      inboxItems: [pendingUserItem("something else entirely")],
+      messages: [],
+    });
+    const model = createModel(fake);
+
+    const error = await model
+      .doGenerate(callOptions())
+      .catch((caught: unknown) => caught);
+    expect(APICallError.isInstance(error)).toBe(true);
+    expect((error as APICallError).isRetryable).toBe(false);
+  });
+
+  it("falls back to message reconciliation when the inbox check itself fails", async () => {
+    const fake = createFakePort({
+      promptError: () => transportError(),
+      inboxListError: transportError(),
+      messages: [],
+    });
+    const model = createModel(fake);
+
+    const error = await model
+      .doGenerate(callOptions())
+      .catch((caught: unknown) => caught);
+    expect(APICallError.isInstance(error)).toBe(true);
+    expect((error as APICallError).isRetryable).toBe(false);
+    expect(fake.callsFor("session.inbox.list").length).toBe(1);
+    // The existing reconciliation path still ran after the failed check.
+    expect(fake.callsFor("message.list").length).toBeGreaterThan(0);
+  });
+});
+
+describe("JSON validate/repair loop", () => {
+  const JSON_FORMAT = {
+    type: "json" as const,
+    schema: { type: "object", properties: { a: { type: "number" } } },
+  };
+
+  it("is disabled by default: invalid output passes through with no repair call", async () => {
+    const fake = createFakePort();
+    scriptTextTurn(fake, "not json at all");
+    const model = createModel(fake);
+
+    const result = await model.doGenerate(
+      callOptions({ responseFormat: JSON_FORMAT }),
+    );
+    expect(result.content).toEqual([{ type: "text", text: "not json at all" }]);
+    expect(fake.callsFor("generate.text").length).toBe(0);
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.type === "unsupported" &&
+          warning.feature.includes("responseFormat"),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not call repair when the output validates first try", async () => {
+    const fake = createFakePort();
+    scriptTextTurn(fake, '{"a": 1}');
+    const model = createModel(fake, { jsonRepair: {} });
+
+    const result = await model.doGenerate(
+      callOptions({ responseFormat: JSON_FORMAT }),
+    );
+    expect(result.content).toEqual([{ type: "text", text: '{"a": 1}' }]);
+    expect(fake.callsFor("generate.text").length).toBe(0);
+  });
+
+  it("repairs invalid output via generate.text and records the attempts", async () => {
+    const fake = createFakePort({
+      generateText: () => ({ text: '```json\n{"a": 1}\n```' }),
+    });
+    scriptTextTurn(fake, "Sure! Here you go: {a: 1}");
+    const model = createModel(fake, { jsonRepair: {} });
+
+    const result = await model.doGenerate(
+      callOptions({ responseFormat: JSON_FORMAT }),
+    );
+    // Code fence stripped, text content replaced with the repaired JSON.
+    expect(result.content).toEqual([{ type: "text", text: '{"a": 1}' }]);
+    const calls = fake.callsFor("generate.text");
+    expect(calls.length).toBe(1);
+    const input = calls[0]!.input as { prompt: string; model?: unknown };
+    expect(input.prompt).toContain("Sure! Here you go");
+    expect(input.prompt).toContain('"properties"');
+    expect(input.model).toEqual({
+      id: "test-model",
+      providerID: "test-provider",
+    });
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.type === "other" &&
+          warning.message.includes("repaired via generate.text"),
+      ),
+    ).toBe(true);
+  });
+
+  it("repairs a schema top-level type mismatch (valid JSON, wrong shape)", async () => {
+    const fake = createFakePort({
+      generateText: () => ({ text: '{"a": 2}' }),
+    });
+    scriptTextTurn(fake, "[1, 2]");
+    const model = createModel(fake, { jsonRepair: {} });
+
+    const result = await model.doGenerate(
+      callOptions({ responseFormat: JSON_FORMAT }),
+    );
+    expect(result.content).toEqual([{ type: "text", text: '{"a": 2}' }]);
+    expect(fake.callsFor("generate.text").length).toBe(1);
+  });
+
+  it("keeps the original output after exhausting bounded attempts", async () => {
+    const fake = createFakePort({
+      generateText: () => ({ text: "still not json" }),
+    });
+    scriptTextTurn(fake, "not json");
+    const model = createModel(fake, { jsonRepair: { maxAttempts: 2 } });
+
+    const result = await model.doGenerate(
+      callOptions({ responseFormat: JSON_FORMAT }),
+    );
+    expect(result.content).toEqual([{ type: "text", text: "not json" }]);
+    expect(fake.callsFor("generate.text").length).toBe(2);
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.type === "other" &&
+          warning.message.includes("repair attempt(s) were exhausted"),
+      ),
+    ).toBe(true);
+  });
+
+  it("treats a failed repair call as a consumed attempt (internal, never surfaced)", async () => {
+    const fake = createFakePort({
+      generateText: () => {
+        throw new Error("generate.text unavailable");
+      },
+    });
+    scriptTextTurn(fake, "not json");
+    const model = createModel(fake, { jsonRepair: {} });
+
+    const result = await model.doGenerate(
+      callOptions({ responseFormat: JSON_FORMAT }),
+    );
+    expect(result.content).toEqual([{ type: "text", text: "not json" }]);
+    expect(fake.callsFor("generate.text").length).toBe(1);
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.type === "other" &&
+          warning.message.includes("repair attempt(s) were exhausted"),
       ),
     ).toBe(true);
   });

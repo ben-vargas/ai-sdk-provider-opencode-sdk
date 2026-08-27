@@ -44,12 +44,21 @@ export interface OpencodeClientPort {
     | "context"
     | "log"
   > & {
-    /** Cancel a not-yet-delivered inbox item (abort before delivery). */
-    readonly inbox: Pick<OpenCodeClient["session"]["inbox"], "cancel">;
+    /**
+     * Cancel a not-yet-delivered inbox item (abort before delivery); list
+     * pending items (delivery-uncertainty check after a failed prompt).
+     */
+    readonly inbox: Pick<OpenCodeClient["session"]["inbox"], "cancel" | "list">;
   };
   readonly message: Pick<OpenCodeClient["message"], "list">;
   /** Catalog lookup: resolves a bare model ID + variant to a providerID. */
   readonly model: Pick<OpenCodeClient["model"], "list">;
+  /**
+   * Session-less, tool-less, history-less text generation (documented
+   * upstream as exactly that) — the safe repair channel for the opt-in JSON
+   * validate/repair loop.
+   */
+  readonly generate: Pick<OpenCodeClient["generate"], "text">;
   readonly event: Pick<OpenCodeClient["event"], "subscribe">;
   readonly permission: Pick<
     OpenCodeClient["permission"],

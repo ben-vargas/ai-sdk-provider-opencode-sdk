@@ -318,6 +318,24 @@ export interface OpencodeSettings {
   resolveFileToUri?: OpencodeResolveFileToUri;
 
   /**
+   * Opt-in client-side JSON validate/repair loop for
+   * `responseFormat: { type: "json" }` (off by default). OpenCode v2 has no
+   * server-side structured-output enforcement, so when enabled the provider
+   * validates the final text client-side (`JSON.parse` plus a shallow
+   * top-level type check against the AI SDK-supplied schema when present)
+   * and, on failure, asks the server's `generate.text` route — documented
+   * upstream as session-less/tool-less/history-less, so it can never replay
+   * the original turn's side effects — to repair the invalid output.
+   * Bounded by `maxAttempts` (default 1); a warning records the attempts
+   * used. Applies to `doGenerate` only: streamed output has already been
+   * delivered and cannot be recalled.
+   */
+  jsonRepair?: {
+    /** Maximum repair calls per generation. @default 1 */
+    maxAttempts?: number;
+  };
+
+  /**
    * Logger instance or false to disable logging.
    */
   logger?: Logger | false;

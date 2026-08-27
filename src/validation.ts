@@ -51,6 +51,9 @@ export const opcodeSettingsSchema = z.object({
   onForm: z.function().optional(),
   formPolicy: z.enum(["cancel", "wait"]).optional(),
   resolveFileToUri: z.function().optional(),
+  jsonRepair: z
+    .object({ maxAttempts: z.number().int().positive().optional() })
+    .optional(),
   logger: z.union([loggerSchema, z.literal(false)]).optional(),
   verbose: z.boolean().optional(),
 });
