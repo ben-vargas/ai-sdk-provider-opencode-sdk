@@ -80,7 +80,7 @@ const opencode = createOpencode({
 | `outputFormatRetryCount`            | **Removed** — it retried v1's native `json_schema`, which no longer exists (see Structured output below). Closest v5 analog: `jsonRepair`.                                                                                                                                                                                                                                                                                                                                     |
 | `onQuestion` / `questionPolicy`     | **Removed.** v2 replaces questions with **forms**: `onForm` receives typed, keyed fields and returns a keyed answer record (not positional `string[][]`); `formPolicy` (`"cancel"`/`"wait"`) replaces `questionPolicy` (`"reject"`/`"wait"`), with cancel as the non-deadlocking default. Like `questionPolicy`, it applies only when **no handler is set** — a configured handler that throws always cancels the form.                                                        |
 | `logger`, `verbose`                 | Kept.                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| —                                   | **New:** `sessionMode` (`"ephemeral"` default / `"persistent"` — currently identical to it / `"existing"`), `location`, `delivery` (`"queue"` default, sent explicitly), `resume`, `onForm`, `formPolicy`, `resolveFileToUri`, `jsonRepair`.                                                                                                                                                                                                                                   |
+| —                                   | **New:** `sessionMode` (`"ephemeral"` default / `"existing"`), `location`, `delivery` (`"queue"` default, sent explicitly), `resume`, `onForm`, `formPolicy`, `resolveFileToUri`, `jsonRepair`.                                                                                                                                                                                                                                                                                |
 
 Questions → forms, before / after:
 
@@ -110,14 +110,20 @@ const model = opencode("opencode/big-pickle", {
   creates or pins one session on first use and reuses it for every later
   call on that instance; the session survives approval round-trips.
   **One model instance = one conversation.** v5 adds `sessionMode` to name
-  which session that is — but `"ephemeral"` (the default) and
-  `"persistent"` currently take the **same** provider-created path and are
-  behaviorally identical; neither shares a session across model instances
-  or process restarts, and no session ID is persisted. If you relied on v4
-  reusing a session beyond one model instance, store the session ID
-  (`model.getSessionId()` or `providerMetadata.opencode.sessionId`) and
-  pass it back as `sessionId` (mode `"existing"`). For a fresh session per
-  call, use `createNewSession: true`.
+  which session that is — `"ephemeral"` (the default, provider-created) or
+  `"existing"` (pin the session given by `sessionId`). Neither shares a
+  session across model instances or process restarts, and no session ID is
+  persisted. If you relied on v4 reusing a session beyond one model
+  instance, store the session ID (`model.getSessionId()` or
+  `providerMetadata.opencode.sessionId`) and pass it back as `sessionId`
+  (mode `"existing"`). For a fresh session per call, use
+  `createNewSession: true`.
+
+  A `"persistent"` mode value was **removed in 5.0.0-beta.1** before it
+  ever did anything: it was documented as identical to `"ephemeral"` and
+  took the same provider-created path. If you were passing it, drop it (the
+  default is equivalent); to reattach to a stored session, use `sessionId`
+  with mode `"existing"`.
 - `providerOptions.opencode.messageID` → **`providerOptions.opencode.id`**
   (the v2 prompt's user-message ID). New: `providerOptions.opencode.sessionId`
   as a per-call session escape hatch.
@@ -210,9 +216,9 @@ and `retry` info.
 - The optional `./embedded` entrypoint did not ship (the beta embedded host
   is non-functional for generation and Node-incompatible);
   `createClientManagerFromPort` is the supported injection seam.
-- `sessionMode: "persistent"` shipped as a **name without distinct
+- `sessionMode: "persistent"` was designed as a **name without distinct
   behavior**: the analysis described it as reusing one session across
-  conversations, but the implementation routes it through the same
-  provider-created, instance-pinned path as `"ephemeral"`. The docs now say
-  so rather than describing the intent; whether to implement cross-instance
-  persistence or drop the value is an open question for GA.
+  conversations, but the implementation routed it through the same
+  provider-created, instance-pinned path as `"ephemeral"`. The value was
+  **removed in 5.0.0-beta.1** rather than shipped as a no-op; `sessionId` +
+  mode `"existing"` is the way to reattach to a stored session.

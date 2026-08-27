@@ -76,23 +76,13 @@ const cases: ConverterCase[] = [
     },
   },
   {
-    name: "persistent mode sends only the latest user turn",
-    prompt: [
-      user("First question"),
-      assistant("First answer"),
-      user("Second question"),
-    ],
-    options: { sessionMode: "persistent" },
-    expected: { text: "Second question", warnings: [] },
-  },
-  {
     name: "existing mode sends only the latest user turn",
     prompt: [user("Old"), assistant("Old answer"), user("New")],
     options: { sessionMode: "existing" },
     expected: { text: "New", warnings: [] },
   },
   {
-    name: "persistent mode keeps trailing tool context after the last user message",
+    name: "existing mode keeps trailing tool context after the last user message",
     prompt: [
       user("Old turn"),
       assistant("Old answer"),
@@ -120,7 +110,7 @@ const cases: ConverterCase[] = [
         ],
       },
     ],
-    options: { sessionMode: "persistent" },
+    options: { sessionMode: "existing" },
     expected: {
       text: [
         entry("user", "Run the tool"),
@@ -580,7 +570,7 @@ describe("file conversion", () => {
     ]);
   });
 
-  it("does not attach files from history outside the persistent-mode scope", async () => {
+  it("does not attach files from history outside the latest-turn scope", async () => {
     const result = await convertToOpencodePrompt(
       [
         {
@@ -597,7 +587,7 @@ describe("file conversion", () => {
         assistant("Saw it"),
         user("Second turn, no files"),
       ],
-      { sessionMode: "persistent" },
+      { sessionMode: "existing" },
     );
     expect(result.files).toEqual([]);
     expect(result.text).toBe("Second turn, no files");

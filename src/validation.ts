@@ -38,7 +38,7 @@ const locationSchema = z.object({
  */
 export const opcodeSettingsSchema = z.object({
   sessionId: z.string().optional(),
-  sessionMode: z.enum(["ephemeral", "persistent", "existing"]).optional(),
+  sessionMode: z.enum(["ephemeral", "existing"]).optional(),
   createNewSession: z.boolean().optional(),
   sessionTitle: z.string().optional(),
   agent: z.string().optional(),
@@ -123,12 +123,6 @@ export function validateSettings(
   if (settings.sessionId && settings.sessionMode === "ephemeral") {
     warnings.push(
       'sessionId is ignored in "ephemeral" session mode; use sessionMode "existing" to pin a session',
-    );
-  }
-
-  if (settings.sessionId && settings.sessionMode === "persistent") {
-    warnings.push(
-      'sessionId is ignored in "persistent" session mode (the provider creates and reuses its own session); use sessionMode "existing" to pin a session',
     );
   }
 
@@ -426,7 +420,7 @@ export function mergeSettings(
  * Explicit rule for the sessionId+sessionMode ambiguity:
  * - An explicit `sessionMode` always wins. Conflicting combinations warn
  *   (in {@link validateSettings}) and the losing field is ignored:
- *   `sessionId` with mode "ephemeral"/"persistent" is ignored; mode
+ *   `sessionId` with mode "ephemeral" is ignored; mode
  *   "existing" without a `sessionId` falls back to "ephemeral".
  * - With no explicit mode, providing a `sessionId` pins that session and
  *   implies mode "existing".

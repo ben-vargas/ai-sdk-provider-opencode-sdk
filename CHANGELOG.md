@@ -38,8 +38,9 @@ for the full setting-by-setting migration.
   process signal handlers are gone.
 - **Session model**: model/agent are session state, and binding is
   model-instance-local: one model instance = one conversation = one pinned
-  session (`sessionMode: "ephemeral"`, the default; `"persistent"` is
-  accepted but currently takes the same path — see the migration guide).
+  session (`sessionMode: "ephemeral"` — the default — or `"existing"` with
+  a `sessionId`; a planned `"persistent"` value was dropped before release
+  as a documented no-op — see the migration guide).
   `directory`/`cwd` → `location: { directory, workspaceID? }`.
 - **Structured output**: v1's native `json_schema` and the
   `StructuredOutput` tool do not exist in v2. `responseFormat: json` is now

@@ -5,7 +5,7 @@
  * there is no multi-role `parts[]` history injection and no `system` field.
  * This module therefore produces `{text, files, warnings, systemBlock}`:
  *
- * - `text`: the latest user turn (persistent/existing sessions — OpenCode
+ * - `text`: the latest user turn (existing/reused sessions — OpenCode
  *   owns the transcript) or the full history serialized as a delimited
  *   transcript (ephemeral sessions, where the target session is fresh).
  * - `files`: `data:` URIs only (the one scheme verified to reach the model
@@ -70,7 +70,7 @@ export interface OpencodePromptConversion {
 export interface ConvertToOpencodePromptOptions {
   /**
    * Session binding of the target session (see `resolveSessionMode`).
-   * - "persistent"/"existing": OpenCode owns the transcript — only the
+   * - "existing": OpenCode owns the transcript — only the
    *   latest user turn (the last user message and anything after it) is
    *   serialized.
    * - "ephemeral" (default): the session is fresh — the full history is
@@ -197,7 +197,7 @@ export async function convertToOpencodePrompt(
 
   const history = prompt.filter((message) => message.role !== "system");
 
-  // Persistent/existing sessions: OpenCode owns the transcript, so only the
+  // Existing/reused sessions: OpenCode owns the transcript, so only the
   // latest user turn — the last user message and anything after it (e.g.
   // tool results the session has not seen) — is serialized. Ephemeral
   // sessions get the full history.

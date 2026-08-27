@@ -1225,7 +1225,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     flags: { freshSession: boolean; jsonMode: boolean; schema?: unknown },
   ): Promise<void> {
     const conversion = await convertToOpencodePrompt(options.prompt, {
-      sessionMode: flags.freshSession ? "ephemeral" : "persistent",
+      sessionMode: flags.freshSession ? "ephemeral" : "existing",
       ...(this.settings.resolveFileToUri
         ? { resolveFileToUri: this.settings.resolveFileToUri }
         : {}),

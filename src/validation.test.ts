@@ -149,12 +149,12 @@ describe("validation", () => {
       ).toBe(true);
     });
 
-    it("should warn when sessionId is set in persistent mode", () => {
-      const result = validateSettings({
-        sessionId: "abc123",
+    it('should warn about the removed "persistent" mode value', () => {
+      const settings = {
         sessionMode: "persistent",
-      });
-      expect(result.warnings.some((w) => w.includes("persistent"))).toBe(true);
+      } as unknown as OpencodeSettings;
+      const result = validateSettings(settings);
+      expect(result.warnings.some((w) => w.includes("sessionMode"))).toBe(true);
     });
 
     it("should warn about invalid delivery values", () => {
@@ -597,9 +597,6 @@ describe("validation", () => {
       expect(
         resolveSessionMode({ sessionId: "ses_1", sessionMode: "ephemeral" }),
       ).toBe("ephemeral");
-      expect(
-        resolveSessionMode({ sessionId: "ses_1", sessionMode: "persistent" }),
-      ).toBe("persistent");
     });
 
     it('falls back to ephemeral for "existing" without a sessionId', () => {

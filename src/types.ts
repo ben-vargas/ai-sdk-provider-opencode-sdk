@@ -132,16 +132,15 @@ export type OpencodeDelivery = SessionInboxDelivery;
  *
  * - "ephemeral": the provider creates a session on first use and owns it
  *   exclusively (default). It survives tool-approval round-trips.
- * - "persistent": **currently identical to "ephemeral" in behavior** —
- *   both take the same provider-created, instance-pinned path. It does not
- *   share a session across model instances or process restarts; there is no
- *   session persistence to key that on. To reattach to a session you stored
- *   yourself, pass its `sessionId` (mode "existing").
  * - "existing": pin the session given by `sessionId` (shared-session caveat:
  *   other clients on the same session can be misattributed — there is no
  *   inbox-to-execution correlation key in the v2 beta).
+ *
+ * A third value, `"persistent"`, was removed in 5.0.0-beta.1: it was a
+ * documented no-op (identical to "ephemeral"). To reattach to a session you
+ * stored yourself, pass its `sessionId` (mode "existing").
  */
-export type OpencodeSessionMode = "ephemeral" | "persistent" | "existing";
+export type OpencodeSessionMode = "ephemeral" | "existing";
 
 /**
  * An interactive form request emitted by OpenCode (replaces v1 questions).
