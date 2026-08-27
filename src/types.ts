@@ -113,8 +113,11 @@ export type OpencodeSessionLocation = LocationRef;
 
 /**
  * Inbox delivery mode for prompts sent to a busy session:
- * "steer" supersedes the remaining turn at the next step boundary,
- * "queue" waits for the current turn to finish.
+ * "steer" injects the prompt into the in-flight turn as mid-turn context —
+ * verified on the beta-source server to neither interrupt nor supersede the
+ * running turn, and to produce no dedicated answer of its own (whether the
+ * model honors the injected text is model behavior);
+ * "queue" waits for the current turn to finish, then runs normally.
  */
 export type OpencodeDelivery = SessionInboxDelivery;
 
@@ -280,7 +283,7 @@ export interface OpencodeSettings {
    * Inbox delivery mode when prompting a busy session.
    *
    * Divergence note: the design doc recommends `"queue"` as the provider
-   * default (avoids `SessionBusyError` and mid-turn supersession), while the
+   * default (avoids `SessionBusyError` and mid-turn context injection), while the
    * live spike observed the *server* default to be `"steer"` when the field
    * is omitted. The provider therefore always sends its own default
    * explicitly rather than inheriting the server's.

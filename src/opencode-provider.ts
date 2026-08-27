@@ -134,26 +134,30 @@ export const opencode = createOpencode();
 
 /**
  * Common model shortcuts for convenience.
- * Model IDs sourced from official documentation:
- * - Anthropic: https://platform.claude.com/docs/en/about-claude/models/overview
- * - Google: https://ai.google.dev/gemini-api/docs/models
- * - OpenAI: https://platform.openai.com/docs/models
+ *
+ * Every ID below was verified present in a live OpenCode v2 catalog
+ * (`model.list`) served by the beta-source server at commit `f4a9b930`
+ * (the build matching the pinned `@opencode-ai/client@0.0.0-beta-18286`),
+ * snapshot 2026-08-27 UTC. The catalog is server- and credential-dependent:
+ * this snapshot covers the zen free tier (`opencode/*`, needs zen
+ * credentials) plus the built-in ollama cloud entries — models from other
+ * providers (Anthropic, OpenAI, Google, …) appear only once their
+ * credentials are configured on the server, so the v4-era shortcuts for
+ * them were dropped as unverifiable. Any `providerID/modelID` string your
+ * server's catalog lists works directly; these shortcuts are not a limit.
  */
 export const OpencodeModels = {
-  // Anthropic models (Claude 4.5 series)
-  "claude-sonnet-4-5": "anthropic/claude-sonnet-4-5-20250929",
-  "claude-haiku-4-5": "anthropic/claude-haiku-4-5-20251001",
-  "claude-opus-4-5": "anthropic/claude-opus-4-5-20251101",
+  // OpenCode zen free tier (requires zen credentials on the server)
+  "nemotron-3.5-lightning-free": "opencode/nemotron-3.5-lightning-free",
+  "muse-spark-1.2-contributor-free": "opencode/muse-spark-1.2-contributor-free",
+  "hy3-free": "opencode/hy3-free",
+  "nemotron-3-ultra-free": "opencode/nemotron-3-ultra-free",
+  "mimo-v2.5-free": "opencode/mimo-v2.5-free",
+  "big-pickle": "opencode/big-pickle",
 
-  // OpenAI models
-  "gpt-4o": "openai/gpt-4o",
-  "gpt-4o-mini": "openai/gpt-4o-mini",
-
-  // Google Gemini models
-  "gemini-3-pro": "google/gemini-3-pro-preview",
-  "gemini-2.5-flash": "google/gemini-2.5-flash",
-  "gemini-2.5-pro": "google/gemini-2.5-pro",
-  "gemini-2.0-flash": "google/gemini-2.0-flash",
+  // Ollama cloud entries (built-in catalog)
+  "glm-5.2": "ollama/glm-5.2:cloud",
+  "kimi-k3": "ollama/kimi-k3:cloud",
 } as const;
 
 export type OpencodeModelShortcut = keyof typeof OpencodeModels;

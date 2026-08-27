@@ -33,7 +33,7 @@ describe("built ESM artifact", () => {
         };
 
         const provider = createOpencode({ client: fakeClient });
-        const model = provider(OpencodeModels["claude-opus-4-5"]);
+        const model = provider(OpencodeModels["big-pickle"]);
         if (model.specificationVersion !== "v4") {
           throw new Error("unexpected specificationVersion: " + model.specificationVersion);
         }

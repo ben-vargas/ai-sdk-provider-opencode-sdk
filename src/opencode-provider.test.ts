@@ -206,14 +206,11 @@ describe("default provider instance", () => {
 
 describe("OpencodeModels", () => {
   it("maps shortcuts to providerID/modelID ids", () => {
-    expect(OpencodeModels["claude-opus-4-5"]).toBe(
-      "anthropic/claude-opus-4-5-20251101",
+    expect(OpencodeModels["nemotron-3.5-lightning-free"]).toBe(
+      "opencode/nemotron-3.5-lightning-free",
     );
-    expect(OpencodeModels["claude-sonnet-4-5"]).toBe(
-      "anthropic/claude-sonnet-4-5-20250929",
-    );
-    expect(OpencodeModels["gpt-4o"]).toBe("openai/gpt-4o");
-    expect(OpencodeModels["gemini-2.5-pro"]).toBe("google/gemini-2.5-pro");
+    expect(OpencodeModels["big-pickle"]).toBe("opencode/big-pickle");
+    expect(OpencodeModels["glm-5.2"]).toBe("ollama/glm-5.2:cloud");
     for (const id of Object.values(OpencodeModels)) {
       expect(id).toMatch(/^[^/]+\/[^/]+$/);
     }
