@@ -380,9 +380,13 @@ IDs (`glm-5.2`, `kimi-k3`). So a genuine catalog entry would read
 `OLLAMA_API_KEY` in models.dev. The stage-0 probe
 (`spike/artifacts/00-probe.json`) captured 20 `ollama-cloud/*` models —
 the full models.dev roster — because that probe ran from a shell exporting
-`OLLAMA_API_KEY`. The integration harness's env allowlist does not forward
-it, which is why the harness catalog shows no `ollama-cloud`. So neither
-`ollama/*` nor `ollama-cloud/*` is shippable as a shortcut.
+`OLLAMA_API_KEY`. At the time the integration harness's env allowlist did
+not forward it, which is why the harness catalog showed no `ollama-cloud`.
+(Stage 10 later made that forwarding deliberate — the harness pins its
+_test_ model to `ollama-cloud/minimax-m3` because the server default never
+answers — but that is machine-local test infrastructure; the conclusion for
+_shipped_ shortcuts is unchanged.) So neither `ollama/*` nor
+`ollama-cloud/*` is shippable as a shortcut.
 
 **The six `opencode/*` shortcuts stand.** All six are present in the live
 models.dev `opencode` provider (five are also in the bundled snapshot;
