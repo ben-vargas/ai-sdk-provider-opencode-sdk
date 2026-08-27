@@ -193,12 +193,13 @@ re-examined below. Evidence: `spike/artifacts/12-beta-src-verification.json`,
 `provenance` block binding the capture to source commit `f4a9b930`, the
 serve build's health `{version, pid}`, and pinned client
 `0.0.0-beta-18286`), and the gated integration suite
-(`npm run test:integration`), which passes 11/11 against this server
-(round-trip incl. doGenerate reconciliation and session pinning, abort
+(`npm run test:integration`), which passed 11/11 against this server at the
+time (round-trip incl. doGenerate reconciliation and session pinning, abort
 pre/post delivery, busy+queue, `data:` attach, a real two-phase approval
 round-trip, contract snapshot, service backend; stage 7 adds the
 wait-watchdog and steer-supersession experiments — see the stage-7
-addendum below).
+addendum below). The suite is 15 tests now, and as of 2026-08-27 it is red
+for an upstream reason — see the stage-9 live re-verification addendum.
 
 Headline: **the beta-source server speaks the pinned contract verbatim** —
 flat `session.prompt` bodies, `session.inbox.*`/`session.execution.*`/
@@ -728,4 +729,91 @@ OC2_URL=http://127.0.0.1:14396 OC2_PASSWORD="$PW" \
 
 # gated integration suite (starts its own opencode2 in its own sandbox)
 npm run test:integration
+```
+
+## Stage-9 addendum — live re-verification (2026-08-27)
+
+The stage-9 harness edits landed verified by code inspection only. Both of
+the following were then checked against a real `opencode2` server.
+
+### The attach path no longer needs a local launcher — CONFIRMED
+
+`a2a9f41` claims `OPENCODE_BETA_URL`/`OPENCODE_BETA_PASSWORD` resolve
+nothing locally. Verified by running the harness module from a directory
+where `@opencode-ai/cli` cannot be resolved at all: a verbatim copy of
+`integration/harness/beta-server.ts` placed in `/tmp/attach-probe/`, whose
+own `createRequire(import.meta.url)` walks `/tmp/attach-probe` → `/tmp` →
+`/` and never reaches the repo's `node_modules`. Both harness versions were
+run against the same live server, with `resolveOpencode2()` throwing "not
+installed" in both:
+
+| harness              | `startBetaServer()` with `OPENCODE_BETA_URL` set                                                                                     |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `a2a9f41^` (pre-fix) | **throws** — `opencode2 harness: resolve @opencode-ai/cli failed` at `resolveOpencode2` (`beta-server.ts:396`); attach mode unusable |
+| `a2a9f41` (post-fix) | **returns a handle** — `baseUrl` = the external server, `authAvailable: true`, `defaultModel` fetched from it, `serveCommand: null`  |
+
+`serveCommand: null` is the intended degradation: the one launcher-dependent
+test (`service-backend.test.ts`, which spawns its own `serve --service`)
+skips instead of failing. When a local binary _does_ happen to be installed
+the attach branch reports it and that test runs — confirmed in the full
+attach-mode run below, where `service-backend.test.ts` passed while attached
+to an externally started server.
+
+### The suite is currently red, for a reason outside this repo
+
+Two full runs on 2026-08-27, one per harness mode:
+
+| run                                            | result                    | duration |
+| ---------------------------------------------- | ------------------------- | -------- |
+| default harness (spawns the published binary)  | 3 passed / 12 failed (15) | 1643 s   |
+| attach mode (`OPENCODE_BETA_URL` → own server) | 5 passed / 10 failed (15) | 1567 s   |
+
+Every failure is a timeout, and the cause is the model, not the provider or
+the harness. Tests take their model from `/api/model/default`, which on this
+build is `opencode/nemotron-3.5-lightning-free`. That model currently
+accepts a prompt (`POST /api/session/{id}/prompt` → 200) and then never
+produces an assistant message at all — not a slow one, not an errored one.
+A single server, one sandbox, one set of zen credentials, three models,
+same trivial prompt (`"Reply with exactly: OK"`):
+
+| model                             | outcome                      |
+| --------------------------------- | ---------------------------- |
+| `nemotron-3.5-lightning-free`     | no assistant message in 45 s |
+| `muse-spark-1.2-contributor-free` | turn completed in 1043 ms    |
+| `hy3-free`                        | turn completed in 2033 ms    |
+
+The two tests that pass in both modes corroborate this. `contract.test.ts`
+needs no generation. `files.test.ts` deliberately picks an _image-capable_
+free zen model out of the catalog rather than the server default, and
+finishes in 4.8 s. The three tests that flip between the two runs
+(`service-backend`, `wait-watchdog`, and the timing-sensitive halves of
+`abort`) are the ones whose budgets a very slow default model sometimes
+squeaks under — `nemotron` did eventually answer once, after 134 s.
+
+**Verdict: the 10–12 failures are an upstream zen availability problem, not
+a regression.** No assertion was weakened and no test was changed. The suite
+is worth re-running once `opencode/nemotron-3.5-lightning-free` recovers;
+until then the harness's dependency on `/api/model/default` is what makes an
+upstream model outage look like a provider failure, which is worth
+revisiting on its own.
+
+### Reproduction
+
+```sh
+# 1. attach-path A/B (needs any running opencode2 at $URL with password $PW)
+mkdir -p /tmp/attach-probe /tmp/attach-probe-pre
+cp integration/harness/beta-server.ts /tmp/attach-probe/
+git show a2a9f41^:integration/harness/beta-server.ts > /tmp/attach-probe-pre/beta-server.ts
+# a probe that imports ./beta-server.ts and calls startBetaServer(); run it
+# from /tmp so @opencode-ai/cli is unresolvable:
+cd /tmp/attach-probe && OPENCODE_BETA_URL=$URL OPENCODE_BETA_PASSWORD=$PW node probe.ts
+
+# 2. suite in attach mode against a server you started yourself
+OPENCODE_BETA_URL=$URL OPENCODE_BETA_PASSWORD=$PW npm run test:integration
+
+# 3. is the default model answering at all?
+curl -s -H "Authorization: Basic $(printf 'opencode:%s' "$PW" | base64)" \
+  "$URL/api/model/default"
+# then POST /api/session (model: {providerID, id}) + /api/session/{id}/prompt
+# and poll GET /api/session/{id}/message for a `type: "assistant"` entry.
 ```
