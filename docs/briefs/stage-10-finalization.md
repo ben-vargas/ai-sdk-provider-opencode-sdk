@@ -13,7 +13,7 @@ so 12/15 tests time out for an upstream reason (see `docs/v2-spike-findings.md`)
   unavailable). Verify at harness setup that the resolved model exists in the live
   catalog and produces an assistant message (bounded probe, max 2 attempts) before
   handing it to tests.
-- The pin requires `OLLAMA_API_KEY` in the *server's* env: pass it through from the host
+- The pin requires `OLLAMA_API_KEY` in the _server's_ env: pass it through from the host
   into the sandboxed server env (document this in the harness header; skip-with-message
   when absent). **Scope guard:** this pin is machine-local test infrastructure ONLY. It
   must NOT reintroduce `ollama-cloud/*` ids into `OpencodeModels` or any shipped code —
@@ -37,7 +37,7 @@ README, migration guide (add a "removed in 5.0.0-beta.1" note with the `sessionI
 alternative), CHANGELOG, JSDoc, and any tests that reference it. Remaining values:
 `"ephemeral" | "existing"`. `npm run typecheck` must prove nothing else referenced it.
 
-## 3. `docs/upstream-issues/` → locally tracked known issues (decision 3)
+## 3. Upstream-issue drafts → locally tracked known issues in `docs/known-upstream-issues/` (decision 3)
 
 The user will NOT file these upstream; they become a local known-issues register to
 re-check later. Rename the directory to `docs/known-upstream-issues/` and:
@@ -52,7 +52,7 @@ re-check later. Rename the directory to `docs/known-upstream-issues/` and:
 - **Delete:** `file-ingestion.md` (withdrawn — described dev-CLI behavior the real
   server doesn't have).
 - Each kept file gets a consistent header: status (`Known upstream issue — tracked
-  locally, not filed`), last-verified date + build (`opencode2 0.0.0-beta-18286`), a
+locally, not filed`), last-verified date + build (`opencode2 0.0.0-beta-18286`), a
   one-command "how to re-check" recipe, and evidence pointers. Add a short
   `README.md` index in the directory explaining its purpose.
 - Remove every "[DRAFT — do not post yet]" framing; fix any remaining inaccuracies

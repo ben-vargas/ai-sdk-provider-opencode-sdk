@@ -8,7 +8,7 @@ Empirically answer the design-blocking open questions from `docs/opencode-sdk-v2
 
 1. `spike/` — the scripts you ran (plain `.mjs` scripts using `@opencode-ai/client`), plus `spike/artifacts/*.json` capturing raw responses/events for each experiment.
 2. `docs/v2-spike-findings.md` — one section per question below: verdict, evidence (artifact file + relevant excerpt), and which §5 open question it resolves. Distinguish clearly: **confirmed**, **refuted**, **inconclusive** (and why).
-3. `docs/upstream-issues/{structured-output,per-prompt-system,file-ingestion,inbox-execution-correlation}.md` — GitHub-ready issue drafts for `anomalyco/opencode`: problem, provider use case, evidence from your spike, concrete API suggestion. **Do not post them or touch GitHub in any way.**
+3. `docs/known-upstream-issues/{structured-output,per-prompt-system,file-ingestion,inbox-execution-correlation}.md` (directory renamed from `upstream-issues` in stage-10; `file-ingestion.md` since withdrawn) — GitHub-ready issue drafts for `anomalyco/opencode`: problem, provider use case, evidence from your spike, concrete API suggestion. **Do not post them or touch GitHub in any way.**
 4. Do not modify `docs/opencode-sdk-v2-analysis.md` — it is a signed-off analysis; your findings doc layers on top.
 
 ## Setup
