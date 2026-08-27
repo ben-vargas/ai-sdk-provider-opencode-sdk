@@ -138,12 +138,6 @@ export function validateSettings(
     );
   }
 
-  if (settings.systemPrompt !== undefined) {
-    warnings.push(
-      "systemPrompt is degraded on OpenCode v2: it is prepended to the first user turn as a delimited block (system-role priority is lost)",
-    );
-  }
-
   if (settings.directory !== undefined) {
     warnings.push(
       settings.location !== undefined

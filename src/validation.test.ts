@@ -104,10 +104,14 @@ describe("validation", () => {
       expect(result.warnings.some((w) => w.includes("onForm"))).toBe(true);
     });
 
-    it("should warn that systemPrompt is degraded", () => {
+    it("does not warn about systemPrompt: it is a real system prompt now", () => {
+      // v2 delivers it as a session instruction entry that applies to every
+      // turn. Only an actual fallback (no route / over the size cap / a
+      // failed write) degrades it, and that is a generation-time warning on
+      // the call that hit it — construction cannot know.
       const result = validateSettings({ systemPrompt: "You are helpful" });
       expect(result.warnings.some((w) => w.includes("systemPrompt"))).toBe(
-        true,
+        false,
       );
     });
 
