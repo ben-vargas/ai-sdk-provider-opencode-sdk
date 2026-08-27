@@ -5,6 +5,81 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.0-beta.1] - 2026-08-26
+
+Clean-break rewrite targeting **OpenCode v2** via `@opencode-ai/client`
+(exact pin `0.0.0-beta-18286`). See **[docs/migrating-v4-to-v5.md](docs/migrating-v4-to-v5.md)**
+for the full setting-by-setting migration.
+
+> **Contract-first caveat:** the client is pinned to the beta-18286 contract
+> and **no published OpenCode binary serves it yet** — the only compatible
+> server is the upstream `anomalyco/opencode` `beta` branch built from
+> source (commit `f4a9b93`). The provider's behavior was developed and
+> verified against that server (unit suite + a gated live integration suite
+> and spike artifacts). Published dev/beta CLIs speak an older, incompatible
+> protocol; use the 4.x line for OpenCode 1.18.x servers.
+
+### Breaking
+
+- **New backend package**: `@opencode-ai/sdk/v2` → `@opencode-ai/client`
+  (`OpenCode.make`); results are returned directly and errors are thrown as
+  typed tagged errors (fields-style `{data, error}` handling is gone).
+- **Server lifecycle**: `hostname`/`port`/`autoStartServer`/`serverTimeout`
+  removed. Backends are now caller `client`, caller `clientManager`,
+  `baseUrl`, or local-service discovery (`service` options + opt-in
+  `autoStart`); the provider never owns or kills a shared server, and
+  process signal handlers are gone.
+- **Session model**: model/agent are session state. Default binding is
+  `sessionMode: "ephemeral"` — one model instance = one conversation = one
+  pinned session (v4's reuse-forever behavior is `"persistent"`, opt-in).
+  `directory`/`cwd` → `location: { directory, workspaceID? }`.
+- **Structured output**: v1's native `json_schema` and the
+  `StructuredOutput` tool do not exist in v2. `responseFormat: json` is now
+  a warned, prompt-engineered degradation; `outputFormatRetryCount` removed.
+- **Questions → forms**: `onQuestion`/`questionPolicy` removed; `onForm`
+  receives typed keyed fields and returns keyed answers;
+  `formPolicy: "cancel" | "wait"`.
+- **Per-request `tools` and per-session `permission` rulesets removed**
+  (no v2 fields); AI SDK `tools`/`toolChoice` are ignored with a warning.
+- **`systemPrompt` degraded**: prepended to the first user turn as a
+  delimited block with a warning (no v2 system field).
+- **Files**: prompt attachments are `data:` URIs only (the one scheme
+  verified end-to-end); assistant messages no longer carry standalone file
+  parts (files surface via tool results).
+- **Errors**: v1 named error classes and `isAuthenticationError`/
+  `isTimeoutError`/`createAPICallError` helpers removed; new tagged-error
+  guards and phase-aware retryability (nothing is retryable after prompt
+  dispatch — the provider reconciles internally instead).
+- **`providerOptions.opencode.messageID` → `providerOptions.opencode.id`.**
+
+### Added
+
+- Delta-native streaming mapped 1:1 from v2 events (`session.text.delta`,
+  `session.reasoning.delta`, incremental tool-input deltas), with execution
+  lifecycle events as the completion signal and a `session.wait`-backed
+  watchdog plus silence watchdog for lost-signal recovery.
+- Two-phase tool-approval round-trip (`tool-approval-request` part →
+  `permission.reply` continuation that resumes the original blocked
+  execution without re-prompting).
+- Interactive forms (`onForm`/`formPolicy`) with keyed answers and
+  client-side answer validation.
+- Session controls: `sessionMode`, `location`, explicit
+  `delivery: "queue"` default, `resume`, per-call
+  `providerOptions.opencode.sessionId` escape hatch.
+- Opt-in `jsonRepair` (non-streaming): client-side JSON validation with
+  bounded repair via the server's session-less `generate.text` route.
+- `resolveFileToUri` hook; bytes are converted to `data:` URIs with the
+  correct media type and unconvertible files are warned and skipped
+  pre-prompt instead of failing the turn late.
+- AI SDK per-call `headers` forwarded to every request in a generation;
+  `includeRawChunks` emits raw typed v2 events.
+- Expanded `providerMetadata.opencode`: `inboxId`, approval/form IDs,
+  native `finish`/`rawFinish`, `outcome`, `interruptReason`, `cost`,
+  native `tokens` (incl. cache), structured `error`, `retry`.
+- Gated live integration suite with a self-contained beta-source server
+  harness (`npm run test:integration`), contract-drift snapshot test, and
+  packed-artifact smoke test.
+
 ## [4.1.0] - 2026-08-05
 
 ### Added

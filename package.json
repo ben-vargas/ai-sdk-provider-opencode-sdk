@@ -1,10 +1,13 @@
 {
   "name": "ai-sdk-provider-opencode-sdk",
-  "version": "5.0.0-beta.0",
-  "description": "AI SDK v7 provider for OpenCode v2 via @opencode-ai/client",
+  "version": "5.0.0-beta.1",
+  "description": "AI SDK v7 provider for OpenCode v2 (beta) via @opencode-ai/client: sessions, streaming, tool approvals, and interactive forms",
   "keywords": [
     "ai-sdk",
+    "ai-sdk-provider",
+    "vercel-ai-sdk",
     "opencode",
+    "opencode-v2",
     "opencode-sdk",
     "language-model",
     "llm"
@@ -33,6 +36,7 @@
   "files": [
     "dist/**/*",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
