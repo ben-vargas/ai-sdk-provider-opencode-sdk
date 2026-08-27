@@ -1,0 +1,114 @@
+{
+  "provenance": {
+    "capturedAt": "2026-08-27T03:17:56Z",
+    "srcDir": "/Users/ben/.cache/opencode-beta-src",
+    "srcGitHead": "f4a9b93013695aa7a1b56ab5d91855965d5cc727",
+    "pinnedClientVersion": "0.0.0-beta-18286",
+    "capturedBy": "integration/steer-supersede.test.ts (npm run test:integration)",
+    "model": "opencode/nemotron-3.5-lightning-free",
+    "note": "Two independent live runs against the beta-source harness (fresh server + sandbox each run); identical structural outcome both times. Run 1's server: http://127.0.0.1:60400, run 2's: http://127.0.0.1:60697. A third full-suite run (session ses_fbec1a3e5ffeXnvkzw6UTKVTIK, server http://127.0.0.1:60865) reproduced the identical structural verdict."
+  },
+  "question": "Deferred-ledger #10: does steer drop the remainder of a multi-step turn at the step boundary (stage-0 dev-CLI finding), and does session.execution.interrupted fire with reason 'superseded'?",
+  "verdict": {
+    "summary": "REFUTED for the beta source. Steering a multi-step tool turn mid-flight does NOT supersede the remainder of the turn: all steps ran to completion (both bash tool steps plus the final text step), the single execution ended with session.execution.succeeded, and no session.execution.interrupted event of any reason fired. The steered prompt was admitted (delivery:'steer'), enqueued, and delivered INTO the in-flight turn as conversation context (session.inbox.delivered mid-turn; pending inbox empty afterward) — no separate execution ever started for it and no assistant message answered it. Whether the model honors the injected instruction is model behavior; this model (nemotron-3.5-lightning-free) ignored it and finished its original plan (ALL-STEPS-DONE) in both runs.",
+    "stepBoundarySupersession": false,
+    "supersededEventFired": false,
+    "steeredPromptSeparatelyAnswered": false,
+    "steeredPromptDelivered": true,
+    "inboxStallObserved": false,
+    "providerImpact": "None shipped. The provider's exclusive-session contract never steers into a busy session; the stage-0 caution ('never steer before step.started') stays moot for provider code. Any future steer-dependent feature must treat steer as mid-turn context injection (no supersession, no dedicated answer), not as a turn replacement."
+  },
+  "runs": [
+    {
+      "run": 1,
+      "sessionID": "ses_fbecc7e37ffe1FiOKjNMP175MG",
+      "firstInboxID": "msg_0413381e7001cACeUbynqt4JXF",
+      "steeredInboxID": "msg_041341e7d0011B577lu8aV2RpX",
+      "settleOutcome": "quiet (92s since last event)",
+      "steeredAnswered": false,
+      "stepOneRan": true,
+      "stepTwoRan": true,
+      "finalStepTextDelivered": true,
+      "executionInterruptedReasons": [],
+      "supersededEventFired": false,
+      "executionTerminalEvents": [
+        "session.execution.started",
+        "session.execution.succeeded"
+      ],
+      "eventTypeCounts": {
+        "session.inbox.enqueued": 2,
+        "session.execution.started": 1,
+        "session.instructions.updated": 1,
+        "session.inbox.delivered": 2,
+        "session.step.started": 3,
+        "session.reasoning.started": 8,
+        "session.reasoning.delta": 38,
+        "session.tool.input.started": 2,
+        "session.reasoning.ended": 8,
+        "session.tool.input.ended": 2,
+        "session.tool.called": 2,
+        "session.step.streamed": 3,
+        "session.tool.progress": 2,
+        "session.tool.success": 2,
+        "session.step.ended": 3,
+        "session.usage.updated": 3,
+        "session.text.started": 1,
+        "session.text.delta": 1,
+        "session.text.ended": 1,
+        "session.execution.succeeded": 1
+      },
+      "pendingInboxAfterSettle": [],
+      "assistantFinishes": [
+        { "id": "msg_041338293001InoQz26Kt1a2Fe", "finish": "tool-calls", "error": null },
+        { "id": "msg_0413433b600113RwyyHaRjV79N", "finish": "tool-calls", "error": null },
+        { "id": "msg_0413496c2002gCviUqVViZ9ixu", "finish": "stop", "error": null }
+      ]
+    },
+    {
+      "run": 2,
+      "sessionID": "ses_fbec87956ffeO6w4tCcFyUU4rz",
+      "firstInboxID": "msg_0413786c2001Ttd0cPwM8J1sSb",
+      "steeredInboxID": "msg_041381b84001QFm1brc3qOTODI",
+      "settleOutcome": "quiet (15s since last event, post-terminal)",
+      "steeredAnswered": false,
+      "stepOneRan": true,
+      "stepTwoRan": true,
+      "finalStepTextDelivered": true,
+      "executionInterruptedReasons": [],
+      "supersededEventFired": false,
+      "executionTerminalEvents": [
+        "session.execution.started",
+        "session.execution.succeeded"
+      ],
+      "eventTypeCounts": {
+        "session.inbox.enqueued": 2,
+        "session.execution.started": 1,
+        "session.instructions.updated": 1,
+        "session.inbox.delivered": 2,
+        "session.step.started": 3,
+        "session.reasoning.started": 8,
+        "session.reasoning.delta": 40,
+        "session.tool.input.started": 2,
+        "session.reasoning.ended": 8,
+        "session.tool.input.ended": 2,
+        "session.tool.called": 2,
+        "session.step.streamed": 3,
+        "session.tool.progress": 2,
+        "session.tool.success": 2,
+        "session.step.ended": 3,
+        "session.usage.updated": 3,
+        "session.text.started": 1,
+        "session.text.delta": 2,
+        "session.text.ended": 1,
+        "session.execution.succeeded": 1
+      },
+      "pendingInboxAfterSettle": [],
+      "assistantFinishes": [
+        { "id": "msg_04137876c001uqnnlQF2D03F7X", "finish": "tool-calls", "error": null },
+        { "id": "msg_0413831c70012SBuDGMdK4Hjor", "finish": "tool-calls", "error": null },
+        { "id": "msg_041389360001tVd2lmZqMtpn01", "finish": "stop", "error": null }
+      ]
+    }
+  ],
+  "methodNote": "The test steers after observing the first tool call (session.tool.input.started/tool.called) for a sleep-widened first step, so the steer lands mid-step, not in pre-step latency. An earlier draft of the experiment asserted 'the steered prompt is eventually answered' and timed out after 240s waiting for a STEERED-REPLY answer that never comes on this build — that draft assumption is what this capture corrects; the committed test asserts delivery-level structure only (steered item delivered, no inbox stall, turn reaches a terminal) and records steeredAnswered as evidence."
+}

@@ -196,7 +196,9 @@ serve build's health `{version, pid}`, and pinned client
 (`npm run test:integration`), which passes 11/11 against this server
 (round-trip incl. doGenerate reconciliation and session pinning, abort
 pre/post delivery, busy+queue, `data:` attach, a real two-phase approval
-round-trip, contract snapshot, service backend).
+round-trip, contract snapshot, service backend; stage 7 adds the
+wait-watchdog and steer-supersession experiments — see the stage-7
+addendum below).
 
 Headline: **the beta-source server speaks the pinned contract verbatim** —
 flat `session.prompt` bodies, `session.inbox.*`/`session.execution.*`/
@@ -218,7 +220,7 @@ this provider.
 | One turn = one assistant message refuted; per-step token increments       | **Confirmed** — a bash-tool turn produced 2 assistant messages (`finish:"tool-calls"` then `"stop"`), each carrying exactly its own step's tokens (`12` → `multiStep`)                                                                                                                                                                                                              | No — reducer already aggregates all messages of a turn                                                                                                          |
 | `SessionInfo.tokens` cumulative stays all-zero                            | **Changed** — now populated and cumulative across the session (12220/33/88 after two steps of 6061+6159/24+9/47+41); `session.usage.updated` events fire and are **cumulative session totals**, not per-turn deltas (`12` → `multiStep.usage`)                                                                                                                                      | No — provider sums per-step `step.ended` tokens, which remains the correct per-turn number                                                                      |
 | `interrupt` returns 204/no body (contract gap vs client)                  | **Fixed upstream** — returns `{interrupted: true}` exactly as the client types expect; emits `session.execution.interrupted`; the partial assistant message keeps `finish:"error"` with `error:{type:"aborted", message:"Step interrupted"}` (`12` → `interrupt`)                                                                                                                   | No — provider already handles `execution.interrupted` and structured `aborted` errors                                                                           |
-| Steer does not abort the in-flight step                                   | **Confirmed** (single-step case) — with text streaming, the steered prompt was admitted mid-turn, the running turn completed fully (`finish:"stop"`, full story), then the steered prompt ran (`12` → `busy`). Multi-step supersession (remainder-of-turn dropped at step boundary) was not re-tested on this build                                                                 | No                                                                                                                                                              |
+| Steer does not abort the in-flight step                                   | **Confirmed** (single-step case) — with text streaming, the steered prompt was admitted mid-turn, the running turn completed fully (`finish:"stop"`, full story), then the steered prompt ran (`12` → `busy`). Multi-step supersession re-tested stage 7: **refuted** — the turn runs to completion; see the stage-7 addendum below (`13-steer-supersede.json`)                     | No                                                                                                                                                              |
 | Files: `data:` only; server stores any URI raw, no validation/fetching    | **Refuted for beta** — the server now validates and ingests attachments at prompt time: `data:` works (stored `source:{type:"inline"}`); **readable `file:` URIs are read server-side** and normalized to base64+mime (model answered "Red"); unreadable `file:`, `https:`, and relative paths **reject the prompt** with a typed message instead of failing the turn later (`12b`) | No — converting everything to `data:` (`supportedUrls: {}`) remains correct and transport-independent; see deferred ledger for the optional `file:` passthrough |
 | `migration.v1.status` = "completed" doubles as "nothing to migrate"       | **Consistent** — "completed" on the (used, never-migrated) harness store (`12` → `migration`)                                                                                                                                                                                                                                                                                       | No                                                                                                                                                              |
 | `session.log` works (embedded host yielded the `log.synced` sentinel)     | **Changed nuance** — the route works but yields **only** the `log.synced` sentinel (with the session's latest `seq`) even with `after: 0` on a session holding 16 durable events; historical item replay is unimplemented (`12` → `sessionLog`)                                                                                                                                     | No shipped change (log catch-up was deferred); SSE-drop recovery must keep using the message store, not the durable log                                         |
@@ -265,6 +267,47 @@ password}`, and `Service.discover({file})` resolves it — including the
   (`$XDG_CONFIG_HOME/opencode/service-<channel>.json` → `{port}`) overrides
   it. Published CLIs still lack a working `--service`, so the provider's
   `autoStart: false` default stands.
+
+## Stage-7 addendum — steer multi-step supersession (deferred-ledger #10)
+
+Evidence: `spike/artifacts/13-steer-supersede.json` (two independent live
+runs, fresh server + sandbox each, source commit `f4a9b930`, pinned client
+`0.0.0-beta-18286`, model `opencode/nemotron-3.5-lightning-free`), captured
+by `integration/steer-supersede.test.ts`: a multi-step bash turn (sleep-
+widened first step) is steered after the first tool call is observed
+in-flight.
+
+Verdict — **stage-0's dev-CLI supersession finding is refuted for the
+beta source**:
+
+- **The remainder of the turn is NOT dropped.** All three steps ran to
+  completion in both runs (both bash steps' markers plus the final
+  `ALL-STEPS-DONE` text; assistant messages finished
+  `tool-calls`/`tool-calls`/`stop`), and the single execution ended with
+  `session.execution.succeeded`.
+- **No superseded event exists on this path** (consistent with stage-0's
+  "no event" half): `session.execution.interrupted` never fired, with any
+  reason.
+- **Steer is mid-turn context injection, not turn replacement.** The
+  steered prompt was admitted (`delivery:"steer"`), `session.inbox.
+  delivered` fired for it mid-turn, and the pending inbox was empty
+  afterward — but **no separate execution ever started for it and no
+  assistant message answered it**. Whether the model honors the injected
+  instruction is model behavior; this model ignored it and finished its
+  original plan in both runs.
+- **Honest failure record:** the first draft of the experiment asserted
+  "the steered prompt is eventually answered" — believed to hold under
+  either supersession semantics — and failed by 240 s timeout against the
+  live server, twice. That assumption is what the capture refuted (there
+  is no dedicated answer by design on this build); the committed test
+  asserts the delivery-level structure the server actually guarantees
+  (steered item delivered — no inbox stall, turn reaches a terminal) and
+  records `steeredAnswered` as evidence rather than asserting it.
+
+Provider impact: none shipped — the provider's exclusive-session contract
+never steers into a busy session, and it keeps sending explicit
+`delivery:"queue"`. Any future steer-dependent feature must treat steer as
+context injection with no supersession and no dedicated answer.
 
 ## Reproduction
 
