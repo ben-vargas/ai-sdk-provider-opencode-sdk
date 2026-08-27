@@ -49,8 +49,10 @@ for the full setting-by-setting migration.
   `formPolicy: "cancel" | "wait"`.
 - **Per-request `tools` and per-session `permission` rulesets removed**
   (no v2 fields); AI SDK `tools`/`toolChoice` are ignored with a warning.
-- **`systemPrompt` degraded**: prepended to the first user turn as a
-  delimited block with a warning (no v2 system field).
+- **`systemPrompt` is session-scoped, not per-prompt**: v2 has no `system`
+  field on `session.prompt`, so the value is written to the session's
+  `ai-sdk.system` instruction entry (see Added) instead of riding the
+  request. It applies to every turn of the session rather than to one call.
 - **Files**: prompt attachments are `data:` URIs only (the one scheme
   verified end-to-end); assistant messages no longer carry standalone file
   parts (files surface via tool results).

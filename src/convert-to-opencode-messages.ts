@@ -13,9 +13,10 @@
  *   and is skipped BEFORE prompting — a bad attachment does not reject the
  *   prompt, it fails the whole turn late at the model provider.
  * - `systemBlock`: system messages separated out so the orchestration layer
- *   can degrade them network-mode ({@link prependSystemBlock} + an
- *   `{type: "unsupported"}` warning) while a future embedded mode injects
- *   them properly via plugin hooks.
+ *   can route them: it writes them (joined with `settings.systemPrompt`) to
+ *   the session's `ai-sdk.system` instruction entry, which is the real
+ *   system channel, and only falls back to {@link prependSystemBlock} plus
+ *   an `{type: "unsupported"}` warning when that entry cannot be used.
  *
  * Tool results/approvals in history render as delimited text context only:
  * OpenCode executes tools server-side and cannot consume client-provided
@@ -134,8 +135,9 @@ function transcriptEntry(role: string, content: string): string {
 
 /**
  * Prepend the separated system block to a prompt text as a delimited system
- * entry — the network-mode degradation (system-role priority is lost; the
- * caller must emit the `{type: "unsupported"}` warning alongside).
+ * entry — the **fallback** for when the session instruction entry cannot
+ * carry it (system-role priority is lost; the caller must emit the
+ * `{type: "unsupported"}` warning alongside).
  */
 export function prependSystemBlock(text: string, systemBlock: string): string {
   const entry = transcriptEntry("system", systemBlock);

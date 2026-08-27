@@ -241,7 +241,7 @@ await generateText({
 
 - **No custom tools** — AI SDK `tools`/`toolChoice` are ignored (warning). Tool availability is server/agent configuration.
 - **No sampling parameters** — `temperature`, `topP`, `topK`, `maxOutputTokens`, etc. have no v2 prompt field; they are ignored with a warning.
-- **System prompts are degraded** — delimited prepend on the first user turn, not a true system role.
+- **System prompts have no per-prompt channel** — `systemPrompt` and `system:` messages are delivered as a session instruction entry (`ai-sdk.system`) that applies to the whole session, not per call: changing the system text mid-conversation rewrites the entry (announced as a durable system message) rather than scoping it to one turn. Servers without the entry route, or values over the 8192-byte cap, fall back to the delimited prepend with a warning.
 - **No native structured output** — see above.
 - **Assistant file outputs** — v2 assistant messages carry only text/reasoning/tool content; files surface only inside tool results.
 - **Multi-turn AI SDK history** — on a fresh session, prior history is serialized into a delimited transcript in the first turn (OpenCode owns the real transcript; reuse one model instance instead where possible).

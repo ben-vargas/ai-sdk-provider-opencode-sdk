@@ -1,8 +1,10 @@
 /**
  * Contract snapshot check (stage-6 brief, deliverable 4): every route the
- * pinned `@opencode-ai/client` can call must exist on the source-built
- * server's OpenAPI document, and the response contracts the provider depends
- * on must have the expected shape. Drift is reported in the failure output
+ * pinned `@opencode-ai/client` can call must exist on the OpenAPI document
+ * of the server the harness runs — by default the published
+ * `@opencode-ai/cli` binary (`opencode2`) at the same build as the pinned
+ * client — and the response contracts the provider depends on must have the
+ * expected shape. Drift is reported in the failure output
  * (and logged when server-only operations appear — those are findings, not
  * failures).
  */
@@ -79,8 +81,7 @@ function pathsMatch(clientPath: string, serverPath: string): boolean {
   return clientSegments.every(
     (segment, index) =>
       segment === serverSegments[index] ||
-      (isTemplateSegment(segment) &&
-        isTemplateSegment(serverSegments[index]!)),
+      (isTemplateSegment(segment) && isTemplateSegment(serverSegments[index]!)),
   );
 }
 
@@ -235,8 +236,8 @@ describe.skipIf(!ctx.available)(suiteTitle("contract snapshot", ctx), () => {
     expect(eventSchema.properties?.["data"]).toEqual({
       $ref: "#/components/schemas/V2EventEncoded",
     });
-    expect(deref(spec, { $ref: "#/components/schemas/V2EventEncoded" })).toEqual(
-      { type: "string", contentMediaType: "application/json" },
-    );
+    expect(
+      deref(spec, { $ref: "#/components/schemas/V2EventEncoded" }),
+    ).toEqual({ type: "string", contentMediaType: "application/json" });
   });
 });
