@@ -15,7 +15,8 @@
  * Every candidate is verified before being handed to tests: it must exist in
  * the live catalog and produce a finished assistant message in a bounded
  * probe (max {@link PROBE_ATTEMPTS} attempts). A candidate that fails falls
- * through to the next; when nothing survives, generation tests skip.
+ * through to the next; when nothing survives — including when the catalog
+ * itself is unreachable (fail-closed) — generation tests skip.
  *
  * Scope guard: the pin is machine-local test infrastructure ONLY. It must
  * not reintroduce `ollama-cloud/*` ids into `OpencodeModels` or any shipped
@@ -45,6 +46,7 @@ export const PINNED_TEST_MODEL: TestModelRef = {
   modelID: "minimax-m3",
 };
 
+const CATALOG_ATTEMPTS = 2;
 const PROBE_ATTEMPTS = 2;
 const PROBE_TIMEOUT_MS = 90_000;
 const PROBE_POLL_MS = 2_000;
@@ -144,20 +146,31 @@ export async function resolveTestModel(options: {
   });
 
   // Catalog membership check: a model the server does not list cannot be
-  // pinned to a session. When the catalog itself is unreachable the probe
-  // below is still the real gate, so membership is treated as unknown-pass.
+  // pinned to a session, and the brief requires BOTH catalog membership and
+  // a successful probe before a model is handed to tests. The check is
+  // fail-closed: when `model.list` is unreachable after a bounded retry, no
+  // candidate can be verified and generation tests skip.
   let catalog: Set<string> | undefined;
-  try {
-    const listed = await client.model.list({});
-    catalog = new Set(
-      listed.data.map((model) =>
-        refString({ providerID: model.providerID, modelID: model.modelID }),
-      ),
-    );
-  } catch (error) {
+  for (let attempt = 1; attempt <= CATALOG_ATTEMPTS; attempt++) {
+    try {
+      const listed = await client.model.list({});
+      catalog = new Set(
+        listed.data.map((model) =>
+          refString({ providerID: model.providerID, modelID: model.modelID }),
+        ),
+      );
+      break;
+    } catch (error) {
+      warn(
+        `model.list attempt ${attempt}/${CATALOG_ATTEMPTS} failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  if (catalog === undefined) {
     warn(
-      `model.list failed (${error instanceof Error ? error.message : String(error)}) — skipping catalog membership checks`,
+      "live catalog is unreachable — no test-model candidate can be verified, so generation tests will skip",
     );
+    return null;
   }
 
   const candidates: ResolvedTestModel[] = [];
@@ -181,7 +194,7 @@ export async function resolveTestModel(options: {
   }
 
   for (const candidate of candidates) {
-    if (catalog !== undefined && !catalog.has(refString(candidate))) {
+    if (!catalog.has(refString(candidate))) {
       warn(
         `test-model candidate ${refString(candidate)} (${candidate.source}) is not in the live catalog — skipping`,
       );
