@@ -765,9 +765,7 @@ describe("approvals: two-phase round-trip", () => {
     try {
       const result = await promise;
       expect(
-        result.content.some(
-          (entry) => entry.type === "tool-approval-request",
-        ),
+        result.content.some((entry) => entry.type === "tool-approval-request"),
       ).toBe(true);
     } finally {
       clearInterval(noise);
@@ -1174,7 +1172,9 @@ describe("busy sessions", () => {
     // when the original delivery was already the provider default "queue".
     const fake = createFakePort({
       promptError: (attempt) =>
-        attempt === 1 ? { _tag: "ConflictError", message: "conflict" } : undefined,
+        attempt === 1
+          ? { _tag: "ConflictError", message: "conflict" }
+          : undefined,
     });
     const model = createModel(fake);
     fake.hooks.onPrompt = () => {

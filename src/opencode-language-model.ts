@@ -1529,10 +1529,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         if (entry.type === "text" || entry.type === "reasoning") {
           const key = `${message.id}:${entry.type}:${ordinal}`;
           ordinal += 1;
-          if (
-            entry.text.length > 0 &&
-            !aggregated.streamedBlockIds.has(key)
-          ) {
+          if (entry.text.length > 0 && !aggregated.streamedBlockIds.has(key)) {
             aggregated.content.push({ type: entry.type, text: entry.text });
           }
           continue;
