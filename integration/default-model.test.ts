@@ -13,6 +13,10 @@ import {
   pollUntil,
   suiteTitle,
 } from "./harness/context.js";
+import {
+  assistantFailureReason,
+  isSuccessfulAssistantMessage,
+} from "./harness/test-model.js";
 
 const ctx = integrationContext();
 
@@ -47,36 +51,42 @@ describe.skipIf(!canRun)(suiteTitle("default-model canary", ctx), () => {
       });
 
       let finished = false;
+      let failure = `no successful assistant message within ${CANARY_TIMEOUT_MS}ms`;
       try {
         await pollUntil(
           async () => {
             const messages = await client.message.list({
               sessionID: session.id,
             });
-            return messages.data.some(
-              (message) =>
-                message.type === "assistant" &&
-                typeof message.finish === "string" &&
-                message.finish.length > 0,
-            )
-              ? true
-              : undefined;
+            if (messages.data.some(isSuccessfulAssistantMessage)) {
+              return true;
+            }
+            // Fail fast (and with the upstream reason) on an errored
+            // assistant record — a nonempty `finish` alone can be
+            // `finish: "error"` and must not pass the canary.
+            for (const message of messages.data) {
+              const reason = assistantFailureReason(message);
+              if (reason !== undefined) {
+                throw new Error(reason);
+              }
+            }
+            return undefined;
           },
           {
             timeoutMs: CANARY_TIMEOUT_MS,
             intervalMs: 2_000,
-            label: "assistant message from the server default model",
+            label: "successful assistant message from the server default model",
           },
         );
         finished = true;
-      } catch {
-        finished = false;
+      } catch (error) {
+        failure = error instanceof Error ? error.message : String(error);
       }
 
       expect(
         finished,
         `upstream default model appears broken: ${ctx.defaultModelId} accepted the prompt ` +
-          `but produced no finished assistant message within ${CANARY_TIMEOUT_MS}ms. ` +
+          `but did not answer successfully (${failure}). ` +
           `This is an upstream outage of the server's default model, NOT a provider ` +
           `regression — timeouts elsewhere in the suite (if any) likely share this cause.`,
       ).toBe(true);

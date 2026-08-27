@@ -13,8 +13,9 @@
  *   3. the server default, with a loud warning that the pin was unavailable.
  *
  * Every candidate is verified before being handed to tests: it must exist in
- * the live catalog and produce a finished assistant message in a bounded
- * probe (max {@link PROBE_ATTEMPTS} attempts). A candidate that fails falls
+ * the live catalog and produce a successful assistant message (non-error
+ * finish with text output — see {@link isSuccessfulAssistantMessage}) in a
+ * bounded probe (max {@link PROBE_ATTEMPTS} attempts). A candidate that fails falls
  * through to the next; when nothing survives — including when the catalog
  * itself is unreachable (fail-closed) — generation tests skip.
  *
@@ -23,6 +24,7 @@
  * code — the stage-8 decontamination stands.
  */
 import { OpenCode } from "@opencode-ai/client";
+import type { SessionMessageInfo } from "@opencode-ai/client";
 
 export interface TestModelRef {
   providerID: string;
@@ -63,6 +65,57 @@ function refString(ref: TestModelRef): string {
   return `${ref.providerID}/${ref.modelID}`;
 }
 
+/**
+ * Finishes that mean the model actually completed a turn. `"error"` (e.g.
+ * ModelUnavailable, auth failures), `"content-filter"`, and `"unknown"` also
+ * arrive as nonempty `finish` strings, so a bare nonempty check would count
+ * upstream failures as probe success.
+ */
+const SUCCESS_FINISHES = new Set(["stop", "length", "tool-calls"]);
+
+/**
+ * True only for an assistant message that completed successfully AND carries
+ * visible text output — the standard for "this model works" shared by the
+ * probe here and the default-model canary.
+ */
+export function isSuccessfulAssistantMessage(
+  message: SessionMessageInfo,
+): boolean {
+  return (
+    message.type === "assistant" &&
+    message.error === undefined &&
+    typeof message.finish === "string" &&
+    SUCCESS_FINISHES.has(message.finish) &&
+    message.content.some(
+      (part) => part.type === "text" && part.text.trim().length > 0,
+    )
+  );
+}
+
+/**
+ * The failure reason when an assistant message terminally failed (structured
+ * error or non-success finish), else undefined. Lets pollers fail fast with
+ * the upstream reason instead of waiting out the timeout.
+ */
+export function assistantFailureReason(
+  message: SessionMessageInfo,
+): string | undefined {
+  if (message.type !== "assistant") {
+    return undefined;
+  }
+  if (message.error !== undefined) {
+    return `assistant message carries error ${message.error.type}: ${message.error.message}`;
+  }
+  if (
+    typeof message.finish === "string" &&
+    message.finish.length > 0 &&
+    !SUCCESS_FINISHES.has(message.finish)
+  ) {
+    return `assistant message finished with "${message.finish}"`;
+  }
+  return undefined;
+}
+
 function parseEnvOverride(raw: string): TestModelRef | undefined {
   const slash = raw.indexOf("/");
   if (slash <= 0 || slash === raw.length - 1) {
@@ -76,8 +129,9 @@ function parseEnvOverride(raw: string): TestModelRef | undefined {
 
 /**
  * One bounded probe turn: create a session pinned to the candidate model,
- * prompt it, and poll the message store until a finished assistant message
- * appears. Throws (with the reason) on timeout or any API error.
+ * prompt it, and poll the message store until a successful assistant message
+ * appears. Throws (with the reason) on timeout, on any API error, or as soon
+ * as an assistant message terminally fails (error finish / structured error).
  */
 async function probeOnce(
   client: ReturnType<typeof OpenCode.make>,
@@ -96,18 +150,20 @@ async function probeOnce(
   const deadline = Date.now() + PROBE_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const messages = await client.message.list({ sessionID: session.id });
-    const finished = messages.data.some(
-      (message) =>
-        message.type === "assistant" &&
-        typeof message.finish === "string" &&
-        message.finish.length > 0,
-    );
-    if (finished) {
+    if (messages.data.some(isSuccessfulAssistantMessage)) {
       return;
+    }
+    for (const message of messages.data) {
+      const failure = assistantFailureReason(message);
+      if (failure !== undefined) {
+        throw new Error(failure);
+      }
     }
     await new Promise((resolve) => setTimeout(resolve, PROBE_POLL_MS));
   }
-  throw new Error(`no finished assistant message within ${PROBE_TIMEOUT_MS}ms`);
+  throw new Error(
+    `no successful assistant message within ${PROBE_TIMEOUT_MS}ms`,
+  );
 }
 
 async function probe(
@@ -131,8 +187,8 @@ async function probe(
 
 /**
  * Resolve and verify the model integration tests should generate with.
- * Returns null when no candidate produced an assistant message — generation
- * tests then skip rather than time out one by one.
+ * Returns null when no candidate produced a successful assistant message —
+ * generation tests then skip rather than time out one by one.
  */
 export async function resolveTestModel(options: {
   baseUrl: string;
@@ -209,14 +265,14 @@ export async function resolveTestModel(options: {
         );
       } else {
         log(
-          `test model resolved: ${refString(candidate)} (${candidate.source}, probe produced an assistant message)`,
+          `test model resolved: ${refString(candidate)} (${candidate.source}, probe produced a successful assistant message)`,
         );
       }
       return candidate;
     }
   }
   warn(
-    "no test-model candidate produced an assistant message — generation tests will skip",
+    "no test-model candidate produced a successful assistant message — generation tests will skip",
   );
   return null;
 }
