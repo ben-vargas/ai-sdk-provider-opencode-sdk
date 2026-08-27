@@ -68,6 +68,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@opencode-ai/cli": "0.0.0-beta-18286",
     "@types/node": "^22.10.0",
     "@typescript-eslint/eslint-plugin": "8.34.0",
     "@typescript-eslint/parser": "8.34.0",

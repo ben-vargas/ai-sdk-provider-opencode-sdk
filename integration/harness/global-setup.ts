@@ -1,13 +1,17 @@
 /**
- * Vitest global setup for the integration suite: start one beta-source
+ * Vitest global setup for the integration suite: start one `opencode2`
  * server for the whole run and provide its endpoint to tests via
- * `inject(...)`. When the harness cannot come up (no bun, clone/build
- * failure, no network), it provides an unavailability reason instead and
- * every test auto-skips with that message — the suite never hard-fails on
- * missing infrastructure.
+ * `inject(...)`. When the harness cannot come up (CLI devDependency missing
+ * or at the wrong build, port/health failure), it provides an unavailability
+ * reason instead and every test auto-skips with that message — the suite
+ * never hard-fails on missing infrastructure.
  */
 import type { TestProject } from "vitest/node";
-import { startBetaServer, type BetaServerHandle } from "./beta-server.js";
+import {
+  startBetaServer,
+  type BetaServerHandle,
+  type ServeCommand,
+} from "./beta-server.js";
 
 declare module "vitest" {
   export interface ProvidedContext {
@@ -16,7 +20,7 @@ declare module "vitest" {
     opencodeWorkdir: string;
     opencodeAuthAvailable: boolean;
     opencodeDefaultModel: { providerID: string; modelID: string } | null;
-    opencodeSourceDir: string;
+    opencodeServeCommand: ServeCommand | null;
     opencodeUnavailableReason: string | null;
   }
 }
@@ -32,10 +36,10 @@ export default async function setup(
     project.provide("opencodeWorkdir", handle.workdir);
     project.provide("opencodeAuthAvailable", handle.authAvailable);
     project.provide("opencodeDefaultModel", handle.defaultModel ?? null);
-    project.provide("opencodeSourceDir", handle.sourceDir ?? "");
+    project.provide("opencodeServeCommand", handle.serveCommand ?? null);
     project.provide("opencodeUnavailableReason", null);
     console.log(
-      `[integration] beta-source server ready at ${handle.baseUrl} ` +
+      `[integration] opencode2 server ready at ${handle.baseUrl} ` +
         `(default model: ${handle.defaultModel ? `${handle.defaultModel.providerID}/${handle.defaultModel.modelID}` : "unknown"}, ` +
         `zen auth: ${handle.authAvailable ? "yes" : "NO — generation tests will skip"})`,
     );
@@ -46,10 +50,10 @@ export default async function setup(
     project.provide("opencodeWorkdir", "");
     project.provide("opencodeAuthAvailable", false);
     project.provide("opencodeDefaultModel", null);
-    project.provide("opencodeSourceDir", "");
+    project.provide("opencodeServeCommand", null);
     project.provide("opencodeUnavailableReason", reason);
     console.warn(
-      `[integration] beta-source harness unavailable — all integration tests will skip.\n` +
+      `[integration] opencode2 harness unavailable — all integration tests will skip.\n` +
         `[integration] reason: ${reason}`,
     );
   }

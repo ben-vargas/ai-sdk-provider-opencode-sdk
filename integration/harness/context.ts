@@ -7,6 +7,7 @@
 import { inject } from "vitest";
 import { OpenCode, type OpenCodeClient } from "@opencode-ai/client";
 import { createOpencode } from "../../src/index.js";
+import type { ServeCommand } from "./beta-server.js";
 import type {
   OpencodeProvider,
   OpencodeProviderSettings,
@@ -28,8 +29,8 @@ export interface IntegrationContext {
   modelId: string;
   /** Model settings every test should start from (sandbox location). */
   baseSettings: OpencodeSettings;
-  /** Beta-source checkout dir ("" when unknown, e.g. attach mode w/o clone). */
-  sourceDir: string;
+  /** How the harness starts a server, for tests that spawn a variant. */
+  serveCommand: ServeCommand | null;
   /** Provider factory preconfigured for the harness endpoint. */
   makeProvider: (overrides?: OpencodeProviderSettings) => OpencodeProvider;
   /** Raw pinned client on the same endpoint, for server-side assertions. */
@@ -47,7 +48,7 @@ export function integrationContext(): IntegrationContext {
   const workdir = inject("opencodeWorkdir");
   const authAvailable = inject("opencodeAuthAvailable");
   const defaultModel = inject("opencodeDefaultModel");
-  const sourceDir = inject("opencodeSourceDir");
+  const serveCommand = inject("opencodeServeCommand");
   const unavailableReason = inject("opencodeUnavailableReason");
 
   const available = baseUrl !== null;
@@ -56,7 +57,7 @@ export function integrationContext(): IntegrationContext {
       ? ""
       : `${defaultModel.providerID}/${defaultModel.modelID}`;
   const reason = !available
-    ? `beta-source harness unavailable: ${unavailableReason ?? "unknown"}`
+    ? `opencode2 harness unavailable: ${unavailableReason ?? "unknown"}`
     : !authAvailable
       ? "no zen credentials in the local opencode data home — generation tests skip"
       : modelId === ""
@@ -77,7 +78,7 @@ export function integrationContext(): IntegrationContext {
     workdir,
     modelId,
     baseSettings,
-    sourceDir,
+    serveCommand,
     makeProvider: (overrides = {}) =>
       createOpencode({
         baseUrl: baseUrl ?? "",

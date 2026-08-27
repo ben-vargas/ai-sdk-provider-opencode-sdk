@@ -1,9 +1,10 @@
 /**
- * Service-discovery backend against a REAL `opencode serve --service`
- * (stage-6 bonus verification): the beta-source CLI's `--service` mode —
- * broken on every published CLI (spike finding 0.1) — now writes a
- * registration file whose endpoint `Service.discover` resolves, including
- * the Basic-auth credential the provider merges automatically.
+ * Service-discovery backend against a REAL `opencode2 serve --service`
+ * (stage-6 bonus verification, retargeted in stage-9): the v2 CLI's
+ * `--service` mode — broken on the *v1* `opencode-ai` CLI (spike finding
+ * 0.1) — writes a registration file whose endpoint `Service.discover`
+ * resolves, including the Basic-auth credential the provider merges
+ * automatically.
  *
  * The test spawns its own service instance with a fully separate sandbox
  * (own XDG homes, own fake HOME, own SQLite database, minimal environment —
@@ -25,12 +26,12 @@ import {
 
 const ctx = integrationContext();
 
-const canRun = ctx.canGenerate && ctx.sourceDir !== "";
+const canRun = ctx.canGenerate && ctx.serveCommand !== null;
 const suiteReason = canRun
   ? ""
   : ctx.reason !== ""
     ? ctx.reason
-    : "beta-source checkout unavailable (attach mode without a local clone)";
+    : "no serve command available from the harness";
 
 describe.skipIf(!canRun)(
   suiteTitle("service backend (serve --service)", {
@@ -96,17 +97,17 @@ describe.skipIf(!canRun)(
         "utf8",
       );
 
+      // Same launcher the harness uses, so this works on both the
+      // published-binary path and the opt-in source fallback.
+      const serve = ctx.serveCommand;
+      if (serve === null) {
+        throw new Error(
+          "serve command unavailable (suite should have skipped)",
+        );
+      }
       const child = spawn(
-        "bun",
-        [
-          "run",
-          "--cwd",
-          join(ctx.sourceDir, "packages", "cli"),
-          "--conditions=browser",
-          "src/index.ts",
-          "serve",
-          "--service",
-        ],
+        serve.command,
+        [...serve.args, "serve", "--service"],
         {
           cwd: workdir,
           // Minimal allowlisted environment + fake HOME, matching the

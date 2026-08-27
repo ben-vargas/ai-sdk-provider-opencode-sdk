@@ -1,56 +1,85 @@
 /**
- * Integration harness for the only server that speaks the pinned client's
- * contract: the `anomalyco/opencode` beta branch built from source.
+ * Integration harness for a server that speaks the pinned client's contract.
  *
- * Responsibilities (stage-6 brief, deliverable 1):
- *   - shallow-clone the beta branch pinned at {@link BETA_PIN} into a cache
- *     directory OUTSIDE the worktree (idempotent; reuses a clone already at
- *     the right commit),
- *   - `bun install` it,
- *   - start `opencode serve` from source with isolated XDG homes, an
- *     isolated HOME/`OPENCODE_TEST_HOME`, a minimal environment, and a
- *     sandbox workspace directory OUTSIDE the real home (the server's config
+ * The default (and intended) path is the **published** OpenCode v2 CLI:
+ * `@opencode-ai/cli@0.0.0-beta-18286`, binary `opencode2`, installed as a
+ * devDependency at the exact same build number as the pinned
+ * `@opencode-ai/client@0.0.0-beta-18286`. Same build ⇒ same wire contract,
+ * verified live (spike/14-opencode2-verification.mjs).
+ *
+ * Package-name trap: `opencode-ai` on npm is the **v1** CLI and speaks a
+ * different, incompatible protocol. The v2 CLI is `@opencode-ai/cli` and its
+ * binary is `opencode2`. Probing `opencode-ai` is what produced this repo's
+ * earlier "no published server serves this contract" conclusion; it was
+ * wrong about the package, not about the contract.
+ *
+ * Responsibilities:
+ *   - resolve the `opencode2` binary from the devDependency and assert its
+ *     version matches the pinned client build,
+ *   - start `opencode2 serve` with isolated XDG homes, an isolated
+ *     HOME/`OPENCODE_TEST_HOME`, a minimal environment, and a sandbox
+ *     workspace directory OUTSIDE the real home (the server's config
  *     discovery walks upward from `location.directory` to the filesystem
  *     root looking for `.opencode`/`.claude`/`.agents`, and loads
  *     `$HOME/.claude` + `$HOME/.agents` directly — so isolation requires
  *     both a fake home and a workdir whose ancestors hold no real config),
- *   - health-check and expose the endpoint (+ Basic-auth header — the beta
- *     server requires a password on every route),
+ *   - health-check and expose the endpoint (+ Basic-auth header — v2 serve
+ *     requires a password on every route; username is `opencode`),
  *   - tear down cleanly.
  *
  * Environment overrides:
  *   - `OPENCODE_BETA_URL` + `OPENCODE_BETA_PASSWORD`: use an already-running
- *     beta-source server instead of cloning/spawning (fast iteration).
- *   - `OPENCODE_BETA_SRC_DIR`: clone cache location
- *     (default `~/.cache/opencode-beta-src`).
+ *     v2 server instead of spawning one (fast iteration).
  *   - `OPENCODE_BETA_SANDBOX_DIR`: sandbox root for XDG homes + workdir
  *     (default `$TMPDIR/opencode-beta-sandbox` — deliberately outside the
  *     real home so upward config discovery cannot reach it).
+ *   - `OPENCODE_BETA_SRC_DIR`: opt-in fallback ONLY. When set, the harness
+ *     builds and serves the pinned beta branch from source instead of using
+ *     the published binary. Kept for the case where a future published
+ *     build proves unusable; it is not the default path and requires `bun`.
  */
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { copyFile, mkdir, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
-/** Upstream commit matching the pinned `@opencode-ai/client@0.0.0-beta-18286`. */
+/**
+ * The published CLI build the harness expects, and the same build as the
+ * pinned `@opencode-ai/client`. Kept in lockstep with the `@opencode-ai/cli`
+ * devDependency in package.json.
+ */
+export const OPENCODE_CLI_PIN = "0.0.0-beta-18286";
+/** Upstream commit matching {@link OPENCODE_CLI_PIN} (source-fallback only). */
 export const BETA_PIN = "f4a9b93013695aa7a1b56ab5d91855965d5cc727";
 const BETA_REPO_URL = "https://github.com/anomalyco/opencode.git";
 const HEALTH_TIMEOUT_MS = 60_000;
 
 /**
  * Server-side permission rules for the sandbox server, injected via
- * `OPENCODE_CONFIG_CONTENT` (v1 `permission` shape; the beta config loader
+ * `OPENCODE_CONFIG_CONTENT` (v1 `permission` shape; the v2 config loader
  * migrates it). `bash: ask` lets the approval-round-trip test trigger a real
  * `permission.asked` without affecting text-only turns.
  */
 const SANDBOX_CONFIG = { permission: { bash: "ask" } };
 
+/**
+ * How to start a server process: spawn `command` with
+ * `[...args, "serve", ...serveFlags]`. Tests that need their own server
+ * variant (e.g. `serve --service`) use this instead of hard-coding a
+ * launcher, so they work on both the published-binary and source paths.
+ */
+export interface ServeCommand {
+  command: string;
+  args: string[];
+}
+
 export interface BetaServerHandle {
   baseUrl: string;
-  /** `Basic` auth header value for every request (beta serve is passworded). */
+  /** `Basic` auth header value for every request (v2 serve is passworded). */
   authHeader: string;
   /** Sandbox directory sessions must bind to (`location.directory`). */
   workdir: string;
@@ -58,12 +87,8 @@ export interface BetaServerHandle {
   authAvailable: boolean;
   /** Server default model, when the catalog is reachable. */
   defaultModel?: { providerID: string; modelID: string };
-  /**
-   * Local beta-source checkout (for tests that spawn their own server
-   * variant, e.g. `serve --service`). Undefined in attach mode when the
-   * cache clone does not exist.
-   */
-  sourceDir?: string;
+  /** How this harness starts a server, for tests that spawn a variant. */
+  serveCommand?: ServeCommand;
   /** Kill the spawned server (no-op for externally provided servers). */
   stop: () => Promise<void>;
 }
@@ -82,13 +107,60 @@ function run(
 }
 
 function fail(step: string, detail: string): never {
-  throw new Error(`beta-source harness: ${step} failed — ${detail}`);
+  throw new Error(`opencode2 harness: ${step} failed — ${detail}`);
+}
+
+const require = createRequire(import.meta.url);
+
+/**
+ * Resolve the published `opencode2` binary and verify its build number.
+ *
+ * The version gate is the whole value of this path: a mismatched binary
+ * speaks a different contract and would produce failures that look like
+ * provider bugs. Resolution goes through the package's own `bin` entry (the
+ * postinstall copies the platform build there) rather than `node_modules/
+ * .bin`, so it works even when bin links were not created.
+ */
+export function resolveOpencode2(): string {
+  let packageJsonPath: string;
+  try {
+    packageJsonPath = require.resolve("@opencode-ai/cli/package.json");
+  } catch {
+    return fail(
+      "resolve @opencode-ai/cli",
+      `not installed — run \`npm install\` (devDependency, pinned ${OPENCODE_CLI_PIN})`,
+    );
+  }
+  const manifest = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
+    version?: string;
+    bin?: Record<string, string>;
+  };
+  if (manifest.version !== OPENCODE_CLI_PIN) {
+    fail(
+      "@opencode-ai/cli version check",
+      `installed ${String(manifest.version)}, expected ${OPENCODE_CLI_PIN} ` +
+        `(the binary must be the same build as the pinned @opencode-ai/client)`,
+    );
+  }
+  const relative = manifest.bin?.opencode2;
+  if (relative === undefined) {
+    fail("@opencode-ai/cli bin lookup", "package declares no `opencode2` bin");
+  }
+  const binary = join(dirname(packageJsonPath), relative);
+  if (!existsSync(binary)) {
+    fail(
+      "opencode2 binary lookup",
+      `${binary} missing — the package postinstall did not run ` +
+        `(reinstall without --ignore-scripts)`,
+    );
+  }
+  return binary;
 }
 
 /**
  * Idempotently materialize the pinned beta source in `dir`. Reuses an
  * existing clone already at {@link BETA_PIN}; otherwise fetches the pin
- * (shallow) and checks it out detached.
+ * (shallow) and checks it out detached. Source-fallback path only.
  */
 export function ensureBetaSource(dir: string): void {
   if (existsSync(join(dir, ".git"))) {
@@ -168,6 +240,26 @@ export function ensureInstalled(dir: string): void {
   }
 }
 
+/**
+ * The serve launcher for the opt-in source fallback
+ * (`OPENCODE_BETA_SRC_DIR`): clone + `bun install` the pinned branch and run
+ * the CLI entrypoint from source.
+ */
+function sourceServeCommand(sourceDir: string): ServeCommand {
+  ensureBetaSource(sourceDir);
+  ensureInstalled(sourceDir);
+  return {
+    command: "bun",
+    args: [
+      "run",
+      "--cwd",
+      join(sourceDir, "packages", "cli"),
+      "--conditions=browser",
+      "src/index.ts",
+    ],
+  };
+}
+
 async function findFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = createServer();
@@ -203,6 +295,11 @@ async function copyZenAuth(dataHome: string): Promise<boolean> {
 /** A child is gone once it has either an exit code or a fatal signal. */
 function hasExited(child: ChildProcess): boolean {
   return child.exitCode !== null || child.signalCode !== null;
+}
+
+/** Build the `Basic` header v2 serve expects (username is always `opencode`). */
+export function basicAuthHeader(password: string): string {
+  return "Basic " + Buffer.from(`opencode:${password}`).toString("base64");
 }
 
 async function waitForHealth(
@@ -269,7 +366,21 @@ async function fetchDefaultModel(
 }
 
 /**
- * Start (or attach to) a beta-source server and return its endpoint handle.
+ * The password `serve` printed, if it printed one.
+ *
+ * `OPENCODE_PASSWORD` is honoured by the pinned build (verified: the env
+ * password authenticates and no `server password` line is emitted), so this
+ * is a safety net — if a build ever ignored the env var it would generate
+ * its own and announce it here, and the harness adopts that instead of
+ * failing every request with 401.
+ */
+function parseAnnouncedPassword(log: string): string | undefined {
+  const match = /^server password (\S+)$/m.exec(log);
+  return match?.[1];
+}
+
+/**
+ * Start (or attach to) a v2 server and return its endpoint handle.
  */
 export async function startBetaServer(): Promise<BetaServerHandle> {
   const sandboxRoot =
@@ -278,16 +389,19 @@ export async function startBetaServer(): Promise<BetaServerHandle> {
   const workdir = join(sandboxRoot, "workdir");
   await mkdir(workdir, { recursive: true });
 
-  const sourceDir =
-    process.env.OPENCODE_BETA_SRC_DIR ??
-    join(homedir(), ".cache", "opencode-beta-src");
+  // Opt-in source fallback; the published binary is the default.
+  const sourceDir = process.env.OPENCODE_BETA_SRC_DIR;
+  const serveCommand: ServeCommand =
+    sourceDir === undefined
+      ? { command: resolveOpencode2(), args: [] }
+      : sourceServeCommand(sourceDir);
 
   // Attach mode: an external server was provided.
   const externalUrl = process.env.OPENCODE_BETA_URL;
   if (externalUrl !== undefined) {
-    const password = process.env.OPENCODE_BETA_PASSWORD ?? "";
-    const authHeader =
-      "Basic " + Buffer.from(`opencode:${password}`).toString("base64");
+    const authHeader = basicAuthHeader(
+      process.env.OPENCODE_BETA_PASSWORD ?? "",
+    );
     await waitForHealth(externalUrl, authHeader);
     return {
       baseUrl: externalUrl,
@@ -295,12 +409,10 @@ export async function startBetaServer(): Promise<BetaServerHandle> {
       workdir,
       authAvailable: true,
       defaultModel: await fetchDefaultModel(externalUrl, authHeader),
-      sourceDir: existsSync(join(sourceDir, ".git")) ? sourceDir : undefined,
+      serveCommand,
       stop: async () => {},
     };
   }
-  ensureBetaSource(sourceDir);
-  ensureInstalled(sourceDir);
 
   const dataHome = join(sandboxRoot, "data");
   const stateHome = join(sandboxRoot, "state");
@@ -315,24 +427,13 @@ export async function startBetaServer(): Promise<BetaServerHandle> {
   const authAvailable = await copyZenAuth(dataHome);
 
   const password = randomBytes(24).toString("base64url");
-  const authHeader =
-    "Basic " + Buffer.from(`opencode:${password}`).toString("base64");
   const port = await findFreePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const logFile = join(sandboxRoot, "server.log");
 
   const child = spawn(
-    "bun",
-    [
-      "run",
-      "--cwd",
-      join(sourceDir, "packages", "cli"),
-      "--conditions=browser",
-      "src/index.ts",
-      "serve",
-      "--port",
-      String(port),
-    ],
+    serveCommand.command,
+    [...serveCommand.args, "serve", "--port", String(port)],
     {
       cwd: workdir,
       // Minimal allowlisted environment: the server (and every tool it
@@ -364,6 +465,20 @@ export async function startBetaServer(): Promise<BetaServerHandle> {
     logChunks.push(chunk.toString("utf8")),
   );
 
+  // Give `serve` a moment to announce a self-generated password before the
+  // first health probe, so the announced value (if any) is used from the
+  // start rather than after a round of 401s.
+  const announceDeadline = Date.now() + 10_000;
+  while (Date.now() < announceDeadline && !hasExited(child)) {
+    if (/^server (password|listening)/m.test(logChunks.join(""))) {
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  const authHeader = basicAuthHeader(
+    parseAnnouncedPassword(logChunks.join("")) ?? password,
+  );
+
   try {
     await waitForHealth(baseUrl, authHeader, child);
   } catch (error) {
@@ -380,7 +495,7 @@ export async function startBetaServer(): Promise<BetaServerHandle> {
     workdir,
     authAvailable,
     defaultModel: await fetchDefaultModel(baseUrl, authHeader),
-    sourceDir,
+    serveCommand,
     stop: async () => {
       await writeFile(logFile, logChunks.join(""), "utf8").catch(() => {});
       if (hasExited(child)) {
