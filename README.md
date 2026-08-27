@@ -1,447 +1,274 @@
 <p align="center">
   <img src="https://img.shields.io/badge/status-beta-orange" alt="beta status">
   <a href="https://www.npmjs.com/package/ai-sdk-provider-opencode-sdk"><img src="https://img.shields.io/npm/v/ai-sdk-provider-opencode-sdk?color=00A79E" alt="npm version" /></a>
-  <a href="https://www.npmjs.com/package/ai-sdk-provider-opencode-sdk"><img src="https://img.shields.io/npm/unpacked-size/ai-sdk-provider-opencode-sdk?color=00A79E" alt="install size" /></a>
-  <a href="https://www.npmjs.com/package/ai-sdk-provider-opencode-sdk"><img src="https://img.shields.io/npm/dy/ai-sdk-provider-opencode-sdk.svg?color=00A79E" alt="npm downloads" /></a>
   <a href="https://nodejs.org/en/about/releases/"><img src="https://img.shields.io/badge/node-%3E%3D22-00A79E" alt="Node.js ≥ 22" /></a>
   <a href="https://www.npmjs.com/package/ai-sdk-provider-opencode-sdk"><img src="https://img.shields.io/npm/l/ai-sdk-provider-opencode-sdk?color=00A79E" alt="License: MIT" /></a>
 </p>
 
-# AI SDK Provider for OpenCode
+# AI SDK Provider for OpenCode v2
 
-> **Latest Release**: Version 4.x supports AI SDK v7. Version 3.x moves to maintenance for AI SDK v6 under the `ai-sdk-v6` tag.
+A community provider for the [Vercel AI SDK](https://sdk.vercel.ai/docs) (v7) that runs generations through an [OpenCode](https://opencode.ai) **v2** server via `@opencode-ai/client`. OpenCode is an AI coding agent: it owns the model catalog, executes tools server-side, and manages sessions; this provider maps that onto `generateText()` / `streamText()` with tool observation, two-phase tool approvals, interactive forms, and native usage/cost metadata.
 
-A community provider for the [Vercel AI SDK](https://sdk.vercel.ai/docs) that enables using AI models through [OpenCode](https://opencode.ai) and the `@opencode-ai/sdk/v2` APIs. OpenCode is a terminal-based AI coding assistant that supports multiple providers (Anthropic, OpenAI, Google, and more).
+> ## ⚠️ Beta status — read before using
+>
+> This 5.x line targets the **OpenCode v2 beta contract** and is pinned to `@opencode-ai/client@0.0.0-beta-18286`.
+>
+> **No published OpenCode binary currently serves this contract.** The dev- and beta-channel CLIs speak an older, incompatible protocol. The only known compatible server is the upstream [`anomalyco/opencode`](https://github.com/anomalyco/opencode) `beta` branch **built from source** (commit `f4a9b93`, matching the pinned client). This repo's integration harness clones, builds, and serves it in an isolated sandbox — see [`integration/harness/beta-server.ts`](integration/harness/beta-server.ts) and the reproduction steps in [`docs/v2-spike-findings.md`](docs/v2-spike-findings.md).
+>
+> For OpenCode 1.18.x servers (the current published CLI), use the **4.x** line of this package.
+>
+> Migrating from 4.x? See **[docs/migrating-v4-to-v5.md](docs/migrating-v4-to-v5.md)** — v2 is a new backend, not an SDK bump, and most settings changed.
 
-This provider enables you to use OpenCode's AI capabilities through the familiar Vercel AI SDK interface, supporting `generateText()`, `streamText()`, `streamObject()`, native JSON-schema structured output with practical fallback patterns, tool approval flows, and file/source streaming parts.
+## Version compatibility
 
-## Version Compatibility
+| Provider | AI SDK | OpenCode server             | Status                        |
+| -------- | ------ | --------------------------- | ----------------------------- |
+| 5.x      | v7     | v2 beta (built from source) | Beta                          |
+| 4.x      | v7     | 1.18.x (published CLI)      | Maintenance                   |
+| 3.x      | v6     | 1.x                         | Maintenance (`ai-sdk-v6` tag) |
 
-| Provider Version | AI SDK Version | NPM Tag     | Status      | Branch                                                                                   |
-| ---------------- | -------------- | ----------- | ----------- | ---------------------------------------------------------------------------------------- |
-| 4.x.x            | v7             | `latest`    | Stable      | `main`                                                                                   |
-| 3.x.x            | v6             | `ai-sdk-v6` | Maintenance | [`ai-sdk-v6`](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/tree/ai-sdk-v6) |
-| 2.x.x            | v6             | N/A         | Legacy      | historical                                                                               |
-| 1.x.x            | v6             | N/A         | Legacy      | historical                                                                               |
-| 0.x.x            | v5             | `ai-sdk-v5` | Legacy      | [`ai-sdk-v5`](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/tree/ai-sdk-v5) |
-
-## Breaking Changes in 4.0.0
-
-This release upgrades the provider to AI SDK v7 and the V4 provider interfaces:
-
-- **Node.js >= 22**: The package now requires **Node.js >= 22**.
-- **File data parts**: Per AI SDK v7, `reference` file input parts are unsupported and skipped with a warning.
-- **`reasoning` call option**: The `reasoning` model call option is unsupported; it logs a warning and is ignored.
-- **`reasoning-file` parts**: Explicitly a no-op for output conversion (logged at debug level).
-
-## Breaking Changes in 2.0.0
-
-This release upgrades the provider internals to OpenCode SDK v2 and includes behavior changes that can affect existing integrations:
-
-- OpenCode request/response routing now uses v2 parameter shapes (`sessionID`, top-level args).
-- New settings are available: `permission`, `variant`, `directory`, `outputFormatRetryCount`.
-- `cwd` and `tools` remain supported but are now legacy/deprecated pathways.
-- Structured output uses OpenCode native `json_schema` mode. Depending on model/backend route, strict object generation can still be inconsistent.
-
-For production object extraction, use a two-step pattern: try `Output.object(...)` first, then fallback to strict JSON prompting + parse/validate.
-
-### Installing the Right Version
-
-**For AI SDK v7 (recommended):**
-
-```bash
-npm install ai-sdk-provider-opencode-sdk ai@^7.0.0
-```
-
-**For AI SDK v6:**
-
-```bash
-npm install ai-sdk-provider-opencode-sdk@ai-sdk-v6 ai@^6.0.0
-```
-
-**For AI SDK v5:**
-
-```bash
-npm install ai-sdk-provider-opencode-sdk@ai-sdk-v5 ai@^5.0.0
-```
-
-## Zod Compatibility
-
-This package is compatible with **Zod 3 and Zod 4** (aligned with `ai`):
-
-```bash
-# With Zod 3
-npm install ai-sdk-provider-opencode-sdk ai zod@^3.25.76
-
-# With Zod 4
-npm install ai-sdk-provider-opencode-sdk ai zod@^4.1.8
-```
-
-## Prerequisites
+## Requirements
 
 - Node.js >= 22
-- [OpenCode CLI](https://opencode.ai) installed (`npm install -g opencode`)
-- Valid API keys configured in OpenCode for your preferred providers
+- An OpenCode v2 server that speaks the beta-18286 contract (see the status banner)
+- Credentials configured on that server for the providers you want to use (e.g. OpenCode zen)
 
-## Quick Start
+```bash
+npm install ai-sdk-provider-opencode-sdk@next ai@^7.0.0
+```
+
+## Quick start
+
+The v2 beta server requires Basic auth (`opencode:<password>`) on every route:
 
 ```typescript
 import { generateText } from "ai";
-import { opencode } from "ai-sdk-provider-opencode-sdk";
+import { createOpencode } from "ai-sdk-provider-opencode-sdk";
+
+const opencode = createOpencode({
+  baseUrl: "http://127.0.0.1:14196",
+  clientOptions: {
+    headers: {
+      Authorization:
+        "Basic " + Buffer.from("opencode:" + password).toString("base64"),
+    },
+  },
+});
 
 const result = await generateText({
-  model: opencode("openai/gpt-5.3-codex-spark"),
+  model: opencode("opencode/nemotron-3.5-lightning-free"),
   prompt: "What is the capital of France?",
 });
 
 console.log(result.text);
+await opencode.dispose();
 ```
 
-## Usage
+### Backends
 
-### Creating a Provider
+`createOpencode` selects exactly one backend, in precedence order:
+
+1. **`client`** — a caller-supplied `OpenCode.make(...)` client. Used as-is; the provider never closes it.
+
+   ```typescript
+   import { OpenCode } from "@opencode-ai/client";
+   const client = OpenCode.make({ baseUrl, headers });
+   const opencode = createOpencode({ client });
+   ```
+
+2. **`clientManager`** — a caller-supplied manager (advanced injection seam; see `createClientManagerFromPort`). Never disposed by the provider.
+
+3. **`baseUrl`** — the provider constructs the client with `clientOptions` (`headers`, `fetch`).
+
+4. **Service discovery** — `Service.discover()` via the local registration file, with the registered endpoint's auth merged automatically. `autoStart: true` additionally spawns via `Service.ensure`. **Caveat:** no published CLI supports `opencode serve --service` yet (only source builds write a registration), so the default is discovery-only (`autoStart: false`), and the zero-config default provider (`import { opencode }`) only works once a registered service exists.
+
+Every backend runs a connection preflight (`health.get` + `migration.v1.status`) on first use.
+
+### Model IDs
+
+Models are `providerID/modelID` strings from your server's catalog (`model.list`); a bare `modelID` omits the model at session create so the server default applies. `OpencodeModels` exports shortcuts for IDs verified against a live beta catalog (server- and credential-dependent — any catalog ID works, shortcuts are a convenience):
 
 ```typescript
-import { createOpencode } from "ai-sdk-provider-opencode-sdk";
+import { OpencodeModels } from "ai-sdk-provider-opencode-sdk";
+opencode(OpencodeModels["big-pickle"]); // "opencode/big-pickle"
+```
 
-// Default provider (auto-starts server)
-const opencode = createOpencode();
+## Sessions and conversations
 
-// With custom settings
-const opencode = createOpencode({
-  hostname: "127.0.0.1",
-  port: 4096,
-  autoStartServer: true,
-  serverTimeout: 10000,
-  defaultSettings: {
-    agent: "build",
-    sessionTitle: "My Session",
-  },
+OpenCode owns the transcript: model and agent are **session state**, and a prompt sends only new user text. The binding rule is **one model instance = one conversation = one pinned session**:
+
+```typescript
+const model = opencode("opencode/big-pickle", { sessionTitle: "My run" });
+
+const r1 = await generateText({ model, prompt: "My name is Alice." });
+const r2 = await generateText({ model, prompt: "What is my name?" }); // same session
+
+const sessionId = r1.finalStep.providerMetadata?.opencode?.sessionId;
+```
+
+`sessionMode` controls the binding:
+
+- `"ephemeral"` (default) — the provider creates and exclusively owns a session per conversation (it survives tool-approval round-trips within the conversation).
+- `"persistent"` — one provider-created session reused across conversations (the v4 implicit default, now opt-in).
+- `"existing"` — pin the session given by `sessionId` (implied when `sessionId` is set without a mode). **Shared-session caveat:** the v2 beta has no inbox→execution correlation key, so events from other clients on the same session (e.g. a TUI) can be misattributed to your call. Use exclusively-owned sessions unless you accept that.
+
+Per call, `providerOptions.opencode.sessionId` targets an existing session for that one request, and `providerOptions.opencode.id` sets the prompt's user-message ID:
+
+```typescript
+await generateText({
+  model,
+  prompt: "...",
+  providerOptions: { opencode: { sessionId: "ses_..." } },
 });
 ```
 
-### Model Selection
+Prompts to a busy session use `delivery: "queue"` by default (the provider always sends it explicitly — the _server_ default is `"steer"`, which injects the prompt into the in-flight turn as mid-turn context rather than starting or superseding one).
 
-Models are specified in `providerID/modelID` format:
+## Tool observation and approvals
 
-```typescript
-// Anthropic models (Claude 4.5 series)
-opencode("anthropic/claude-sonnet-4-5-20250929");
-opencode("anthropic/claude-haiku-4-5-20251001");
-opencode("anthropic/claude-opus-4-5-20251101");
+OpenCode executes its own tools server-side. You **cannot** supply tool implementations — AI SDK `tools`/`toolChoice` are ignored with a warning — but tool activity streams through as standard AI SDK parts (`tool-call`, `tool-result`, incremental `tool-input-delta`), and tool-produced files surface as `file`/`source` parts.
 
-// OpenAI models (GPT-5.3 / GPT-5.1 series)
-opencode("openai/gpt-5.3-codex-spark");
-opencode("openai/gpt-5.1");
-opencode("openai/gpt-5.1-codex");
+When the server's permission config requires approval (e.g. `permission: { bash: "ask" }`), the flow is two-phase:
 
-// Google Gemini models
-opencode("google/gemini-3-pro-preview");
-opencode("google/gemini-2.5-flash");
-opencode("google/gemini-2.5-pro");
-opencode("google/gemini-2.0-flash");
-```
+1. The call finishes with a `tool-approval-request` content part; the session stays pinned on the model instance.
+2. Call the **same model instance** again with the prior history plus a `tool-approval-response` part (`{ approvalId, approved }`). The provider sends `permission.reply` and resumes the **original** blocked execution — no new prompt is sent.
 
-### Streaming
+Pending/replied approval IDs are reported under `providerMetadata.opencode`. See [`examples/tool-approval.ts`](examples/tool-approval.ts) for the full round-trip.
+
+## Interactive forms (`onForm`)
+
+Forms are v2's replacement for v1 questions: typed, keyed fields answered with a keyed record (not positional arrays).
 
 ```typescript
-import { streamText } from "ai";
-
-const result = streamText({
-  model: opencode("openai/gpt-5.3-codex-spark"),
-  prompt: "Write a haiku about coding.",
-});
-
-for await (const chunk of result.textStream) {
-  process.stdout.write(chunk);
-}
-```
-
-### Conversation History
-
-```typescript
-import { generateText, type ModelMessage } from "ai";
-
-const messages: ModelMessage[] = [
-  { role: "user", content: "My name is Alice." },
-  { role: "assistant", content: "Hello Alice! How can I help you today?" },
-  { role: "user", content: "What is my name?" },
-];
-
-const result = await generateText({
-  model: opencode("openai/gpt-5.3-codex-spark"),
-  messages,
+const model = opencode("opencode/big-pickle", {
+  onForm: (form) => ({
+    type: "answer",
+    answer: { environment: "staging", confirm: true },
+  }),
+  formPolicy: "cancel", // no handler (or handler throws): cancel unblocks the session; "wait" leaves it pending
 });
 ```
 
-### Agent Selection
+Return `{ type: "cancel" }` to decline. Handled form IDs appear in `providerMetadata.opencode.formIds`. Note: the form wiring follows the beta contract and is unit-tested, but no live server flow has produced a form end-to-end yet — treat it as beta within the beta.
 
-OpenCode supports different agents for different tasks:
+## Structured output: honest status
 
-```typescript
-const model = opencode("openai/gpt-5.3-codex-spark", {
-  agent: "build", // or 'plan', 'general', 'explore'
-});
-```
+**OpenCode v2 has no server-side structured output.** The v1 `json_schema` format is gone from the prompt contract, so this provider cannot enforce a schema. What it does instead:
 
-### Session Management
+- `responseFormat: { type: "json" }` appends a prompt-engineered JSON instruction (schema included when provided) and emits an unsupported-format **warning** — the model may still deviate.
+- Opt-in `jsonRepair: { maxAttempts }` (non-streaming only): the final text is validated client-side (`JSON.parse` + structural check against the schema); on failure the server's session-less `generate.text` route is asked to repair the output, bounded by `maxAttempts`. The original turn is never replayed, so tool side effects cannot repeat.
 
-Sessions maintain conversation context:
+Always validate the result yourself (the AI SDK's object helpers re-validate — expect failures to surface there). Never assume enforcement.
 
-```typescript
-const model = opencode("openai/gpt-5.3-codex-spark", {
-  sessionTitle: "Code Review Session",
-});
+## Files and images
 
-// First call creates a session
-const result1 = await generateText({ model, prompt: "Review this code..." });
+The v2 prompt accepts files only as URIs, and **`data:` URIs are the only scheme verified to work across server builds** (others are rejected at prompt time or fail the turn late at the model provider). The provider therefore:
 
-// Subsequent calls reuse the same session
-const result2 = await generateText({ model, prompt: "What did you find?" });
+- advertises `supportedUrls: {}`, so the AI SDK downloads remote URLs to bytes before the provider sees them;
+- converts bytes to `data:` URIs with the correct media type (the server trusts the URI's declared mediatype);
+- warns and skips anything it cannot convert, instead of letting the turn fail late.
 
-// Get session ID from metadata
-const sessionId = result1.finalStep.providerMetadata?.opencode?.sessionId;
-
-// Resume a specific session
-const resumeModel = opencode("openai/gpt-5.3-codex-spark", {
-  sessionId: sessionId,
-});
-```
-
-### Tool Observation
-
-OpenCode executes tools server-side. You can observe tool execution but cannot provide custom implementations:
+A `resolveFileToUri` hook lets you customize the conversion; it must return a `data:` URI (or `undefined` to skip).
 
 ```typescript
-import { streamText } from "ai";
-
-const result = streamText({
-  model: opencode("openai/gpt-5.3-codex-spark"),
-  prompt: "List files in the current directory.",
-});
-
-for await (const part of result.stream) {
-  switch (part.type) {
-    case "tool-call":
-      console.log(`tool-call: ${part.toolName}`);
-      break;
-    case "tool-result":
-      console.log(`tool-result: ${part.toolName}`);
-      break;
-    case "tool-approval-request":
-      console.log(`approval-request: ${part.approvalId}`);
-      break;
-    case "file":
-      console.log(`file: ${part.file.mediaType}`);
-      break;
-    case "source":
-      console.log(`source: ${part.sourceType}`);
-      break;
-    case "text-delta":
-      process.stdout.write(part.text ?? "");
-      break;
-    case "finish":
-      console.log(`finish: ${part.finishReason}`);
-      break;
-    case "error":
-      console.error(part.error);
-      break;
-  }
-}
-```
-
-### Interactive Questions
-
-OpenCode's question tool can ask the user to pick between options mid-generation (a `question.asked` event). The session blocks server-side until the question is answered or rejected. Provide an `onQuestion` callback to answer questions programmatically:
-
-```typescript
-const model = opencode("openai/gpt-5.3-codex-spark", {
-  onQuestion: (request) => {
-    // request.questions: [{ header, question, options: [{ label, description }], multiple?, custom? }]
-    return {
-      type: "answer",
-      // One string[] per question; multiple selections -> multiple strings.
-      answers: request.questions.map((q) => [q.options[0]?.label ?? ""]),
-    };
-  },
-});
-```
-
-Return `{ type: "reject" }` to decline a question. If the callback throws, the provider logs a warning and rejects the question so generation can continue.
-
-Without a handler, behavior is controlled by `questionPolicy`:
-
-- `"reject"` (default) - the provider rejects the question (`question.reject`) so the session unblocks. Previously the provider emitted a stream error and generation hung until the question was answered in OpenCode directly.
-- `"wait"` - legacy behavior: the provider emits a stream `error` part and waits for the question to be answered externally (e.g. in the OpenCode TUI).
-
-Both `streamText` and `generateText` handle questions; the non-streaming path watches for `question.asked` events on a temporary event subscription while the prompt is in flight. See `examples/question-handling.ts` for a full example.
-
-## Feature Support
-
-| Feature                  | Support    | Notes                                                                       |
-| ------------------------ | ---------- | --------------------------------------------------------------------------- |
-| Text generation          | ✅ Full    | `generateText()`, `streamText()`                                            |
-| Streaming                | ✅ Full    | Real-time SSE streaming                                                     |
-| Multi-turn conversations | ✅ Full    | Session-based context                                                       |
-| Tool observation         | ✅ Full    | See tool execution                                                          |
-| Reasoning/thinking       | ✅ Full    | ReasoningPart support                                                       |
-| Model selection          | ✅ Full    | Per-request model                                                           |
-| Agent selection          | ✅ Full    | build, plan, general, explore                                               |
-| Abort/cancellation       | ✅ Full    | AbortSignal support                                                         |
-| Image input (base64)     | ⚠️ Partial | Data URLs only                                                              |
-| Image input (URL)        | ❌ None    | Not supported                                                               |
-| Structured output (JSON) | ⚠️ Partial | Native `json_schema`; use prompt+validation fallback for strict reliability |
-| Custom tools             | ❌ None    | Server-side only                                                            |
-| Tool approvals           | ✅ Full    | `tool-approval-request` / `tool-approval-response`                          |
-| Interactive questions    | ✅ Full    | `onQuestion` callback; questions without a handler rejected by default      |
-| File/source streaming    | ✅ Full    | Emits `file` and `source` stream parts                                      |
-| temperature/topP/topK    | ❌ None    | Provider defaults                                                           |
-| maxTokens                | ❌ None    | Agent config                                                                |
-
-## Examples
-
-- `examples/basic-usage.ts` - Minimal text generation.
-- `examples/streaming.ts` - Streaming text chunks and final usage.
-- `examples/conversation-history.ts` - Multi-turn prompts with session continuity.
-- `examples/generate-object.ts` - Native object mode with robust JSON fallback.
-- `examples/stream-object.ts` - Streaming structured output with fallback parsing.
-- `examples/tool-observation.ts` - Observe tool calls, results, approvals, files, and sources.
-- `examples/question-handling.ts` - Answer OpenCode's interactive questions with `onQuestion`.
-- `examples/abort-signal.ts` - Cancellation patterns for generate and stream calls.
-- `examples/image-input.ts` - File/image input using base64 or data URLs.
-- `examples/custom-config.ts` - Provider/model configuration and reliability controls.
-- `examples/client-options.ts` - `clientOptions` passthrough and preconfigured `client` patterns.
-- `examples/limitations.ts` - Practical limitations and expected behaviors.
-- `examples/long-running-tasks.ts` - Patterns for longer tasks and retries.
-
-## Provider Settings
-
-```typescript
-interface OpencodeProviderSettings {
-  hostname?: string; // Default: '127.0.0.1'
-  port?: number; // Default: 4096
-  baseUrl?: string; // Override full URL
-  autoStartServer?: boolean; // Default: true
-  serverTimeout?: number; // Default: 10000
-  clientOptions?: OpencodeClientOptions; // Pass-through to createOpencodeClient()
-  client?: OpencodeClient; // Preconfigured SDK client (bypasses server management)
-  defaultSettings?: OpencodeSettings;
-}
-```
-
-`clientOptions` forwards OpenCode SDK client configuration such as:
-
-- `headers` (custom HTTP headers)
-- `fetch` (custom fetch implementation)
-- `auth` (token or auth function)
-- `bodySerializer` / `querySerializer`
-- `requestValidator` / `responseValidator` / `responseTransformer`
-- `throwOnError`
-- standard `RequestInit` fields (`credentials`, `mode`, `cache`, `signal`, etc.)
-
-Notes:
-
-- `baseUrl` and `directory` remain provider/model managed (`baseUrl` at provider level, `directory` via `defaultSettings` or per-model settings).
-- If both `client` and `clientOptions` are provided, `client` takes precedence.
-- If `client` is provided, its lifecycle remains caller-managed; `dispose()` only cleans up provider-managed server processes.
-
-Example:
-
-```typescript
-const opencode = createOpencode({
-  baseUrl: "http://127.0.0.1:4096",
-  clientOptions: {
-    headers: {
-      "x-api-key": process.env.OPENCODE_API_KEY ?? "",
+await generateText({
+  model,
+  messages: [
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "What color is this image?" },
+        { type: "file", mediaType: "image/png", data: pngBytes },
+      ],
     },
-    credentials: "include",
-    throwOnError: true,
-  },
+  ],
 });
 ```
 
-## Model Settings
+## Settings reference
 
-```typescript
-interface OpencodeSettings {
-  sessionId?: string; // Resume session
-  createNewSession?: boolean; // Force new session
-  sessionTitle?: string; // Title for new sessions
-  agent?: string; // Agent name
-  systemPrompt?: string; // Override system prompt
-  tools?: Record<string, boolean>; // Enable/disable tools (deprecated in favor of permissions)
-  permission?: Array<{
-    permission: string;
-    pattern: string;
-    action: "allow" | "deny" | "ask";
-  }>; // Session ruleset
-  variant?: string; // OpenCode variant
-  directory?: string; // Per-request directory
-  cwd?: string; // Legacy working directory alias
-  outputFormatRetryCount?: number; // JSON schema retry count
-  onQuestion?: (
-    request: OpencodeQuestionRequest,
-  ) => Promise<OpencodeQuestionResponse> | OpencodeQuestionResponse; // Answer interactive questions
-  questionPolicy?: "reject" | "wait"; // Questions with no handler (default: "reject")
-  logger?: Logger | false; // Logging
-  verbose?: boolean; // Debug logging
-}
-```
+### Provider settings (`createOpencode(...)`)
 
-## Advanced Exports
+| Setting           | Type                                            | Notes                                                          |
+| ----------------- | ----------------------------------------------- | -------------------------------------------------------------- |
+| `client`          | `OpencodeClient`                                | Caller-supplied v2 client; highest precedence, never disposed  |
+| `clientManager`   | `OpencodeClientManager`                         | Caller-supplied manager; never disposed                        |
+| `baseUrl`         | `string`                                        | Explicit server URL                                            |
+| `service`         | `{ file?, version?, command?, env?, onStart? }` | Local-service discovery options                                |
+| `autoStart`       | `boolean` (default `false`)                     | Spawn via `Service.ensure` when discovery finds nothing        |
+| `clientOptions`   | `{ headers?, fetch? }`                          | Client construction passthrough for `baseUrl`/service backends |
+| `defaultSettings` | `OpencodeSettings`                              | Defaults merged under per-model settings                       |
 
-The package also exports lower-level APIs for advanced integrations:
+### Model settings (`opencode(modelId, {...})`)
 
-- Runtime classes: `OpencodeLanguageModel`, `OpencodeClientManager`
-- Validation/config helpers: `validateSettings`, `validateProviderSettings`, `validateModelId`, `mergeSettings`
-- Logging helpers: `getLogger`, `defaultLogger`, `silentLogger`, `createContextLogger`
-- Event/message utilities: `convertToOpencodeMessages`, `convertEventToStreamParts`, `createStreamState`, `createFinishParts`
+| Setting                 | Type                                        | Notes                                                                                                                           |
+| ----------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `sessionId`             | `string`                                    | Pin an existing session (shared-session caveat)                                                                                 |
+| `sessionMode`           | `"ephemeral" \| "persistent" \| "existing"` | Default `"ephemeral"`                                                                                                           |
+| `createNewSession`      | `boolean`                                   | Fresh session per ordinary call; approval continuations still reattach to the blocked session                                   |
+| `sessionTitle`          | `string`                                    | Title for created sessions                                                                                                      |
+| `agent`                 | `string`                                    | Session state, set at create                                                                                                    |
+| `systemPrompt`          | `string`                                    | **Degraded**: prepended to the first user turn as a delimited block, with a warning — v2 has no per-prompt/session system field |
+| `variant`               | `string`                                    | Model variant (requires a resolvable `providerID`)                                                                              |
+| `location`              | `{ directory, workspaceID? }`               | Session location, bound at create (replaces v4 `directory`/`cwd`)                                                               |
+| `directory`             | `string`                                    | Deprecated alias for `location.directory`                                                                                       |
+| `delivery`              | `"queue" \| "steer"`                        | Busy-session delivery; provider default `"queue"`, sent explicitly                                                              |
+| `resume`                | `boolean`                                   | v2 `resume` flag (semantics provisional upstream)                                                                               |
+| `onForm` / `formPolicy` | see above                                   | Forms handling; policy default `"cancel"`                                                                                       |
+| `resolveFileToUri`      | hook                                        | Custom file→`data:` URI resolution                                                                                              |
+| `jsonRepair`            | `{ maxAttempts? }`                          | Opt-in client-side JSON validate/repair (non-streaming)                                                                         |
+| `logger` / `verbose`    | `Logger \| false` / `boolean`               | Logging                                                                                                                         |
 
-These are intended for power users and tooling integrations. Most applications should use `createOpencode()` / `opencode()` directly.
+### Response metadata
 
-## Error Handling
+`providerMetadata.opencode` carries: `sessionId`, `messageId`, `inboxId`, `approvalRequestId(s)`, `repliedApprovalIds`, `formIds`, native `finish`/`rawFinish`, `outcome` (`succeeded`/`failed`/`interrupted`), `interruptReason`, `cost` (USD), native `tokens` (incl. cache read/write), structured `error`, and `retry` info.
 
-The provider converts OpenCode errors to AI SDK error types:
+## Limitations (v2 network contract)
+
+- **No custom tools** — AI SDK `tools`/`toolChoice` are ignored (warning). Tool availability is server/agent configuration.
+- **No sampling parameters** — `temperature`, `topP`, `topK`, `maxOutputTokens`, etc. have no v2 prompt field; they are ignored with a warning.
+- **System prompts are degraded** — delimited prepend on the first user turn, not a true system role.
+- **No native structured output** — see above.
+- **Assistant file outputs** — v2 assistant messages carry only text/reasoning/tool content; files surface only inside tool results.
+- **Multi-turn AI SDK history** — on a fresh session, prior history is serialized into a delimited transcript in the first turn (OpenCode owns the real transcript; reuse one model instance instead where possible).
+- **Steer delivery** — verified as mid-turn context injection: it does not interrupt or supersede the running turn and produces no dedicated answer of its own.
+- **Shared sessions** — no inbox→execution correlation key; exclusivity is a documented caveat, not enforceable.
+
+## Error handling
+
+Errors are normalized to AI SDK error types (`APICallError` etc.) with phase-aware retryability: nothing is surfaced as retryable once a prompt has been dispatched (an SDK-level retry would enqueue duplicate work); post-dispatch failures are reconciled internally against the session's message store. Helpers:
 
 ```typescript
 import {
-  isAuthenticationError,
-  isTimeoutError,
+  isAbortError,
+  isClientError,
+  getClientErrorStatus,
+  extractErrorMessage,
 } from "ai-sdk-provider-opencode-sdk";
-
-try {
-  const result = await generateText({ model, prompt: "..." });
-} catch (error) {
-  if (isAuthenticationError(error)) {
-    console.error("Check your API keys in OpenCode");
-  } else if (isTimeoutError(error)) {
-    console.error("Request timed out");
-  }
-}
 ```
-
-## Structured Output Reliability
-
-When using `Output.object(...)`, the provider sends OpenCode native `format: { type: "json_schema", schema }`. This is the preferred path and works in many cases.
-
-Some model/backend routes can still return output that does not parse into a strict object every time. The examples `examples/generate-object.ts` and `examples/stream-object.ts` intentionally demonstrate a robust fallback strategy:
-
-1. Try native structured output.
-2. Retry a small number of times.
-3. Fallback to strict JSON prompting and validate with Zod.
 
 ## Cleanup
 
-Always dispose of the provider when done to stop the managed server:
-
 ```typescript
-const opencode = createOpencode();
-
-// ... use the provider ...
-
-// Clean up
-await opencode.dispose?.();
+await opencode.dispose();
 ```
+
+`dispose()` releases provider-owned resources only: it never closes caller-supplied clients, never disposes injected managers, and never stops a shared registered service (stopping a service the provider spawned in owned mode is the exception). `provider.getClientManager().stopService()` is the explicit, user-invoked stop.
+
+## Examples
+
+All examples need a running beta-source server — see [`examples/env.ts`](examples/env.ts) for the environment variables (`OPENCODE_BETA_URL`, `OPENCODE_BETA_PASSWORD`, `OPENCODE_MODEL`, `OPENCODE_DIRECTORY`).
+
+- [`examples/basic-usage.ts`](examples/basic-usage.ts) — minimal `generateText` (`npm run example:basic`)
+- [`examples/streaming.ts`](examples/streaming.ts) — streaming deltas + final usage (`npm run example:streaming`)
+- [`examples/form-handling.ts`](examples/form-handling.ts) — `onForm` wiring (`npm run example:form-handling`)
+- [`examples/tool-approval.ts`](examples/tool-approval.ts) — two-phase approval round-trip (`npm run example:tool-approval`)
+- [`examples/client-options.ts`](examples/client-options.ts) — backends, headers, custom fetch (`npm run example:client-options`)
+- [`examples/abort-signal.ts`](examples/abort-signal.ts) — cancellation pre/mid-turn (`npm run example:abort`)
+
+## Advanced exports
+
+For power users and tooling: `OpencodeLanguageModel` (direct construction exposes timing knobs like `readinessTimeoutMs`, `silenceWatchdogMs`, `waitWatchdogGraceMs`), `createClientManager` / `createClientManagerFromSettings` / `createClientManagerFromPort`, the `OpencodeClientPort` facade (`asClientPort`), validation helpers, the v2 event reducer (`convertV2EventToStreamParts`, `createV2StreamState`, …), finish-reason mappers, error utilities, and re-exported beta client types (`V2Event`, `PermissionRequest`, form types). Most applications should stick to `createOpencode()`.
 
 ## License
 
