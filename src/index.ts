@@ -1,3 +1,19 @@
+// Provider factory exports
+export {
+  createOpencode,
+  opencode,
+  OpencodeModels,
+} from "./opencode-provider.js";
+export type { OpencodeModelShortcut } from "./opencode-provider.js";
+
+// Client-manager exports
+export {
+  createClientManager,
+  createClientManagerFromSettings,
+  createClientManagerFromPort,
+  mergeDefaultHeaders,
+} from "./opencode-client-manager.js";
+
 // Client-port facade exports
 export { asClientPort } from "./client-port.js";
 export type {
@@ -9,6 +25,7 @@ export type {
 export type {
   OpencodeModelId,
   OpencodeClient,
+  OpencodeClientManager,
   OpencodeClientOptions,
   OpencodeServiceOptions,
   OpencodeSessionLocation,
