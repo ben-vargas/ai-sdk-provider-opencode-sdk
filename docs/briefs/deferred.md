@@ -3,9 +3,14 @@
 Items intentionally deferred by earlier stages. Stage 7 (hardening) and
 stage 8 (ship prep) picked these up explicitly, informed by the stage-6
 beta-source findings; anything deferred further must stay on this list with
-a reason. Stage-8 status: items 1, 3, 4, 7, 8, 10 resolved; items 2, 5, 6,
-9, 11 remain open, each with a current reason (re-checked stage 8 — all
-are upstream-blocked or no-demonstrated-need, unchanged since stage 7).
+a reason. Stage-9 status: items 1, 3, 4, 7, 8, 10 remain resolved; items 2,
+5, 6, 11 remain open; item 9 was re-examined against the published
+`opencode2` binary and **stays deferred for a different, narrower reason**
+(below). Stage 9 also closed a limitation that was never on this list —
+system prompts — because the mechanism that fixes it (`session.instructions.
+entry`) had been recorded as unimplemented everywhere, and turned out to
+work on the published binary. See the stage-9 section of
+`docs/v2-spike-findings.md`.
 
 ## Deferred from stage 4 (language model)
 
@@ -140,6 +145,17 @@ started` is observed (the one case whose wait semantics stage 6 pinned)
    build-dependence (dev builds still store non-`data:` URIs raw and fail
    late) is exactly the failure mode the `data:`-only preflight exists to
    prevent, so the gate stands until beta is the sole target.
+   _Re-examined stage 9, still deferred — narrower reason._ The original
+   deferral was partly framed on "wait until the beta contract is the only
+   one we target", and stage 9 weakened that: a **published** binary now
+   serves the contract (`@opencode-ai/cli`, `opencode2`), so targeting it is
+   no longer exotic. The deferral survives on the remaining, unchanged
+   ground: the provider cannot tell which build a caller's `baseUrl` points
+   at, and on the v1-lineage CLIs a non-`data:` URI is stored raw and kills
+   the turn _after_ dispatch with a provider-internal error that never
+   mentions the file. A `data:`-only preflight converts that into a
+   caller-visible error before dispatch. Loosening it needs a server
+   capability signal, not just a compatible server existing.
 10. **Steer multi-step supersession re-test.** **Resolved (stage 7) —
     stage-0 refuted for the beta source.** A dedicated live experiment
     (`integration/steer-supersede.test.ts`; evidence

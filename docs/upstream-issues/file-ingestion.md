@@ -1,25 +1,44 @@
-# [DRAFT — do not post yet] v2: `files[].uri` accepts every scheme but only `data:` works — late, opaque failures
+# [WITHDRAWN — do not post] v2: `files[].uri` accepts every scheme but only `data:` works
 
-**Repo:** anomalyco/opencode
-**Labels (suggested):** v2, api, bug/docs
+**Status:** withdrawn 2026-08-27. Every complaint in this draft was already
+fixed in the build we ship against; the original evidence came from the wrong
+server. Kept as a record, not as a draft to post.
 
-## Problem
+## Why it is withdrawn
 
-v2's `session.prompt` file input is URI-only (`files: [{uri, name?, description?, …}]` — no mime, no bytes). Nothing documents which schemes are supported, and the observed behavior (dev CLI `0.0.0-dev-202608261632`, 2026-08-26) is a trap:
+The draft was written from dev-CLI captures (`opencode-ai@0.0.0-dev-…`, the
+**v1** package's dev tag). It reported that `session.prompt` accepted every
+URI scheme at the API boundary, that only `data:` actually reached the model,
+and that anything else killed the turn *after* dispatch with a
+provider-internal error that never mentioned the file.
 
-- **Every scheme is accepted at the API boundary** — `data:`, `file://`, `https://`, absolute and workspace-relative paths were all admitted and stored on the user message verbatim. For `data:` URIs the stored `mime` is taken from the URI's declared mediatype (not the file name, and not sniffed from content — a valid PNG sent as `data:application/octet-stream` is stored and forwarded as octet-stream, then rejected by the provider adapter).
-- **Only `data:` URIs actually work** (verified end-to-end: a 64×64 red PNG sent as `data:` is correctly described by two different image-capable models). For all other schemes the raw URI string is passed through to the model provider as media and the _turn_ later fails with `finish:"error"`, `error:{type:"unknown", message:"OpenAI Responses media must contain valid base64"}` (or "OpenAI Chat media must contain valid base64" — reproduced on two distinct provider adapters).
-- So an invalid attachment does not reject the prompt (where the caller could handle it) — it kills the whole generation afterward, with a provider-internal error message that never mentions the file.
+On the server this provider actually targets — `@opencode-ai/cli@0.0.0-beta-18286`
+(`opencode2`), the published build of the pinned client — none of that holds.
+Verified on the source build at stage 6
+(`spike/artifacts/12b-beta-src-file-uris.json`) and re-verified on the
+published binary at stage 9 (`spike/artifacts/14-opencode2-verification.json`,
+`v6Files`), using an image-capable model:
 
-Repro: send a small PNG as each URI form to an image-capable model, then read `message.list`. We have captured request/response/event JSON for all cases (five schemes × plus mediatype-conflict and second-model controls) and can attach it.
+| URI form                    | Behaviour on `opencode2@0.0.0-beta-18286`                                                            |
+| --------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `data:image/png;base64,…`   | Works — model answers "Red"; stored as `source: {type: "inline"}`                                      |
+| `file:///…` (readable)      | **Works** — the server reads the file and stores `source: {type: "uri", uri}` with the bytes inlined   |
+| `file:///…` (missing)       | Rejected **at prompt time**: `Unable to read attachment: file:///…`                                    |
+| `https://…`                 | Rejected **at prompt time**: `Unsupported attachment URI: https://…`                                   |
+| Bare absolute path          | Rejected **at prompt time**: `Invalid attachment URI: /…`                                              |
+| Relative path               | Rejected **at prompt time**: `Invalid attachment URI: red-square.png`                                  |
 
-## Use case
+That is the draft's ask #2 — "validate at prompt time; reject unsupported
+schemes instead of failing the turn later" — already implemented, with
+precise, caller-actionable messages. Ask #1 (document the supported schemes)
+is the only fragment with any life left in it, and it is too thin to open an
+issue over on its own; it is folded into the docs asks in
+`client-cli-version-skew.md`.
 
-We maintain `ai-sdk-provider-opencode-sdk` (Vercel AI SDK provider). AI SDK file parts arrive as bytes or URLs; we must decide per scheme whether to pass through or download-and-inline, and we need prompt-time errors to surface attachment problems to the caller. Today we can only support `data:` and must treat everything else as caller error — but the API shape suggests (and silently accepts) much more.
+## Note for this repo (not upstream)
 
-## Ask
-
-1. Document the supported `uri` schemes for `files[].uri` (and keep `data:` supported — it is currently the only working path and our primary integration).
-2. **Validate at prompt time**: reject unsupported schemes with `InvalidRequestError` (the validation layer already produces excellent path-anchored messages) instead of failing the turn later with an opaque provider error.
-3. Clarify intent for `file://`/workspace-relative paths (should the server read them from the session `location`?) and `https:` (does the server fetch? under whose credentials/SSRF policy?). If server-side fetching is planned, an allowlist + size cap would be expected.
-4. If bytes-upload is the long-term answer, consider an explicit upload API returning an opaque URI; we would adopt it immediately.
+The provider's own `data:`-only preflight is **not** a workaround for the
+behaviour described above — it stays deliberately, because the provider
+cannot tell which build a caller's `baseUrl` points at, and on the v1-lineage
+builds a non-`data:` URI still fails late and opaquely. See deferred-ledger
+item 9 for the current reasoning.

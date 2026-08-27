@@ -1,0 +1,219 @@
+{
+  "capturedAt": "2026-08-27T05:16:03.682Z",
+  "baseUrl": "http://127.0.0.1:14396",
+  "health": {
+    "label": "health",
+    "ok": true,
+    "ms": 17,
+    "value": {
+      "healthy": true,
+      "version": "0.0.0-beta-18286",
+      "pid": 11920
+    }
+  },
+  "e1RoundTrip": {
+    "put": {
+      "label": "entry-put",
+      "ok": true,
+      "ms": 1
+    },
+    "afterPut": {
+      "label": "entry-list-after-put",
+      "ok": true,
+      "ms": 1,
+      "value": [
+        {
+          "key": "ai-sdk.system",
+          "value": "Always end every reply with the word BANANA."
+        }
+      ]
+    },
+    "remove": {
+      "label": "entry-remove",
+      "ok": true,
+      "ms": 1
+    },
+    "afterRemove": {
+      "label": "entry-list-after-remove",
+      "ok": true,
+      "ms": 0,
+      "value": []
+    }
+  },
+  "e2Visible": {
+    "turn1": "ZEPHYR-77",
+    "turn2": "ZEPHYR-77",
+    "turn1SawEntry": true,
+    "turn2SawEntry": true,
+    "contextMessageTypes": [
+      "user",
+      "assistant",
+      "user",
+      "assistant"
+    ],
+    "systemMessages": []
+  },
+  "e4MidSessionPut": {
+    "beforePut": "I don't have information about a specific \"codeword\" in the system. The OpenCode harness and tools don't appear to reference a particular codeword. Could you clarify what context or system you're referring to?",
+    "beforePutSawEntry": false,
+    "afterPut": "ORCHID-42",
+    "afterPutSawEntry": true,
+    "messageTypes": [
+      "user",
+      "assistant",
+      "system",
+      "user",
+      "assistant"
+    ],
+    "systemMessages": [
+      "{\"id\":\"msg_041a62e9e001ocpXbkL4wtRvf3\",\"time\":{\"created\":1787807805086},\"type\":\"system\",\"text\":\"<context key=\\\"ai-sdk.system\\\">\\nYour secret codeword is ORCHID-42. Whenever the user asks for the codeword, reply with exactly that codeword and nothing else.\\n</context>\",\"description\":\"Instructions updated: api/ai-sdk.system\"}"
+    ]
+  },
+  "e5RemoveClean": {
+    "reply": "I'm not sure which \"codeword\" you're referring to — it could be a password, a secret word in a game, a term in programming, or something else entirely. Could you provide a bit more context?",
+    "conclusive": true,
+    "stillSawEntry": false,
+    "entries": {
+      "label": "list-after-clean-remove",
+      "ok": true,
+      "ms": 4,
+      "value": []
+    }
+  },
+  "e5bRemoveAfterExposure": {
+    "withEntry": "Hello! 👋",
+    "withEntryObeyed": false,
+    "afterRemove": "Goodbye! 👋 Have a great day!",
+    "afterRemoveStillObeyed": false,
+    "confound": "the transcript still shows the QQQ-prefixed turn, so continued obedience is explainable by history alone"
+  },
+  "e6Keys": {
+    "\"ai-sdk.System\"": {
+      "label": "key-ai-sdk.System",
+      "ok": false,
+      "ms": 4,
+      "error": {
+        "_tag": "InvalidRequestError",
+        "message": "Expected a string matching the RegExp ^[a-z0-9][a-z0-9._-]*$\n  at [\"key\"]",
+        "kind": "Params"
+      }
+    },
+    "\"_leading\"": {
+      "label": "key-_leading",
+      "ok": false,
+      "ms": 2,
+      "error": {
+        "_tag": "InvalidRequestError",
+        "message": "Expected a string matching the RegExp ^[a-z0-9][a-z0-9._-]*$\n  at [\"key\"]",
+        "kind": "Params"
+      }
+    },
+    "\".dot\"": {
+      "label": "key-.dot",
+      "ok": false,
+      "ms": 1,
+      "error": {
+        "_tag": "InvalidRequestError",
+        "message": "Expected a string matching the RegExp ^[a-z0-9][a-z0-9._-]*$\n  at [\"key\"]",
+        "kind": "Params"
+      }
+    },
+    "\"\"": {
+      "label": "key-",
+      "ok": false,
+      "ms": 1,
+      "error": {
+        "__error": true,
+        "name": "ClientError",
+        "message": "UnsupportedContentType",
+        "reason": "UnsupportedContentType"
+      }
+    },
+    "\"AI-SDK\"": {
+      "label": "key-AI-SDK",
+      "ok": false,
+      "ms": 0,
+      "error": {
+        "_tag": "InvalidRequestError",
+        "message": "Expected a string matching the RegExp ^[a-z0-9][a-z0-9._-]*$\n  at [\"key\"]",
+        "kind": "Params"
+      }
+    }
+  },
+  "e6GoodKeys": {
+    "ai-sdk.system": {
+      "label": "good-key-ai-sdk.system",
+      "ok": true,
+      "ms": 1
+    },
+    "a": {
+      "label": "good-key-a",
+      "ok": true,
+      "ms": 1
+    },
+    "a1._-x": {
+      "label": "good-key-a1._-x",
+      "ok": true,
+      "ms": 1
+    }
+  },
+  "e6Size": {
+    "raw8189": {
+      "label": "value-raw-8189",
+      "ok": true,
+      "ms": 1
+    },
+    "raw8190": {
+      "label": "value-raw-8190",
+      "ok": true,
+      "ms": 1
+    },
+    "raw8191": {
+      "label": "value-raw-8191",
+      "ok": false,
+      "ms": 1,
+      "error": {
+        "_tag": "InstructionEntryValueTooLargeError",
+        "actualBytes": 8193,
+        "maxBytes": 8192,
+        "message": "Instruction entry value is 8193 bytes; the limit is 8192 bytes"
+      }
+    },
+    "raw8192": {
+      "label": "value-raw-8192",
+      "ok": false,
+      "ms": 0,
+      "error": {
+        "_tag": "InstructionEntryValueTooLargeError",
+        "actualBytes": 8194,
+        "maxBytes": 8192,
+        "message": "Instruction entry value is 8194 bytes; the limit is 8192 bytes"
+      }
+    }
+  },
+  "e6SizeMultibyte": {
+    "label": "value-multibyte",
+    "ok": true,
+    "ms": 1
+  },
+  "e6NonString": {
+    "label": "value-object",
+    "ok": true,
+    "ms": 1
+  },
+  "e7Precedence": {
+    "reply": "ANSWER: Choose descriptive names that convey the variable's purpose, stick to a consistent naming convention such as camelCase or snake_case, and avoid single-character names except for simple loop counters.",
+    "followedOverride": true,
+    "usedMarkdownList": false
+  },
+  "e9UnknownSession": {
+    "label": "put-unknown-session",
+    "ok": false,
+    "ms": 3,
+    "error": {
+      "_tag": "SessionNotFoundError",
+      "sessionID": "ses_definitely_not_real",
+      "message": "Session not found: ses_definitely_not_real"
+    }
+  }
+}

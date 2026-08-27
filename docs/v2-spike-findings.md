@@ -395,3 +395,220 @@ itself sufficient evidence.
 sufficient. Every shipped ID must also be attributable to a source
 independent of the capture host — the models-dev catalog, or the pinned
 source's bundled snapshot.
+
+---
+
+# opencode2 verification (stage 9)
+
+**Date:** 2026-08-27
+**Server:** the **published** `@opencode-ai/cli@0.0.0-beta-18286` binary
+(`opencode2 serve`), run with the same isolation rules as the stage-6
+source-build harness (isolated XDG homes, fake `HOME`/`OPENCODE_TEST_HOME`,
+minimal allowlisted environment, tmp-rooted sandbox workdir, Basic auth).
+Evidence: `spike/artifacts/14-opencode2-verification.json`,
+`spike/artifacts/14b-instruction-entries.json`.
+
+## The headline correction: a published server has existed all along
+
+Stage 0 concluded, and stages 1–8 repeated, that **no published binary serves
+the pinned client's contract**. That was wrong. The conclusion came from
+probing **`opencode-ai`** — the _v1_ package name, whose `latest` is
+`1.18.23` and whose `beta`/`dev` tags publish a partial 51-route v2 surface
+of an older protocol generation.
+
+The v2 CLI is published as **`@opencode-ai/cli`**, binary **`opencode2`**.
+`@opencode-ai/cli@0.0.0-beta-18286` is the exact build of the pinned
+`@opencode-ai/client@0.0.0-beta-18286`, and one build number spans binary,
+client and running server (`14` → `v1Provenance.allThreeMatch: true`,
+`health.get()` → `{healthy: true, version: "0.0.0-beta-18286"}`).
+
+**The provider source needed no rework.** `src/` never referenced a CLI or a
+source build — it was written contract-first against the pinned client types,
+which is precisely what `opencode2` serves. What changed in stage 9 is the
+_harness_ (now spawns the published binary; the source build survives as an
+opt-in fallback behind `OPENCODE_BETA_SRC_DIR`) and the _claims_ in the docs.
+
+Residual, verified packaging problems are written up in
+`docs/upstream-issues/client-cli-version-skew.md`: `@opencode-ai/cli`'s
+`latest`/`next` point at `0.0.0-beta-17823`, **behind** its own `beta`
+(`18314`); the same dist-tag does not pair across packages (`client@beta` is
+`18371` while `cli@beta` is `18314`); and no documented rule says the build
+numbers must match, though in practice they must. `/api/doc` 404s on this
+build, but the OpenAPI document **is** served at `/openapi.json` (which the
+contract test already uses).
+
+Two operational facts worth stating plainly:
+
+- `serve` requires HTTP Basic auth on **every** route including
+  `/api/health`; the username is `opencode`.
+- `serve` honours `OPENCODE_PASSWORD`. With it set, no password line is
+  printed; without it, `serve` generates one and prints
+  `server password <...>`. The harness injects a random password rather than
+  racing stdout, and keeps the parse as a fallback.
+
+## Behavioural re-verification: confirms / contradicts
+
+Every row was re-run against `opencode2`; the "previous evidence" column says
+where the earlier answer came from.
+
+| Behaviour                                        | Previous evidence            | opencode2 verdict                                                                                                         | Shipped default affected?                                 |
+| ------------------------------------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| Binary/client/server build pairing               | n/a (new)                    | **Confirmed** — all three read `0.0.0-beta-18286`                                                                         | No                                                        |
+| Server default `delivery` when omitted           | dev CLI, then source         | **Confirmed** — receipt says `delivery:"steer"`                                                                           | No — provider sends explicit `"queue"`                    |
+| `receipt.id` equals the stored user message id   | source build                 | **Confirmed** — `userMessageIdEqualsReceiptId: true`                                                                      | No — correlation logic unchanged                          |
+| `session.wait` on an **idle** session            | source build                 | **Confirmed** — resolves immediately                                                                                      | No                                                        |
+| `session.wait` on a **busy** session             | source build                 | **Confirmed with a correction** — resolves _coincident with_ turn completion, not reliably before or after it (see below) | No — wait stays a watchdog, not a turn-completion signal  |
+| Prompting a busy session with delivery omitted   | dev CLI, then source         | **Confirmed** — accepted, receipt `delivery:"steer"`                                                                      | No                                                        |
+| Prompting a busy session with `delivery:"queue"` | dev CLI, then source         | **Confirmed** — accepted; all three turns drain                                                                           | No                                                        |
+| `migration.v1.status`                            | embedded host                | **Confirmed** — `{status: "completed"}`                                                                                   | No                                                        |
+| `session.log` catch-up from `after: 0`           | source build                 | **Confirmed** — yields the `log.synced` sentinel only                                                                     | No                                                        |
+| File ingestion: `data:` URI                      | dev CLI, then source         | **Confirmed** — model answers "Red"; receipt stores `source: {type: "inline"}`                                            | No                                                        |
+| File ingestion: `file:` URI                      | source build                 | **Confirmed** — model answers "Red"; the server reads the file and stores `source: {type: "uri", uri}` with bytes inlined | No — the `data:`-only preflight is deliberate (ledger #9) |
+| File ingestion: bare absolute path               | source build                 | **Confirmed** — rejected **at prompt time**: `Invalid attachment URI: /…/red-square.png`                                  | No                                                        |
+| `session.instructions.entry.*`                   | **unimplemented** everywhere | **Contradicted — the route works.** See below; this one _did_ change a shipped default                                    | **Yes** — real system prompts shipped                     |
+
+### `session.wait` on a busy session: coincident, not ordered
+
+The stage-6 source-build capture recorded
+`waitResolvedBeforeExecutionSucceeded: false`, and stage 9's first run agreed
+— but stage 9's second run reported `true`. The deltas explain it: wait
+resolved at 39958 ms and `session.execution.succeeded` was observed at
+39961 ms, a **3 ms** gap. That flag measures which of two near-simultaneous
+things our _subscription_ saw first, not a server ordering guarantee. The
+honest statement is that `session.wait` resolves coincident with turn
+completion; nothing here supports treating its resolution as either a strict
+before or a strict after signal.
+
+This changes no shipped behaviour — the provider already treats
+`session.wait` as a watchdog raced against event-driven completion rather
+than as the completion signal (deferred-ledger item 1). It does mean the
+earlier `false` should not have been recorded as a property.
+
+### A probe that had to be thrown away
+
+The first stage-9 run of the file-ingestion check used the server's default
+model, `opencode/nemotron-3.5-lightning-free`, which declares
+`capabilities.input: ["text"]`. A text-only model answers "I cannot view
+images" for _every_ URI scheme, which reads as a uniform failure and proves
+nothing about ingestion. The probe was re-run against
+`opencode/muse-spark-1.2-contributor-free` (`input` includes `image`), and
+the artifact now records the probe model's declared capabilities alongside
+the results so its validity is checkable from the artifact itself.
+
+## Q5 revisited — `session.instructions.entry` works, and it changed what we ship
+
+Stage 0 recorded Q5 as **inconclusive (unimplemented)**: no instructions
+routes on the dev CLI, empty-body 500s on the embedded host. Against
+`opencode2` the mechanism works end to end, and the provider now uses it as
+its real system-prompt channel (`src/system-instruction.ts`,
+`OpencodeLanguageModel.applySystemInstruction`). Evidence:
+`spike/artifacts/14b-instruction-entries.json`.
+
+| Probe                                                   | Result                                                                                                                                |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| E1 `entry.put` / `list` / `remove` round-trip           | Works; `list` reflects the put, and is empty after the remove                                                                         |
+| E2 Entry set before the first prompt reaches the model  | Yes — the model returns the planted codeword                                                                                          |
+| E3 Still applies on turn 2 of the same session          | Yes                                                                                                                                   |
+| E4 Entry put **mid-session** applies from the next turn | Yes — turn 1 (no entry) does not know the codeword; turn 2 does                                                                       |
+| E4 A mid-session put announces a durable message        | Yes — one `system` message, text `<context key="ai-sdk.system">…</context>`, `description: "Instructions updated: api/ai-sdk.system"` |
+| E5 `remove` stops the instruction applying              | Yes — **no transcript confound** (see below)                                                                                          |
+| E6 Key grammar                                          | `^[a-z0-9][a-z0-9._-]*$`; `AI-SDK`, `ai-sdk.System`, `_leading`, `.dot` and `""` rejected                                             |
+| E6 Value cap                                            | 8192 bytes measured on the **JSON encoding** (see below)                                                                              |
+| E6 Non-string values                                    | Accepted — `value` is a `JsonValue`, not just a string                                                                                |
+| E7 Precedence vs the agent prompt                       | An entry instruction overrode default agent formatting behaviour                                                                      |
+| E9 Unknown session                                      | Clean `Session not found: <id>`                                                                                                       |
+
+### Two probe designs worth keeping
+
+**E3 nearly produced a false positive.** The first version of the `ask`
+helper returned "the last completed assistant message", which on turn 2+ is
+the _previous_ turn's answer — so a cross-turn survival test would have
+passed without a second turn ever running. The helper now takes a baseline
+assistant count before prompting and waits for a _new_ completed assistant.
+The first run's E3 "pass" was discarded.
+
+**E5 nearly produced a false negative, twice.** Asking the model to confirm a
+removal is confounded: once the codeword has appeared in the transcript, the
+model can parrot it with the entry long gone. The decisive probe therefore
+puts _and removes_ the entry **before the session is ever prompted**, so the
+value cannot be in the history at all — the model does not produce it. A
+separate, deliberately weaker after-exposure probe is recorded next to it and
+labelled as non-evidence. Separately, the first conclusive-looking E5 result
+was actually a turn **timeout**, and a regex missing over the literal string
+`"<timeout>"` was being read as "the instruction was absent"; the probe now
+retries a timed-out turn once and records a `conclusive` flag.
+
+### The size cap is charged on the JSON encoding
+
+`InstructionEntryValueTooLargeError` reports `actualBytes`/`maxBytes`, and
+the bytes it counts are those of `JSON.stringify(value)`, not of the raw
+string:
+
+| Raw value        | Charged bytes | Accepted |
+| ---------------- | ------------- | -------- |
+| 8189 ASCII chars | 8191          | yes      |
+| 8190 ASCII chars | 8192          | yes      |
+| 8191 ASCII chars | 8193          | **no**   |
+| 8192 ASCII chars | 8194          | **no**   |
+| 4095 × `é`       | 8192          | yes      |
+
+So the two quote characters count, multi-byte characters are charged their
+UTF-8 length, and JSON-escaped characters their escaped length.
+`instructionValueBytes()` reproduces this exactly; a caller budgeting against
+"8 KiB of text" would overshoot by two bytes and more with non-ASCII content.
+
+### What shipped as a result
+
+- `settings.systemPrompt` and AI SDK `system:` messages are joined (setting
+  first) and written to the session entry `ai-sdk.system` — namespaced so a
+  caller's own entries on a pinned session are never clobbered.
+- **This removed a real limitation**: the v4-era delimited prepend only ever
+  reached a session's _first_ prompt, so a system prompt silently stopped
+  applying on reused sessions. The entry is re-rendered every turn.
+- Writes are reconciled, not blind. An unchanged value skips the request (a
+  redundant put announces another durable system message); a call that drops
+  its system content **removes** the entry rather than leaking a previous
+  call's system prompt into later turns.
+- The fallback is feature-detected, not assumed: a port without the route, a
+  value over the cap, or a failed write degrades to the delimited prepend and
+  emits an `unsupported` warning naming the actual reason. Only an explicit
+  404/405/501 sticks; a transient failure is retried on the next turn rather
+  than downgrading the whole conversation.
+
+What remains undocumented upstream — precedence guarantees, **compaction
+survival**, key-namespacing conventions, whether a no-op put is suppressed
+server-side — is written up in `docs/upstream-issues/per-prompt-system.md`,
+which is now a docs request rather than the API-change request it was.
+
+## Reproduction (stage 9)
+
+```bash
+# server: the PUBLISHED v2 binary — package @opencode-ai/cli, binary opencode2.
+# (npm i -g opencode-ai gives you the *v1* CLI; that is the trap.)
+npm install -D @opencode-ai/cli@0.0.0-beta-18286
+
+SB=/tmp/oc2-verify
+mkdir -p $SB/{home,data/opencode,state,config,cache,workdir}
+cp ~/.local/share/opencode/auth.json $SB/data/opencode/    # zen creds
+PW=$(openssl rand -base64 24 | tr -d '=+/')
+
+# env -i + fake HOME/OPENCODE_TEST_HOME + a tmp-rooted workdir are all
+# required: config discovery walks upward from the session directory to the
+# filesystem root and reads $HOME/.claude and $HOME/.agents directly.
+cd $SB/workdir && env -i PATH="$PATH" HOME=$SB/home \
+  OPENCODE_TEST_HOME=$SB/home TMPDIR=/tmp \
+  XDG_DATA_HOME=$SB/data XDG_STATE_HOME=$SB/state \
+  XDG_CONFIG_HOME=$SB/config XDG_CACHE_HOME=$SB/cache \
+  OPENCODE_PASSWORD="$PW" \
+  OPENCODE_CONFIG_CONTENT='{"permission":{"bash":"ask"}}' \
+  ./node_modules/.bin/opencode2 serve --port 14396
+
+# experiments (repo root)
+OC2_URL=http://127.0.0.1:14396 OC2_PASSWORD="$PW" \
+  OC2_WORKDIR=$SB/workdir node spike/14-opencode2-verification.mjs
+OC2_URL=http://127.0.0.1:14396 OC2_PASSWORD="$PW" \
+  OC2_WORKDIR=$SB/workdir node spike/14b-instruction-entries.mjs
+
+# gated integration suite (starts its own opencode2 in its own sandbox)
+npm run test:integration
+```
