@@ -53,6 +53,12 @@ export interface BetaServerHandle {
   authAvailable: boolean;
   /** Server default model, when the catalog is reachable. */
   defaultModel?: { providerID: string; modelID: string };
+  /**
+   * Local beta-source checkout (for tests that spawn their own server
+   * variant, e.g. `serve --service`). Undefined in attach mode when the
+   * cache clone does not exist.
+   */
+  sourceDir?: string;
   /** Kill the spawned server (no-op for externally provided servers). */
   stop: () => Promise<void>;
 }
@@ -259,6 +265,10 @@ export async function startBetaServer(): Promise<BetaServerHandle> {
   const workdir = join(sandboxRoot, "workdir");
   await mkdir(workdir, { recursive: true });
 
+  const sourceDir =
+    process.env.OPENCODE_BETA_SRC_DIR ??
+    join(homedir(), ".cache", "opencode-beta-src");
+
   // Attach mode: an external server was provided.
   const externalUrl = process.env.OPENCODE_BETA_URL;
   if (externalUrl !== undefined) {
@@ -272,13 +282,10 @@ export async function startBetaServer(): Promise<BetaServerHandle> {
       workdir,
       authAvailable: true,
       defaultModel: await fetchDefaultModel(externalUrl, authHeader),
+      sourceDir: existsSync(join(sourceDir, ".git")) ? sourceDir : undefined,
       stop: async () => {},
     };
   }
-
-  const sourceDir =
-    process.env.OPENCODE_BETA_SRC_DIR ??
-    join(homedir(), ".cache", "opencode-beta-src");
   ensureBetaSource(sourceDir);
   ensureInstalled(sourceDir);
 
@@ -350,6 +357,7 @@ export async function startBetaServer(): Promise<BetaServerHandle> {
     workdir,
     authAvailable,
     defaultModel: await fetchDefaultModel(baseUrl, authHeader),
+    sourceDir,
     stop: async () => {
       await writeFile(logFile, logChunks.join(""), "utf8").catch(() => {});
       if (child.exitCode !== null) {

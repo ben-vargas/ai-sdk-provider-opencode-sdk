@@ -16,6 +16,7 @@ declare module "vitest" {
     opencodeWorkdir: string;
     opencodeAuthAvailable: boolean;
     opencodeDefaultModel: { providerID: string; modelID: string } | null;
+    opencodeSourceDir: string;
     opencodeUnavailableReason: string | null;
   }
 }
@@ -31,6 +32,7 @@ export default async function setup(
     project.provide("opencodeWorkdir", handle.workdir);
     project.provide("opencodeAuthAvailable", handle.authAvailable);
     project.provide("opencodeDefaultModel", handle.defaultModel ?? null);
+    project.provide("opencodeSourceDir", handle.sourceDir ?? "");
     project.provide("opencodeUnavailableReason", null);
     console.log(
       `[integration] beta-source server ready at ${handle.baseUrl} ` +
@@ -44,6 +46,7 @@ export default async function setup(
     project.provide("opencodeWorkdir", "");
     project.provide("opencodeAuthAvailable", false);
     project.provide("opencodeDefaultModel", null);
+    project.provide("opencodeSourceDir", "");
     project.provide("opencodeUnavailableReason", reason);
     console.warn(
       `[integration] beta-source harness unavailable — all integration tests will skip.\n` +

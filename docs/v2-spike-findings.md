@@ -238,6 +238,20 @@ New beta-only observations:
   authoritative), and the reasoning stream is extremely chatty
   (`reasoning.started`/`ended` pairs per token burst) — the reducer's
   tolerant handling absorbs both.
+- **`serve --service` works** (stage-0 finding 0.1 refuted for the beta
+  source): the flag exists, the server writes a channel-suffixed
+  registration (`$XDG_STATE_HOME/opencode/service-local.json` for the
+  from-source "local" channel) containing `{id, version, url, pid,
+password}`, and `Service.discover({file})` resolves it — including the
+  Basic-auth credential the provider's manager merges automatically. The
+  full provider service-discovery backend generates end-to-end against it
+  (`integration/service-backend.test.ts`). Caveats: the registration's
+  `version` is the literal string `"local"` on source builds (a semver
+  `service.version` predicate would reject it), and `--service` binds a
+  fixed per-channel default port unless the service config
+  (`$XDG_CONFIG_HOME/opencode/service-<channel>.json` → `{port}`) overrides
+  it. Published CLIs still lack a working `--service`, so the provider's
+  `autoStart: false` default stands.
 
 ## Reproduction
 

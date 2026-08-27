@@ -28,6 +28,8 @@ export interface IntegrationContext {
   modelId: string;
   /** Model settings every test should start from (sandbox location). */
   baseSettings: OpencodeSettings;
+  /** Beta-source checkout dir ("" when unknown, e.g. attach mode w/o clone). */
+  sourceDir: string;
   /** Provider factory preconfigured for the harness endpoint. */
   makeProvider: (overrides?: OpencodeProviderSettings) => OpencodeProvider;
   /** Raw pinned client on the same endpoint, for server-side assertions. */
@@ -45,6 +47,7 @@ export function integrationContext(): IntegrationContext {
   const workdir = inject("opencodeWorkdir");
   const authAvailable = inject("opencodeAuthAvailable");
   const defaultModel = inject("opencodeDefaultModel");
+  const sourceDir = inject("opencodeSourceDir");
   const unavailableReason = inject("opencodeUnavailableReason");
 
   const available = baseUrl !== null;
@@ -74,6 +77,7 @@ export function integrationContext(): IntegrationContext {
     workdir,
     modelId,
     baseSettings,
+    sourceDir,
     makeProvider: (overrides = {}) =>
       createOpencode({
         baseUrl: baseUrl ?? "",
