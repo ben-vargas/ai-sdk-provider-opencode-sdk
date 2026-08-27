@@ -11,10 +11,16 @@ findings; anything it defers further must stay on this list with a reason.
    additional watchdog (design doc §2.2 doGenerate row) is not wired in. Any
    post-dispatch `wait` failure must be reconciled internally (never surfaced
    retryable) per the stage-3 phase rule.
-   _Stage-6 evidence:_ `wait` is now implemented on the beta-source server
-   but **resolved before turn completion** (~2.8 s into a 7–14 s turn) — it
-   must not be treated as a completion signal without first pinning down its
-   semantics upstream (`spike/artifacts/12-beta-src-verification.json`).
+   _Stage-6 evidence (corrected on review):_ `wait` is now implemented on
+   the beta-source server and, with execution confirmed started before the
+   call, **resolved within event-stream latency of
+   `session.execution.succeeded`** on long busy turns (8317 ms vs 8320 ms,
+   21229 ms vs 21229 ms) — it tracks turn completion on this build. An
+   earlier mid-turn-resolution reading (~2.8 s) lacked terminal-event
+   correlation and was a measurement artifact. Wait remains a watchdog
+   candidate only: its behavior under steer/queue/interrupt/error paths is
+   unpinned upstream (`spike/artifacts/12-beta-src-verification.json` →
+   `waitBusy`).
 2. **`session.log` catch-up.** SSE-drop recovery via the durable log
    (`session.log({after, follow})`, sequence numbers) is not implemented; the
    reducer's input layer already normalizes `SessionLogItem` vs live

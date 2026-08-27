@@ -24,8 +24,10 @@ serve`):
 - The source-built server speaks the pinned client's contract **verbatim**:
   flat `session.prompt` bodies, `session.inbox.*`/`session.execution.*`/
   `session.text.delta` events, `{interrupted}` interrupt body, form/inbox
-  routes, `/openapi.json` with all 112 routes the client generation expects
-  (our integration suite asserts client-routes ⊆ server-spec and passes a
+  routes, `/openapi.json` covering every operation the client generation
+  expects — 130 method+path pairs over 110 unique paths, against a server
+  document of 112 paths / 133 operations
+  (our integration suite asserts client-operations ⊆ server-spec and passes a
   full prompt→stream→finish/abort/queue/approval matrix against it). So the
   contract itself is fine — **the only way to obtain a matching server today
   is building the beta branch from source with bun**, which no downstream

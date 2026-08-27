@@ -179,14 +179,24 @@ bun  spike/11-migration-fresh.mjs
 **Server:** `anomalyco/opencode` branch `beta` **built from source** at commit
 `f4a9b930` (the commit matching our pinned `@opencode-ai/client@0.0.0-beta-18286`),
 run via `bun run --cwd packages/cli --conditions=browser src/index.ts serve`
-with isolated XDG homes and a sandbox workdir (`~/.cache/opencode-beta-sandbox`).
+with isolated XDG homes, a fake HOME (`HOME` + `OPENCODE_TEST_HOME`), a
+minimal allowlisted environment, and a tmp-rooted sandbox workdir
+(`$TMPDIR/opencode-beta-sandbox`). The sandbox must live outside the real
+home: the server's config discovery walks upward from the session directory
+to the filesystem root looking for `.opencode`/`.claude`/`.agents`, and loads
+`$HOME/.claude` + `$HOME/.agents` directly, so both a fake home and a
+home-free workdir ancestry are required for isolation.
 This is the first live server that actually speaks the pinned client's
 contract — every stage-0 answer that came from the mismatched dev CLI is
 re-examined below. Evidence: `spike/artifacts/12-beta-src-verification.json`,
-`spike/artifacts/12b-beta-src-file-uris.json`, and the gated integration suite
-(`npm run test:integration`), which passes 12/12 against this server
-(round-trip, doGenerate reconciliation, abort pre/post delivery, busy+queue,
-`data:` attach, a real two-phase approval round-trip, contract snapshot).
+`spike/artifacts/12b-beta-src-file-uris.json` (both artifacts embed a
+`provenance` block binding the capture to source commit `f4a9b930`, the
+serve build's health `{version, pid}`, and pinned client
+`0.0.0-beta-18286`), and the gated integration suite
+(`npm run test:integration`), which passes 11/11 against this server
+(round-trip incl. doGenerate reconciliation and session pinning, abort
+pre/post delivery, busy+queue, `data:` attach, a real two-phase approval
+round-trip, contract snapshot, service backend).
 
 Headline: **the beta-source server speaks the pinned contract verbatim** —
 flat `session.prompt` bodies, `session.inbox.*`/`session.execution.*`/
@@ -203,7 +213,7 @@ this provider.
 | Server default `delivery` is `"steer"` when omitted                       | **Confirmed** — receipt and stored inbox item say `delivery:"steer"` (`12` → `simpleTurn`)                                                                                                                                                                                                                                                                                          | No — provider keeps sending explicit `"queue"`                                                                                                                  |
 | Busy prompt never 409s (`SessionBusyError` untriggerable)                 | **Confirmed** — prompting a busy session with delivery omitted (admitted as steer) or `queue` always succeeds; no `ConflictError`/`SessionBusyError` observed (`12` → `busy`, integration `busy-queue.test.ts`)                                                                                                                                                                     | No — busy-retry path stays as defensive code                                                                                                                    |
 | Receipt `id` = stored user message id; correlation is ordering-based      | **Confirmed** — `receipt.id` is the stored user message id; `step.started` payloads carry only `{sessionID, assistantMessageID, agent, model}` — still no key linking back to the inbox id (`12` → `simpleTurn.events`)                                                                                                                                                             | No — exclusive-session caveat stands                                                                                                                            |
-| `session.wait` unimplemented (503/500)                                    | **Changed** — implemented: resolves ~instantly on an idle session and resolves without error on a busy one. BUT it resolved **~2.8 s after prompting** a turn that takes 7–14 s, i.e. before `session.execution.succeeded` — it is NOT a turn-completion signal on this build (`12` → `waitIdle`, `waitBusy`)                                                                       | No shipped change (wait was never wired in); the deferred watchdog must not treat `wait` resolution as completion                                               |
+| `session.wait` unimplemented (503/500)                                    | **Changed** — implemented: resolves ~instantly on an idle session; on a busy long turn (execution confirmed started before the call) it resolved **within event-stream latency of `session.execution.succeeded`** (two captures: 8317 ms vs 8320 ms, 21229 ms vs 21229 ms) — i.e. it tracks turn completion on this build. An earlier capture suggesting mid-turn resolution (~2.8 s) had no terminal-event correlation and was a measurement artifact (`12` → `waitIdle`, `waitBusy.waitResolvedDeltaMs`/`executionSucceededDeltaMs`) | No shipped change (wait was never wired in); the deferred watchdog may use `wait` as a completion backstop, but its semantics under steer/queue/error paths stay unpinned upstream |
 | `server.connected` emitted immediately on subscribe; live-only, no replay | **Confirmed** (`12` → `serverConnected`; readiness handshake works in every integration test)                                                                                                                                                                                                                                                                                       | No                                                                                                                                                              |
 | One turn = one assistant message refuted; per-step token increments       | **Confirmed** — a bash-tool turn produced 2 assistant messages (`finish:"tool-calls"` then `"stop"`), each carrying exactly its own step's tokens (`12` → `multiStep`)                                                                                                                                                                                                              | No — reducer already aggregates all messages of a turn                                                                                                          |
 | `SessionInfo.tokens` cumulative stays all-zero                            | **Changed** — now populated and cumulative across the session (12220/33/88 after two steps of 6061+6159/24+9/47+41); `session.usage.updated` events fire and are **cumulative session totals**, not per-turn deltas (`12` → `multiStep.usage`)                                                                                                                                      | No — provider sums per-step `step.ended` tokens, which remains the correct per-turn number                                                                      |
@@ -226,9 +236,12 @@ New beta-only observations:
   `permission.asked`, execution blocks, `permission.reply` (`"once"`) resumes
   it. The provider's two-phase approval flow passes against this live server
   (`integration/approval.test.ts`).
-- **OpenAPI lives at `/openapi.json`** (`GET /doc` 500s); 112 routes; the
-  pinned client's full route set is present at commit `f4a9b930` (integration
-  `contract.test.ts` asserts client ⊆ server). The event payload union is
+- **OpenAPI lives at `/openapi.json`** (`GET /doc` 500s); the document
+  carries 112 paths / 133 operations, and every operation the pinned client
+  generation speaks (130 method+path pairs over 110 unique paths) is present
+  at commit `f4a9b930` (integration `contract.test.ts` asserts
+  client-operations ⊆ server-spec with segment-wise template matching, and
+  reports server-only operations per method). The event payload union is
   **not** described in the spec — `data` is an opaque `V2EventEncoded` JSON
   string, so event-name compatibility cannot be checked from the document.
 - **`session.prompt` has no `model` field** on this contract: model is session
@@ -256,18 +269,23 @@ password}`, and `Service.discover({file})` resolves it — including the
 ## Reproduction
 
 ```sh
-# harness (idempotent clone+install+serve, isolated XDG homes):
+# harness (idempotent clone+install+serve, isolated XDG homes + fake HOME):
 npm run test:integration
-# or manually:
-SBOX=~/.cache/opencode-beta-sandbox
-cd $SBOX/workdir && env XDG_DATA_HOME=$SBOX/data XDG_STATE_HOME=$SBOX/state \
+# or manually (env -i + fake HOME/OPENCODE_TEST_HOME + tmp sandbox are all
+# required for isolation from real user configuration):
+SBOX=$TMPDIR/opencode-beta-sandbox
+mkdir -p $SBOX/{data,state,config,cache,home,workdir}
+cd $SBOX/workdir && env -i PATH="$PATH" HOME=$SBOX/home \
+  OPENCODE_TEST_HOME=$SBOX/home TMPDIR=$TMPDIR \
+  XDG_DATA_HOME=$SBOX/data XDG_STATE_HOME=$SBOX/state \
   XDG_CONFIG_HOME=$SBOX/config XDG_CACHE_HOME=$SBOX/cache \
   OPENCODE_PASSWORD=pw OPENCODE_CONFIG_CONTENT='{"permission":{"bash":"ask"}}' \
   bun run --cwd ~/.cache/opencode-beta-src/packages/cli --conditions=browser \
     src/index.ts serve --port 14196
 
 BETA_SRC_URL=http://127.0.0.1:14196 BETA_SRC_PASSWORD=pw \
-  BETA_SRC_WORKDIR=$HOME/.cache/opencode-beta-sandbox/workdir \
+  BETA_SRC_WORKDIR=$TMPDIR/opencode-beta-sandbox/workdir \
+  BETA_SRC_DIR=$HOME/.cache/opencode-beta-src \
   node spike/12-beta-src-verification.mjs
 # same env:
 node spike/12b-beta-src-file-uris.mjs
