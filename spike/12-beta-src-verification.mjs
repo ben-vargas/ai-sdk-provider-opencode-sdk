@@ -2,23 +2,30 @@
 // (the only server that speaks the pinned client's contract). Re-runs the
 // spike experiments whose stage-0 answers came from the mismatched dev CLI.
 //
-// Server: start via the integration harness (or manually):
-//   SBOX=~/.cache/opencode-beta-sandbox
-//   cd $SBOX/workdir && env XDG_DATA_HOME=$SBOX/data XDG_STATE_HOME=$SBOX/state \
+// Server: start via the integration harness (or manually — note the fake
+// HOME/OPENCODE_TEST_HOME and the tmp-rooted sandbox, both required so the
+// server cannot reach real user configuration):
+//   SBOX=$TMPDIR/opencode-beta-sandbox
+//   cd $SBOX/workdir && env -i PATH="$PATH" HOME=$SBOX/home \
+//     OPENCODE_TEST_HOME=$SBOX/home TMPDIR=$TMPDIR \
+//     XDG_DATA_HOME=$SBOX/data XDG_STATE_HOME=$SBOX/state \
 //     XDG_CONFIG_HOME=$SBOX/config XDG_CACHE_HOME=$SBOX/cache \
 //     OPENCODE_PASSWORD=<pw> OPENCODE_CONFIG_CONTENT='{"permission":{"bash":"ask"}}' \
 //     bun run --cwd ~/.cache/opencode-beta-src/packages/cli --conditions=browser \
 //       src/index.ts serve --port 14196
 // Run:
 //   BETA_SRC_URL=http://127.0.0.1:14196 BETA_SRC_PASSWORD=<pw> \
-//     BETA_SRC_WORKDIR=$HOME/.cache/opencode-beta-sandbox/workdir \
+//     BETA_SRC_WORKDIR=$TMPDIR/opencode-beta-sandbox/workdir \
+//     BETA_SRC_DIR=$HOME/.cache/opencode-beta-src \
 //     node spike/12-beta-src-verification.mjs
 import { OpenCode } from "@opencode-ai/client";
-import { saveArtifact, capture, sleep } from "./lib.mjs";
+import { saveArtifact, capture, captureProvenance, sleep } from "./lib.mjs";
 
 const BASE_URL = process.env.BETA_SRC_URL;
 const PASSWORD = process.env.BETA_SRC_PASSWORD;
 const WORKDIR = process.env.BETA_SRC_WORKDIR;
+// Optional: source checkout, for Git-SHA provenance in the artifact.
+const SRC_DIR = process.env.BETA_SRC_DIR;
 if (!BASE_URL || !PASSWORD || !WORKDIR) {
   console.error("BETA_SRC_URL, BETA_SRC_PASSWORD, BETA_SRC_WORKDIR required");
   process.exit(1);
@@ -32,6 +39,12 @@ const client = OpenCode.make({
 
 const MODEL = { providerID: "opencode", id: "nemotron-3.5-lightning-free" };
 const out = {};
+out.provenance = await captureProvenance({
+  betaClient: client,
+  baseUrl: BASE_URL,
+  workdir: WORKDIR,
+  srcDir: SRC_DIR,
+});
 
 function collect(filter) {
   const events = [];
@@ -128,6 +141,11 @@ const strip = (event) => {
 }
 
 // ---- exp3: session.wait (idle, then busy) --------------------------------
+// The busy case must establish an ordering, not just a resolution time:
+// (1) prove execution actually started before wait() is called, (2) use a
+// long-running prompt, (3) keep the collector alive until the terminal
+// `session.execution.succeeded` so the artifact records whether wait
+// resolved before or after turn completion.
 {
   const session = await newSession("verify-wait");
   out.waitIdle = await capture("wait-on-idle-session", () =>
@@ -140,24 +158,37 @@ const strip = (event) => {
   await sleep(300);
   await client.session.prompt({
     sessionID: session.id,
-    text: "Reply with exactly: WAITED",
+    text: "Write a story about a lighthouse in about 150 words.",
   });
+  const started = await waitFor(
+    mine.events,
+    (e) => e.type === "session.execution.started",
+    30_000,
+  );
   const startedAt = Date.now();
   out.waitBusy = await capture("wait-on-busy-session", () =>
     Promise.race([
       client.session
         .wait({ sessionID: session.id })
         .then(() => `resolved after ${Date.now() - startedAt}ms`),
-      sleep(60_000).then(() => "timeout-60s"),
+      sleep(120_000).then(() => "timeout-120s"),
     ]),
   );
-  const succeededAt = mine.events.find(
+  const waitResolvedAt = Date.now();
+  const succeeded = await waitFor(
+    mine.events,
     (e) => e.type === "session.execution.succeeded",
-  )?.receivedAt;
-  out.waitBusy.executionSucceededDeltaMs =
-    succeededAt === undefined ? undefined : succeededAt - startedAt;
+    120_000,
+  );
   mine.stop();
   await mine.done;
+  out.waitBusy.executionStartedBeforeWaitCall = started !== undefined;
+  out.waitBusy.waitResolvedDeltaMs = waitResolvedAt - startedAt;
+  out.waitBusy.executionSucceededDeltaMs =
+    succeeded === undefined ? undefined : succeeded.receivedAt - startedAt;
+  out.waitBusy.waitResolvedBeforeExecutionSucceeded =
+    succeeded === undefined ? undefined : waitResolvedAt < succeeded.receivedAt;
+  out.waitBusy.eventSequence = mine.events.map((e) => e.type);
 }
 
 // ---- exp4: busy semantics — omitted delivery + steer + queue -------------
@@ -250,7 +281,15 @@ const strip = (event) => {
     sessionID: session.id,
     text: "Write a story about a lighthouse in about 150 words.",
   });
-  await waitFor(mine.events, (e) => e.type === "session.text.delta", 45_000);
+  // First streamed delta of either kind: reasoning-heavy models emit
+  // `text.delta` only in a terminal burst, so gating on text alone can
+  // interrupt an already-finished turn.
+  await waitFor(
+    mine.events,
+    (e) =>
+      e.type === "session.text.delta" || e.type === "session.reasoning.delta",
+    45_000,
+  );
   out.interrupt = await capture("interrupt-continue-false", () =>
     client.session.interrupt({ sessionID: session.id, continue: false }),
   );
@@ -373,7 +412,7 @@ const strip = (event) => {
     const timer = setTimeout(() => controller.abort(), 5000);
     try {
       for await (const item of client.session.log(
-        { sessionID: session.id },
+        { sessionID: session.id, after: 0 },
         { signal: controller.signal },
       )) {
         items.push(item);
@@ -408,6 +447,8 @@ console.log(
         out.simpleTurn?.userMessageIdEqualsReceiptId,
       waitIdle: out.waitIdle?.value ?? out.waitIdle?.error?.message,
       waitBusy: out.waitBusy?.value ?? out.waitBusy?.error?.message,
+      waitBusySucceededDeltaMs: out.waitBusy?.executionSucceededDeltaMs,
+      waitBeforeSucceeded: out.waitBusy?.waitResolvedBeforeExecutionSucceeded,
       busyOmittedOk: out.busy?.whileBusyOmitted?.ok,
       busyOmittedDelivery: out.busy?.whileBusyOmitted?.value?.delivery,
       busyQueueOk: out.busy?.queued?.ok,

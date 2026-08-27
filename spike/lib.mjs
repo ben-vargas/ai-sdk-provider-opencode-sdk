@@ -191,6 +191,62 @@ export function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/**
+ * Provenance block for beta-source verification artifacts: binds a capture
+ * to the exact server it ran against (health carries the serve version+pid),
+ * the source checkout's Git SHA, and the pinned client version — so the
+ * artifact itself, not just surrounding docs, attributes the evidence.
+ */
+export async function captureProvenance({
+  betaClient,
+  baseUrl,
+  workdir,
+  srcDir,
+}) {
+  const { execSync } = await import("node:child_process");
+  const { readFileSync, existsSync } = await import("node:fs");
+  let srcGitHead;
+  if (srcDir && existsSync(join(srcDir, ".git"))) {
+    try {
+      srcGitHead = execSync(`git -C "${srcDir}" rev-parse HEAD`, {
+        encoding: "utf8",
+      }).trim();
+    } catch {
+      srcGitHead = undefined;
+    }
+  }
+  let pinnedClientVersion;
+  try {
+    pinnedClientVersion = JSON.parse(
+      readFileSync(
+        fileURLToPath(
+          new URL(
+            "../node_modules/@opencode-ai/client/package.json",
+            import.meta.url,
+          ),
+        ),
+        "utf8",
+      ),
+    ).version;
+  } catch {
+    pinnedClientVersion = undefined;
+  }
+  return {
+    capturedAt: new Date().toISOString(),
+    betaSrcUrl: baseUrl,
+    workdir,
+    srcDir,
+    srcGitHead,
+    pinnedClientVersion,
+    serverHealth: await capture("provenance-health", () =>
+      betaClient.health.get(),
+    ),
+    serverInfo: await capture("provenance-server-get", () =>
+      betaClient.server.get(),
+    ),
+  };
+}
+
 /** Extract sessionID from an event, handling the form.created nesting. */
 export function eventSessionID(event) {
   return event?.data?.sessionID ?? event?.data?.form?.sessionID;

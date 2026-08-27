@@ -4,11 +4,13 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { OpenCode } from "@opencode-ai/client";
-import { saveArtifact, sleep } from "./lib.mjs";
+import { saveArtifact, captureProvenance, sleep } from "./lib.mjs";
 
 const BASE_URL = process.env.BETA_SRC_URL;
 const PASSWORD = process.env.BETA_SRC_PASSWORD;
 const WORKDIR = process.env.BETA_SRC_WORKDIR;
+// Optional: source checkout, for Git-SHA provenance in the artifact.
+const SRC_DIR = process.env.BETA_SRC_DIR;
 if (!BASE_URL || !PASSWORD || !WORKDIR) {
   console.error("BETA_SRC_URL, BETA_SRC_PASSWORD, BETA_SRC_WORKDIR required");
   process.exit(1);
@@ -89,6 +91,12 @@ async function tryUri(label, uri, { expectAnswer = false } = {}) {
 }
 
 const out = {};
+out.provenance = await captureProvenance({
+  betaClient: client,
+  baseUrl: BASE_URL,
+  workdir: WORKDIR,
+  srcDir: SRC_DIR,
+});
 out.dataUri = await tryUri("data", `data:image/png;base64,${RED_PNG_BASE64}`, {
   expectAnswer: true,
 });

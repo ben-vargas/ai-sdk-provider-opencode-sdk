@@ -1,4 +1,32 @@
 {
+  "provenance": {
+    "capturedAt": "2026-08-27T01:36:07.141Z",
+    "betaSrcUrl": "http://127.0.0.1:14297",
+    "workdir": "/var/folders/3m/rkhd81k52n799tn9h5zwpxpc0000gn/T//opencode-beta-sandbox/workdir",
+    "srcDir": "/Users/ben/.cache/opencode-beta-src",
+    "srcGitHead": "f4a9b93013695aa7a1b56ab5d91855965d5cc727",
+    "pinnedClientVersion": "0.0.0-beta-18286",
+    "serverHealth": {
+      "label": "provenance-health",
+      "ok": true,
+      "ms": 15,
+      "value": {
+        "healthy": true,
+        "version": "local",
+        "pid": 81959
+      }
+    },
+    "serverInfo": {
+      "label": "provenance-server-get",
+      "ok": true,
+      "ms": 1,
+      "value": {
+        "urls": [
+          "http://127.0.0.1:14297"
+        ]
+      }
+    }
+  },
   "dataUri": {
     "label": "data",
     "uri": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAb0lEQVR4nO3PAQkAAAyEwO9feoshgnABdLep8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3IPanc8OLDQitxAAAAAElFTkSuQmCC",
@@ -22,7 +50,7 @@
   },
   "fileUriReadable": {
     "label": "file-readable",
-    "uri": "file:///Users/ben/.cache/opencode-beta-sandbox/workdir/red-square.png",
+    "uri": "file:///var/folders/3m/rkhd81k52n799tn9h5zwpxpc0000gn/T/opencode-beta-sandbox/workdir/red-square.png",
     "promptRejected": false,
     "storedAttachment": [
       {
@@ -30,7 +58,7 @@
         "name": "red-square.png",
         "source": {
           "type": "uri",
-          "uri": "file:///Users/ben/.cache/opencode-beta-sandbox/workdir/red-square.png"
+          "uri": "file:///var/folders/3m/rkhd81k52n799tn9h5zwpxpc0000gn/T/opencode-beta-sandbox/workdir/red-square.png"
         },
         "dataBytes": 224
       }
@@ -38,7 +66,7 @@
     "answers": [
       {
         "finish": "tool-calls",
-        "text": "One-color image — verifying the dominant hue."
+        "text": "Your image is solid red — confirming now."
       },
       {
         "finish": "stop",
