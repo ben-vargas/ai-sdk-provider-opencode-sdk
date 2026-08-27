@@ -97,10 +97,13 @@ for the full setting-by-setting migration.
   instruction baseline and re-renders on every turn — so a system prompt
   applies to the whole session, not just its first prompt (the v4-era
   limitation). Writes are reconciled: an unchanged value skips the request,
-  and dropping system content removes the entry rather than leaking it into
-  later turns. Falls back to the delimited prepend plus an `unsupported`
-  warning when the route is absent, the value exceeds the server's
-  8192-byte cap (measured on the JSON encoding), or the write fails.
+  and any turn that does not write its own value — because it carries no
+  system content, or because the value is over the cap or the write failed
+  — clears the entry first, so a stale system prompt can never outrank the
+  turn that replaced it. Falls back to the delimited prepend plus an
+  `unsupported` warning when the route is absent, the value exceeds the
+  server's 8192-byte cap (measured on the JSON encoding), or the write
+  fails; a clear that itself fails is reported in that warning too.
 - Gated live integration suite (`npm run test:integration`) driving the
   published `opencode2` binary in an isolated sandbox, contract-drift
   snapshot test, and packed-artifact smoke test.

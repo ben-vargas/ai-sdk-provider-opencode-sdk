@@ -602,7 +602,12 @@ UTF-8 length, and JSON-escaped characters their escaped length.
 - Writes are reconciled, not blind. An unchanged value skips the request (a
   redundant put announces another durable system message); a call that drops
   its system content **removes** the entry rather than leaking a previous
-  call's system prompt into later turns.
+  call's system prompt into later turns. So does a call that cannot write
+  its own value (over the cap, or a failed put): leaving the old value there
+  would keep a stale, higher-priority system prompt governing the session
+  while the new content only reached the model as prepended user text.
+  `remove` is idempotent on this build (removing an absent key succeeds),
+  which is what makes the reconciling clear cheap enough to always attempt.
 - The fallback is feature-detected, not assumed: a port without the route, a
   value over the cap, or a failed write degrades to the delimited prepend and
   emits an `unsupported` warning naming the actual reason. Only an explicit
