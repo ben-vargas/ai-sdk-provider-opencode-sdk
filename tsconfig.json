@@ -22,6 +22,6 @@
     "exactOptionalPropertyTypes": false,
     "noUncheckedIndexedAccess": true
   },
-  "include": ["src/**/*", "test/**/*"],
+  "include": ["src/**/*", "test/**/*", "integration/**/*"],
   "exclude": ["node_modules", "dist", "examples", "src/**/*.test.ts"]
 }
