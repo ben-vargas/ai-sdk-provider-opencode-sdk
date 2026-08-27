@@ -7,9 +7,13 @@
  *     directory OUTSIDE the worktree (idempotent; reuses a clone already at
  *     the right commit),
  *   - `bun install` it,
- *   - start `opencode serve` from source with isolated XDG homes and a
- *     sandbox workspace directory (never the global opencode state, never
- *     this worktree),
+ *   - start `opencode serve` from source with isolated XDG homes, an
+ *     isolated HOME/`OPENCODE_TEST_HOME`, a minimal environment, and a
+ *     sandbox workspace directory OUTSIDE the real home (the server's config
+ *     discovery walks upward from `location.directory` to the filesystem
+ *     root looking for `.opencode`/`.claude`/`.agents`, and loads
+ *     `$HOME/.claude` + `$HOME/.agents` directly — so isolation requires
+ *     both a fake home and a workdir whose ancestors hold no real config),
  *   - health-check and expose the endpoint (+ Basic-auth header — the beta
  *     server requires a password on every route),
  *   - tear down cleanly.
@@ -20,14 +24,15 @@
  *   - `OPENCODE_BETA_SRC_DIR`: clone cache location
  *     (default `~/.cache/opencode-beta-src`).
  *   - `OPENCODE_BETA_SANDBOX_DIR`: sandbox root for XDG homes + workdir
- *     (default `~/.cache/opencode-beta-sandbox`).
+ *     (default `$TMPDIR/opencode-beta-sandbox` — deliberately outside the
+ *     real home so upward config discovery cannot reach it).
  */
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 /** Upstream commit matching the pinned `@opencode-ai/client@0.0.0-beta-18286`. */
@@ -195,6 +200,11 @@ async function copyZenAuth(dataHome: string): Promise<boolean> {
   return copied;
 }
 
+/** A child is gone once it has either an exit code or a fatal signal. */
+function hasExited(child: ChildProcess): boolean {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
 async function waitForHealth(
   baseUrl: string,
   authHeader: string,
@@ -203,8 +213,11 @@ async function waitForHealth(
   const deadline = Date.now() + HEALTH_TIMEOUT_MS;
   let lastError = "no response";
   while (Date.now() < deadline) {
-    if (child !== undefined && child.exitCode !== null) {
-      fail("server start", `serve exited with code ${child.exitCode}`);
+    if (child !== undefined && hasExited(child)) {
+      fail(
+        "server start",
+        `serve exited with code ${child.exitCode} signal ${child.signalCode}`,
+      );
     }
     try {
       const response = await fetch(`${baseUrl}/api/health`, {
@@ -261,7 +274,7 @@ async function fetchDefaultModel(
 export async function startBetaServer(): Promise<BetaServerHandle> {
   const sandboxRoot =
     process.env.OPENCODE_BETA_SANDBOX_DIR ??
-    join(homedir(), ".cache", "opencode-beta-sandbox");
+    join(tmpdir(), "opencode-beta-sandbox");
   const workdir = join(sandboxRoot, "workdir");
   await mkdir(workdir, { recursive: true });
 
@@ -293,8 +306,9 @@ export async function startBetaServer(): Promise<BetaServerHandle> {
   const stateHome = join(sandboxRoot, "state");
   const configHome = join(sandboxRoot, "config");
   const cacheHome = join(sandboxRoot, "cache");
+  const homeDir = join(sandboxRoot, "home");
   await Promise.all(
-    [dataHome, stateHome, configHome, cacheHome].map((dir) =>
+    [dataHome, stateHome, configHome, cacheHome, homeDir].map((dir) =>
       mkdir(dir, { recursive: true }),
     ),
   );
@@ -321,8 +335,17 @@ export async function startBetaServer(): Promise<BetaServerHandle> {
     ],
     {
       cwd: workdir,
+      // Minimal allowlisted environment: the server (and every tool it
+      // spawns) must not inherit the real HOME or ambient variables. The
+      // fake HOME + OPENCODE_TEST_HOME redirect `$HOME/.claude`,
+      // `$HOME/.agents`, and `~` expansion into the sandbox.
       env: {
-        ...process.env,
+        PATH: process.env.PATH ?? "",
+        HOME: homeDir,
+        OPENCODE_TEST_HOME: homeDir,
+        ...(process.env.TMPDIR !== undefined
+          ? { TMPDIR: process.env.TMPDIR }
+          : {}),
         XDG_DATA_HOME: dataHome,
         XDG_STATE_HOME: stateHome,
         XDG_CONFIG_HOME: configHome,
@@ -360,7 +383,7 @@ export async function startBetaServer(): Promise<BetaServerHandle> {
     sourceDir,
     stop: async () => {
       await writeFile(logFile, logChunks.join(""), "utf8").catch(() => {});
-      if (child.exitCode !== null) {
+      if (hasExited(child)) {
         return;
       }
       const exited = new Promise<void>((resolve) => {

@@ -6,14 +6,15 @@
  * the Basic-auth credential the provider merges automatically.
  *
  * The test spawns its own service instance with a fully separate sandbox
- * (own XDG homes, own SQLite database) so it cannot contend with the shared
- * harness server.
+ * (own XDG homes, own fake HOME, own SQLite database, minimal environment —
+ * mirroring the isolation rules in `harness/beta-server.ts`) so it cannot
+ * contend with the shared harness server or reach real user configuration.
  */
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
@@ -37,7 +38,9 @@ describe.skipIf(!canRun)(
     reason: suiteReason,
   }),
   () => {
-    const sandbox = join(homedir(), ".cache", "opencode-beta-service-sandbox");
+    // Outside the real home: the server's config discovery walks upward
+    // from the workdir to the filesystem root.
+    const sandbox = join(tmpdir(), "opencode-beta-service-sandbox");
     let stopChild: (() => Promise<void>) | undefined;
 
     afterAll(async () => {
@@ -50,6 +53,7 @@ describe.skipIf(!canRun)(
       const dataHome = join(sandbox, "data");
       const stateHome = join(sandbox, "state");
       const workdir = join(sandbox, "workdir");
+      const homeDir = join(sandbox, "home");
       await Promise.all(
         [
           join(dataHome, "opencode"),
@@ -57,6 +61,7 @@ describe.skipIf(!canRun)(
           join(sandbox, "config"),
           join(sandbox, "cache"),
           workdir,
+          homeDir,
         ].map((dir) => mkdir(dir, { recursive: true })),
       );
       const authSource = join(homedir(), ".local", "share", "opencode");
@@ -104,8 +109,15 @@ describe.skipIf(!canRun)(
         ],
         {
           cwd: workdir,
+          // Minimal allowlisted environment + fake HOME, matching the
+          // harness server's isolation rules.
           env: {
-            ...process.env,
+            PATH: process.env.PATH ?? "",
+            HOME: homeDir,
+            OPENCODE_TEST_HOME: homeDir,
+            ...(process.env.TMPDIR !== undefined
+              ? { TMPDIR: process.env.TMPDIR }
+              : {}),
             XDG_DATA_HOME: dataHome,
             XDG_STATE_HOME: stateHome,
             XDG_CONFIG_HOME: join(sandbox, "config"),
@@ -115,7 +127,9 @@ describe.skipIf(!canRun)(
         },
       );
       stopChild = async () => {
-        if (child.exitCode === null) {
+        // signalCode check: a signal-killed child keeps exitCode === null,
+        // and waiting on "exit" after the fact would hang teardown.
+        if (child.exitCode === null && child.signalCode === null) {
           const exited = new Promise<void>((resolve) => {
             child.once("exit", () => resolve());
           });
