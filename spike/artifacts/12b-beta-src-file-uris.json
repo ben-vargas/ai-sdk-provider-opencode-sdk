@@ -1,0 +1,73 @@
+{
+  "dataUri": {
+    "label": "data",
+    "uri": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAb0lEQVR4nO3PAQkAAAyEwO9feoshgnABdLep8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3IPanc8OLDQitxAAAAAElFTkSuQmCC",
+    "promptRejected": false,
+    "storedAttachment": [
+      {
+        "mime": "image/png",
+        "name": "red-square.png",
+        "source": {
+          "type": "inline"
+        },
+        "dataBytes": 224
+      }
+    ],
+    "answers": [
+      {
+        "finish": "stop",
+        "text": "Red"
+      }
+    ]
+  },
+  "fileUriReadable": {
+    "label": "file-readable",
+    "uri": "file:///Users/ben/.cache/opencode-beta-sandbox/workdir/red-square.png",
+    "promptRejected": false,
+    "storedAttachment": [
+      {
+        "mime": "image/png",
+        "name": "red-square.png",
+        "source": {
+          "type": "uri",
+          "uri": "file:///Users/ben/.cache/opencode-beta-sandbox/workdir/red-square.png"
+        },
+        "dataBytes": 224
+      }
+    ],
+    "answers": [
+      {
+        "finish": "tool-calls",
+        "text": "One-color image — verifying the dominant hue."
+      },
+      {
+        "finish": "stop",
+        "text": "Red"
+      }
+    ]
+  },
+  "fileUriMissing": {
+    "label": "file-missing",
+    "uri": "file:///tmp/does-not-exist-for-verify.png",
+    "promptRejected": true,
+    "error": {
+      "message": "Unable to read attachment: file:///tmp/does-not-exist-for-verify.png"
+    }
+  },
+  "httpsUri": {
+    "label": "https",
+    "uri": "https://raw.githubusercontent.com/github/explore/main/topics/git/git.png",
+    "promptRejected": true,
+    "error": {
+      "message": "Unsupported attachment URI: https://raw.githubusercontent.com/github/explore/main/topics/git/git.png"
+    }
+  },
+  "relativePath": {
+    "label": "relative",
+    "uri": "red-square.png",
+    "promptRejected": true,
+    "error": {
+      "message": "Invalid attachment URI: red-square.png"
+    }
+  }
+}

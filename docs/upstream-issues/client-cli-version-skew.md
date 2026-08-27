@@ -14,6 +14,34 @@ The published packages that make up a working v2 setup are not release-paired, a
 
 So "install the beta client + install a CLI" currently cannot produce a working pair, and nothing in the version strings reveals that: all three artifacts use `0.0.0-*` builds with a generic `info.version: "1.0.0"` in `/doc`, and `client.health.get()` version gating has nothing documented to gate on.
 
+## Stage-6 addendum: source build is the only compatible server; embedded host is Bun-only
+
+Verified 2026-08-26 against the `beta` branch **built from source** at
+`f4a9b930` (the commit matching client build `0.0.0-beta-18286`, via
+`bun install` + `bun run --cwd packages/cli --conditions=browser src/index.ts
+serve`):
+
+- The source-built server speaks the pinned client's contract **verbatim**:
+  flat `session.prompt` bodies, `session.inbox.*`/`session.execution.*`/
+  `session.text.delta` events, `{interrupted}` interrupt body, form/inbox
+  routes, `/openapi.json` with all 112 routes the client generation expects
+  (our integration suite asserts client-routes ⊆ server-spec and passes a
+  full prompt→stream→finish/abort/queue/approval matrix against it). So the
+  contract itself is fine — **the only way to obtain a matching server today
+  is building the beta branch from source with bun**, which no downstream
+  consumer of the published npm packages can be expected to do.
+- The embedded-host alternative is closed off for Node consumers:
+  `@opencode-ai/sdk@0.0.0-beta-18286` ships extensionless relative ESM
+  imports (`import ... from "./promise"`), which Node cannot resolve
+  (`ERR_MODULE_NOT_FOUND`); it only runs under Bun. A provider package
+  cannot ship a `./embedded` entrypoint for Node users until the beta sdk
+  publishes Node-resolvable ESM (file extensions or an exports map).
+- Additional runtime requirement worth documenting: the beta server requires
+  HTTP Basic auth (`opencode:<password>`) on every route including
+  `/api/health`; foreground `serve` reads `OPENCODE_PASSWORD` or generates
+  and prints one. Clients pointed at a `baseUrl` need the credential — one
+  more thing `health.get()` gating cannot discover by itself today.
+
 ## Use case
 
 We maintain `ai-sdk-provider-opencode-sdk` (Vercel AI SDK provider). We develop against the typed beta client (the analysis-recommended path) but can only validate behavior against a live server — and today every live server speaks a different contract generation than the client we ship against. We had to build our reducer/fixtures purely from the generated types because captured live streams are not valid fixtures for the beta contract. Users hitting the skew see opaque `InvalidRequestError`/`UnsupportedContentType` failures with no hint that the problem is client↔server generation mismatch.

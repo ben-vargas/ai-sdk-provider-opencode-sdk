@@ -52,7 +52,7 @@ Route-for-route it matches the client, and `health.get`, `server.get` (`{urls:[]
 
 | `files[].uri`                                    | Accepted at prompt? | Stored user message             | Model outcome                                                                                                           |
 | ------------------------------------------------ | ------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `data:image/png;base64,…`                        | yes                 | `{uri, mime:"image/png", name}` | **Succeeded** — see ingestion note below                                                                      |
+| `data:image/png;base64,…`                        | yes                 | `{uri, mime:"image/png", name}` | **Succeeded** — see ingestion note below                                                                                |
 | `file:///abs/path.png`                           | yes                 | raw uri stored                  | **Turn failed**: `finish:"error"`, `error:{type:"unknown", message:"OpenAI Responses media must contain valid base64"}` |
 | relative `red-square.png` (in session directory) | yes                 | raw uri stored                  | same failure                                                                                                            |
 | absolute `/abs/path.png`                         | yes                 | raw uri stored                  | same failure                                                                                                            |
@@ -169,4 +169,92 @@ node spike/08-interrupt-resume.mjs
 node spike/09-service-and-stream.mjs   # needs the :14096 server up
 bun  spike/10-embedded-gaps.mjs
 bun  spike/11-migration-fresh.mjs
+```
+
+---
+
+# Beta-source server verification (stage 6)
+
+**Date:** 2026-08-26
+**Server:** `anomalyco/opencode` branch `beta` **built from source** at commit
+`f4a9b930` (the commit matching our pinned `@opencode-ai/client@0.0.0-beta-18286`),
+run via `bun run --cwd packages/cli --conditions=browser src/index.ts serve`
+with isolated XDG homes and a sandbox workdir (`~/.cache/opencode-beta-sandbox`).
+This is the first live server that actually speaks the pinned client's
+contract — every stage-0 answer that came from the mismatched dev CLI is
+re-examined below. Evidence: `spike/artifacts/12-beta-src-verification.json`,
+`spike/artifacts/12b-beta-src-file-uris.json`, and the gated integration suite
+(`npm run test:integration`), which passes 12/12 against this server
+(round-trip, doGenerate reconciliation, abort pre/post delivery, busy+queue,
+`data:` attach, a real two-phase approval round-trip, contract snapshot).
+
+Headline: **the beta-source server speaks the pinned contract verbatim** —
+flat `session.prompt` bodies, `session.inbox.*`/`session.execution.*`/
+`session.text.delta` event names, form/inbox/log routes present, Basic-auth
+password required on every route (`OPENCODE_PASSWORD`; the harness generates
+one and sends `Authorization: Basic opencode:<pw>`). The dev CLI's
+`session.next.*` contract is a different, older generation and is now dead to
+this provider.
+
+## Verdict table
+
+| Stage-0 finding (dev-CLI evidence)                                        | Beta-source verdict                                                                                                                                                                                                                                                                                                                                                                 | Shipped default affected?                                                                                                                                       |
+| ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Server default `delivery` is `"steer"` when omitted                       | **Confirmed** — receipt and stored inbox item say `delivery:"steer"` (`12` → `simpleTurn`)                                                                                                                                                                                                                                                                                          | No — provider keeps sending explicit `"queue"`                                                                                                                  |
+| Busy prompt never 409s (`SessionBusyError` untriggerable)                 | **Confirmed** — prompting a busy session with delivery omitted (admitted as steer) or `queue` always succeeds; no `ConflictError`/`SessionBusyError` observed (`12` → `busy`, integration `busy-queue.test.ts`)                                                                                                                                                                     | No — busy-retry path stays as defensive code                                                                                                                    |
+| Receipt `id` = stored user message id; correlation is ordering-based      | **Confirmed** — `receipt.id` is the stored user message id; `step.started` payloads carry only `{sessionID, assistantMessageID, agent, model}` — still no key linking back to the inbox id (`12` → `simpleTurn.events`)                                                                                                                                                             | No — exclusive-session caveat stands                                                                                                                            |
+| `session.wait` unimplemented (503/500)                                    | **Changed** — implemented: resolves ~instantly on an idle session and resolves without error on a busy one. BUT it resolved **~2.8 s after prompting** a turn that takes 7–14 s, i.e. before `session.execution.succeeded` — it is NOT a turn-completion signal on this build (`12` → `waitIdle`, `waitBusy`)                                                                       | No shipped change (wait was never wired in); the deferred watchdog must not treat `wait` resolution as completion                                               |
+| `server.connected` emitted immediately on subscribe; live-only, no replay | **Confirmed** (`12` → `serverConnected`; readiness handshake works in every integration test)                                                                                                                                                                                                                                                                                       | No                                                                                                                                                              |
+| One turn = one assistant message refuted; per-step token increments       | **Confirmed** — a bash-tool turn produced 2 assistant messages (`finish:"tool-calls"` then `"stop"`), each carrying exactly its own step's tokens (`12` → `multiStep`)                                                                                                                                                                                                              | No — reducer already aggregates all messages of a turn                                                                                                          |
+| `SessionInfo.tokens` cumulative stays all-zero                            | **Changed** — now populated and cumulative across the session (12220/33/88 after two steps of 6061+6159/24+9/47+41); `session.usage.updated` events fire and are **cumulative session totals**, not per-turn deltas (`12` → `multiStep.usage`)                                                                                                                                      | No — provider sums per-step `step.ended` tokens, which remains the correct per-turn number                                                                      |
+| `interrupt` returns 204/no body (contract gap vs client)                  | **Fixed upstream** — returns `{interrupted: true}` exactly as the client types expect; emits `session.execution.interrupted`; the partial assistant message keeps `finish:"error"` with `error:{type:"aborted", message:"Step interrupted"}` (`12` → `interrupt`)                                                                                                                   | No — provider already handles `execution.interrupted` and structured `aborted` errors                                                                           |
+| Steer does not abort the in-flight step                                   | **Confirmed** (single-step case) — with text streaming, the steered prompt was admitted mid-turn, the running turn completed fully (`finish:"stop"`, full story), then the steered prompt ran (`12` → `busy`). Multi-step supersession (remainder-of-turn dropped at step boundary) was not re-tested on this build                                                                 | No                                                                                                                                                              |
+| Files: `data:` only; server stores any URI raw, no validation/fetching    | **Refuted for beta** — the server now validates and ingests attachments at prompt time: `data:` works (stored `source:{type:"inline"}`); **readable `file:` URIs are read server-side** and normalized to base64+mime (model answered "Red"); unreadable `file:`, `https:`, and relative paths **reject the prompt** with a typed message instead of failing the turn later (`12b`) | No — converting everything to `data:` (`supportedUrls: {}`) remains correct and transport-independent; see deferred ledger for the optional `file:` passthrough |
+| `migration.v1.status` = "completed" doubles as "nothing to migrate"       | **Consistent** — "completed" on the (used, never-migrated) harness store (`12` → `migration`)                                                                                                                                                                                                                                                                                       | No                                                                                                                                                              |
+| `session.log` works (embedded host yielded the `log.synced` sentinel)     | **Changed nuance** — the route works but yields **only** the `log.synced` sentinel (with the session's latest `seq`) even with `after: 0` on a session holding 16 durable events; historical item replay is unimplemented (`12` → `sessionLog`)                                                                                                                                     | No shipped change (log catch-up was deferred); SSE-drop recovery must keep using the message store, not the durable log                                         |
+| Abort of `event.subscribe` throws `ClientError{reason:"Transport"}`       | **Confirmed** — same teardown behavior on the beta server (every integration run)                                                                                                                                                                                                                                                                                                   | No                                                                                                                                                              |
+
+New beta-only observations:
+
+- **Auth is mandatory**: every route (including `/api/health`) is behind Basic
+  auth `opencode:<password>`. In `serve` (default mode) the password comes from
+  `OPENCODE_PASSWORD` or is generated and printed; in `--service` mode it is
+  persisted into the service registration. Providers hitting a beta server via
+  `baseUrl` need `clientOptions.headers.Authorization`.
+- **Permissions work end-to-end**: with `OPENCODE_CONFIG_CONTENT=
+'{"permission":{"bash":"ask"}}'` a bash tool call emits a real
+  `permission.asked`, execution blocks, `permission.reply` (`"once"`) resumes
+  it. The provider's two-phase approval flow passes against this live server
+  (`integration/approval.test.ts`).
+- **OpenAPI lives at `/openapi.json`** (`GET /doc` 500s); 112 routes; the
+  pinned client's full route set is present at commit `f4a9b930` (integration
+  `contract.test.ts` asserts client ⊆ server). The event payload union is
+  **not** described in the spec — `data` is an opaque `V2EventEncoded` JSON
+  string, so event-name compatibility cannot be checked from the document.
+- **`session.prompt` has no `model` field** on this contract: model is session
+  state (`session.create`'s `model: {id, providerID}` or `switchModel`), which
+  matches the provider's session-establishment design.
+- `session.idle` was never observed (the `execution.*` terminal events are
+  authoritative), and the reasoning stream is extremely chatty
+  (`reasoning.started`/`ended` pairs per token burst) — the reducer's
+  tolerant handling absorbs both.
+
+## Reproduction
+
+```sh
+# harness (idempotent clone+install+serve, isolated XDG homes):
+npm run test:integration
+# or manually:
+SBOX=~/.cache/opencode-beta-sandbox
+cd $SBOX/workdir && env XDG_DATA_HOME=$SBOX/data XDG_STATE_HOME=$SBOX/state \
+  XDG_CONFIG_HOME=$SBOX/config XDG_CACHE_HOME=$SBOX/cache \
+  OPENCODE_PASSWORD=pw OPENCODE_CONFIG_CONTENT='{"permission":{"bash":"ask"}}' \
+  bun run --cwd ~/.cache/opencode-beta-src/packages/cli --conditions=browser \
+    src/index.ts serve --port 14196
+
+BETA_SRC_URL=http://127.0.0.1:14196 BETA_SRC_PASSWORD=pw \
+  BETA_SRC_WORKDIR=$HOME/.cache/opencode-beta-sandbox/workdir \
+  node spike/12-beta-src-verification.mjs
+# same env:
+node spike/12b-beta-src-file-uris.mjs
 ```

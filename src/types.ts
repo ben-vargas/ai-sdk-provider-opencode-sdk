@@ -168,19 +168,21 @@ export type OpencodeFormResponse =
 export type OpencodeFormPolicy = "cancel" | "wait";
 
 /**
- * A `data:` URI usable as a `files[].uri` prompt value. The only scheme
- * verified to reach the model end-to-end on current OpenCode v2 builds:
- * the server admits and stores any scheme without validation, but hands
- * `file:`/path/`https:` URIs verbatim to the model provider where they fail
- * the whole turn. The stored MIME comes from the URI's declared mediatype,
- * so encode the correct media type into the URI itself.
+ * A `data:` URI usable as a `files[].uri` prompt value — the one scheme that
+ * works across every known v2 server build. Beta-contract servers also read
+ * server-local `file:` URIs and reject `https:`/relative paths at prompt
+ * time, while dev-channel builds store any non-`data:` URI raw and fail the
+ * turn at the model provider (spike Q1 + stage-6 re-verification). The
+ * stored MIME comes from the URI's declared mediatype, so encode the correct
+ * media type into the URI itself.
  */
 export type OpencodeDataUri = `data:${string}`;
 
 /**
- * A file the provider needs a v2 prompt URI for. Only `data:` URIs are known
- * to reach the model end-to-end on current builds; other schemes are stored
- * verbatim and fail at the model provider.
+ * A file the provider needs a v2 prompt URI for. Only `data:` URIs work
+ * across all builds; other schemes are either rejected at prompt time (beta
+ * contract, except readable server-local `file:`) or stored verbatim and
+ * failed at the model provider (dev builds).
  */
 export interface OpencodeFileToResolve {
   /** IANA media type of the file content. */
@@ -196,9 +198,11 @@ export interface OpencodeFileToResolve {
 /**
  * Hook to turn a file part into a `files[].uri` value for `session.prompt`.
  * Return a `data:` URI to attach the file, or undefined to skip it (the
- * provider emits a warning for skipped files). Non-`data:` URIs are known
- * to fail the whole turn downstream, so the provider rejects any other
- * scheme before prompting (warning + skip) rather than attaching it.
+ * provider emits a warning for skipped files). The provider rejects any
+ * other scheme before prompting (warning + skip): non-`data:` URIs fail
+ * downstream on dev builds and (except readable server-local `file:`) are
+ * rejected at prompt time on the beta contract, so `data:` is the only
+ * build-independent scheme.
  */
 export type OpencodeResolveFileToUri = (
   file: OpencodeFileToResolve,
