@@ -43,6 +43,7 @@ export default async function setup(
       authHeader: handle.authHeader,
       workdir: handle.workdir,
       defaultModel: handle.defaultModel ?? null,
+      mode: handle.mode,
     });
     project.provide("opencodeBaseUrl", handle.baseUrl);
     project.provide("opencodeAuthHeader", handle.authHeader);

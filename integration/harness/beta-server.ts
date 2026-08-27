@@ -31,8 +31,10 @@
  *   - `OLLAMA_API_KEY`: forwarded from the host into the sandboxed server
  *     env (the one deliberate hole in the allowlist). It enables the
  *     server's `ollama-cloud` provider, which the suite's pinned test model
- *     needs (see `test-model.ts`). Without it the pin is skipped with a
- *     message and the suite falls back to the server default model.
+ *     needs (see `test-model.ts`). Without it the spawned server does not
+ *     list the pin in its catalog, so resolution falls back (with a
+ *     message) to the server default model. In attach mode the external
+ *     server's own env decides — the host key is irrelevant there.
  *   - `OPENCODE_TEST_MODEL`: `providerID/modelID` override for the model
  *     generation tests use (resolved and probe-verified in `test-model.ts`).
  *   - `OPENCODE_BETA_URL` + `OPENCODE_BETA_PASSWORD`: use an already-running
@@ -89,6 +91,8 @@ export interface ServeCommand {
 }
 
 export interface BetaServerHandle {
+  /** `"spawned"` sandbox child vs `"attach"` (`OPENCODE_BETA_URL`). */
+  mode: "spawned" | "attach";
   baseUrl: string;
   /** `Basic` auth header value for every request (v2 serve is passworded). */
   authHeader: string;
@@ -421,6 +425,7 @@ export async function startBetaServer(): Promise<BetaServerHandle> {
       }
     })();
     return {
+      mode: "attach",
       baseUrl: externalUrl,
       authHeader,
       workdir,
@@ -519,6 +524,7 @@ export async function startBetaServer(): Promise<BetaServerHandle> {
   }
 
   return {
+    mode: "spawned",
     baseUrl,
     authHeader,
     workdir,

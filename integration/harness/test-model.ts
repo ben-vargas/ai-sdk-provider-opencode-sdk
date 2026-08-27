@@ -8,9 +8,14 @@
  *
  *   1. `OPENCODE_TEST_MODEL` env override (`providerID/modelID`),
  *   2. the pinned {@link PINNED_TEST_MODEL} — requires `OLLAMA_API_KEY` in
- *      the **server's** env (the harness forwards it from the host; the pin
- *      is skipped with a message when the host has none),
+ *      the **server's** env (spawned mode forwards it from the host; attach
+ *      mode depends on the external server's own env),
  *   3. the server default, with a loud warning that the pin was unavailable.
+ *
+ * The order is identical in spawned and attach modes: every candidate —
+ * including the pin — is offered in both, and the live catalog check decides
+ * whether it is actually available on THIS server (the pin's provider is
+ * env-gated, so a server without `OLLAMA_API_KEY` simply does not list it).
  *
  * Every candidate is verified before being handed to tests: it must exist in
  * the live catalog and produce a successful assistant message (non-error
@@ -18,6 +23,11 @@
  * bounded probe (max {@link PROBE_ATTEMPTS} attempts). A candidate that fails falls
  * through to the next; when nothing survives — including when the catalog
  * itself is unreachable (fail-closed) — generation tests skip.
+ *
+ * Every API request the resolver makes carries an `AbortSignal`, so a hung
+ * server call aborts at its deadline instead of extending it, and each probe
+ * attempt is additionally raced against a hard deadline — the bounded window
+ * holds even if a transport ignores the signal.
  *
  * Scope guard: the pin is machine-local test infrastructure ONLY. It must
  * not reintroduce `ollama-cloud/*` ids into `OpencodeModels` or any shipped
@@ -50,8 +60,53 @@ export const PINNED_TEST_MODEL: TestModelRef = {
 
 const CATALOG_ATTEMPTS = 2;
 const PROBE_ATTEMPTS = 2;
-const PROBE_TIMEOUT_MS = 90_000;
-const PROBE_POLL_MS = 2_000;
+
+/**
+ * Deadlines for the resolver's API traffic. Every value bounds real network
+ * requests via `AbortSignal`; tests override them (tiny values against fake
+ * servers) to prove the bounds hold without waiting out production windows.
+ */
+export interface ResolverTimeouts {
+  /** Per-attempt bound on the whole probe turn (create+prompt+polls). */
+  probeTimeoutMs: number;
+  /** Delay between message-store polls inside a probe attempt. */
+  probePollMs: number;
+  /** Per-attempt bound on the `model.list` catalog request. */
+  catalogTimeoutMs: number;
+}
+
+const DEFAULT_TIMEOUTS: ResolverTimeouts = {
+  probeTimeoutMs: 90_000,
+  probePollMs: 2_000,
+  catalogTimeoutMs: 15_000,
+};
+
+/**
+ * Extra slack the hard-deadline race grants beyond `probeTimeoutMs`, so the
+ * signal-driven abort (with its more specific error) normally wins and the
+ * race only fires when a transport ignored the signal entirely.
+ */
+const HARD_DEADLINE_GRACE_MS = 5_000;
+
+/** Reject if `promise` is still pending after `ms` — the last-resort bound. */
+async function withHardDeadline<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label} exceeded the hard deadline of ${ms}ms`)),
+      ms,
+    );
+  });
+  try {
+    return await Promise.race([promise, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function log(message: string): void {
   console.log(`[integration] ${message}`);
@@ -130,26 +185,39 @@ function parseEnvOverride(raw: string): TestModelRef | undefined {
 /**
  * One bounded probe turn: create a session pinned to the candidate model,
  * prompt it, and poll the message store until a successful assistant message
- * appears. Throws (with the reason) on timeout, on any API error, or as soon
+ * appears. A single `AbortSignal.timeout` covers the whole attempt and is
+ * threaded into every API request, so a hung server call cannot outlive the
+ * window. Throws (with the reason) on timeout, on any API error, or as soon
  * as an assistant message terminally fails (error finish / structured error).
  */
 async function probeOnce(
   client: ReturnType<typeof OpenCode.make>,
   ref: TestModelRef,
   workdir: string,
+  timeouts: ResolverTimeouts,
 ): Promise<void> {
-  const session = await client.session.create({
-    title: `harness-model-probe ${refString(ref)}`,
-    model: { providerID: ref.providerID, id: ref.modelID },
-    location: { directory: workdir },
-  });
-  await client.session.prompt({
-    sessionID: session.id,
-    text: "Reply with exactly: OK",
-  });
-  const deadline = Date.now() + PROBE_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    const messages = await client.message.list({ sessionID: session.id });
+  const signal = AbortSignal.timeout(timeouts.probeTimeoutMs);
+  const deadline = Date.now() + timeouts.probeTimeoutMs;
+  const session = await client.session.create(
+    {
+      title: `harness-model-probe ${refString(ref)}`,
+      model: { providerID: ref.providerID, id: ref.modelID },
+      location: { directory: workdir },
+    },
+    { signal },
+  );
+  await client.session.prompt(
+    {
+      sessionID: session.id,
+      text: "Reply with exactly: OK",
+    },
+    { signal },
+  );
+  while (Date.now() < deadline && !signal.aborted) {
+    const messages = await client.message.list(
+      { sessionID: session.id },
+      { signal },
+    );
     if (messages.data.some(isSuccessfulAssistantMessage)) {
       return;
     }
@@ -159,10 +227,10 @@ async function probeOnce(
         throw new Error(failure);
       }
     }
-    await new Promise((resolve) => setTimeout(resolve, PROBE_POLL_MS));
+    await new Promise((resolve) => setTimeout(resolve, timeouts.probePollMs));
   }
   throw new Error(
-    `no successful assistant message within ${PROBE_TIMEOUT_MS}ms`,
+    `no successful assistant message within ${timeouts.probeTimeoutMs}ms`,
   );
 }
 
@@ -170,10 +238,15 @@ async function probe(
   client: ReturnType<typeof OpenCode.make>,
   ref: TestModelRef,
   workdir: string,
+  timeouts: ResolverTimeouts,
 ): Promise<boolean> {
   for (let attempt = 1; attempt <= PROBE_ATTEMPTS; attempt++) {
     try {
-      await probeOnce(client, ref, workdir);
+      await withHardDeadline(
+        probeOnce(client, ref, workdir, timeouts),
+        timeouts.probeTimeoutMs + HARD_DEADLINE_GRACE_MS,
+        `test-model probe ${refString(ref)}`,
+      );
       return true;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -195,7 +268,20 @@ export async function resolveTestModel(options: {
   authHeader: string;
   workdir: string;
   defaultModel: TestModelRef | null;
+  /**
+   * How the harness got its server: `"spawned"` (sandbox child process) or
+   * `"attach"` (`OPENCODE_BETA_URL`). The resolution order is identical in
+   * both — the mode only sharpens the diagnostic when the pin is missing
+   * from the catalog, because WHO must hold `OLLAMA_API_KEY` differs.
+   */
+  mode: "spawned" | "attach";
+  /** Test-only override of the request deadlines (defaults are production). */
+  timeouts?: Partial<ResolverTimeouts>;
 }): Promise<ResolvedTestModel | null> {
+  const timeouts: ResolverTimeouts = {
+    ...DEFAULT_TIMEOUTS,
+    ...options.timeouts,
+  };
   const client = OpenCode.make({
     baseUrl: options.baseUrl,
     headers: { Authorization: options.authHeader },
@@ -209,7 +295,10 @@ export async function resolveTestModel(options: {
   let catalog: Set<string> | undefined;
   for (let attempt = 1; attempt <= CATALOG_ATTEMPTS; attempt++) {
     try {
-      const listed = await client.model.list({});
+      const listed = await client.model.list(
+        {},
+        { signal: AbortSignal.timeout(timeouts.catalogTimeoutMs) },
+      );
       catalog = new Set(
         listed.data.map((model) =>
           refString({ providerID: model.providerID, modelID: model.modelID }),
@@ -237,26 +326,34 @@ export async function resolveTestModel(options: {
       candidates.push({ ...parsed, source: "env" });
     }
   }
-  if (process.env.OLLAMA_API_KEY !== undefined) {
-    candidates.push({ ...PINNED_TEST_MODEL, source: "pin" });
-  } else {
-    warn(
-      `pinned test model ${refString(PINNED_TEST_MODEL)} skipped: OLLAMA_API_KEY is not set on the host, ` +
-        `so the sandboxed server has no ollama-cloud provider — falling back to the server default model`,
-    );
-  }
+  // The pin is ALWAYS a candidate — in both spawned and attach modes. Its
+  // provider is env-gated server-side, so the live catalog check below is
+  // the authority on whether THIS server offers it; gating on the host's
+  // own env here would wrongly skip a probeable pin on an attached server
+  // whose env (not the host's) holds the key.
+  candidates.push({ ...PINNED_TEST_MODEL, source: "pin" });
   if (options.defaultModel !== null) {
     candidates.push({ ...options.defaultModel, source: "default" });
   }
 
   for (const candidate of candidates) {
     if (!catalog.has(refString(candidate))) {
-      warn(
-        `test-model candidate ${refString(candidate)} (${candidate.source}) is not in the live catalog — skipping`,
-      );
+      if (candidate.source === "pin") {
+        warn(
+          `pinned test model ${refString(candidate)} is not in the live catalog — ` +
+            (options.mode === "spawned"
+              ? `the sandboxed server has no ollama-cloud provider (set OLLAMA_API_KEY on the host; the harness forwards it)`
+              : `the attached server (OPENCODE_BETA_URL) has no ollama-cloud provider (its own env must hold OLLAMA_API_KEY)`) +
+            ` — falling back`,
+        );
+      } else {
+        warn(
+          `test-model candidate ${refString(candidate)} (${candidate.source}) is not in the live catalog — skipping`,
+        );
+      }
       continue;
     }
-    if (await probe(client, candidate, options.workdir)) {
+    if (await probe(client, candidate, options.workdir, timeouts)) {
       if (candidate.source === "default") {
         warn(
           `pinned test model ${refString(PINNED_TEST_MODEL)} was UNAVAILABLE — the suite is ` +
