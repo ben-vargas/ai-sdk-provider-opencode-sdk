@@ -248,19 +248,35 @@ class DefaultOpencodeClientManager implements OpencodeClientManager {
     }
     const service = this.backend.service;
     if (this.backend.autoStart) {
-      return Service.ensure({
-        file: service?.file,
-        version: service?.version,
-        command: service?.command,
-        env: service?.env,
-        onStart: (reason, previousVersion) => {
-          this.serverManaged = true;
-          this.logger.debug?.(
-            `Starting OpenCode service (${reason}${previousVersion ? `, previous version ${previousVersion}` : ""})`,
-          );
-          service?.onStart?.(reason, previousVersion);
-        },
-      });
+      try {
+        return await Service.ensure({
+          file: service?.file,
+          version: service?.version,
+          command: service?.command,
+          env: service?.env,
+          onStart: (reason, previousVersion) => {
+            this.serverManaged = true;
+            this.logger.debug?.(
+              `Starting OpenCode service (${reason}${previousVersion ? `, previous version ${previousVersion}` : ""})`,
+            );
+            service?.onStart?.(reason, previousVersion);
+          },
+        });
+      } catch (error) {
+        // Spawn/exit/timeout failures from Service.ensure need the same
+        // actionable context as a discovery miss: the default command is
+        // broken on published CLI builds, and `baseUrl` is the usable path.
+        throw new Error(
+          "Failed to auto-start the OpenCode service" +
+            (service?.file ? ` (registration file: ${service.file})` : "") +
+            `: ${extractErrorMessage(error)}. Note: \`opencode serve ` +
+            "--service` is broken on current published CLI builds (see " +
+            "docs/v2-spike-findings.md) — pass `baseUrl` to point at a " +
+            "server you started yourself, or supply a `service.command` " +
+            "that serves the service-registration contract.",
+          { cause: error },
+        );
+      }
     }
     const discovered = await Service.discover({
       file: service?.file,
@@ -270,6 +286,10 @@ class DefaultOpencodeClientManager implements OpencodeClientManager {
       throw new Error(
         "No registered OpenCode service found" +
           (service?.file ? ` (registration file: ${service.file})` : "") +
+          (service?.version !== undefined
+            ? ", or a registered service was filtered out by the configured " +
+              "`service.version` predicate"
+            : "") +
           ". Start one with `opencode serve --service`, pass `baseUrl` to " +
           "point at a running server, or set `autoStart: true` to let the " +
           "provider start it. Note: `opencode serve --service` is broken on " +
@@ -354,6 +374,48 @@ class DefaultOpencodeClientManager implements OpencodeClientManager {
   }
 }
 
+/**
+ * Per-holder view of a registry-shared manager. The underlying manager is
+ * reference-counted, so each holder must release exactly once; this lease
+ * makes `dispose()` idempotent per holder — a duplicate dispose (e.g. from
+ * overlapping cleanup/finally paths) cannot decrement another holder's
+ * reference or stop a service another provider is still using.
+ */
+class SharedManagerLease implements OpencodeClientManager {
+  private released = false;
+
+  constructor(private readonly shared: DefaultOpencodeClientManager) {}
+
+  getPort(): Promise<OpencodeClientPort> {
+    if (this.released) {
+      return Promise.reject(
+        new Error("OpencodeClientManager has been disposed"),
+      );
+    }
+    return this.shared.getPort();
+  }
+
+  getServerUrl(): string | undefined {
+    return this.shared.getServerUrl();
+  }
+
+  isServerManaged(): boolean {
+    return this.shared.isServerManaged();
+  }
+
+  stopService(): Promise<void> {
+    return this.shared.stopService();
+  }
+
+  async dispose(): Promise<void> {
+    if (this.released) {
+      return;
+    }
+    this.released = true;
+    await this.shared.dispose();
+  }
+}
+
 // --- registry -------------------------------------------------------------
 
 /**
@@ -381,21 +443,25 @@ function referenceId(value: object | undefined): string {
   return `#${id}`;
 }
 
-function headersKey(headers: RequestInit["headers"] | undefined): string {
+/**
+ * Structured header identity for the registry key: sorted entries, embedded
+ * as a nested array in the JSON key so values containing `=`/`,` cannot
+ * collide with distinct header sets.
+ */
+function headersIdentity(
+  headers: RequestInit["headers"] | undefined,
+): [string, string][] | "-" {
   const normalized = mergeDefaultHeaders(undefined, headers);
   if (!normalized) {
     return "-";
   }
-  return Object.entries(normalized)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, value]) => `${key}=${value}`)
-    .join(",");
+  return Object.entries(normalized).sort(([a], [b]) => a.localeCompare(b));
 }
 
 function registryKeyFor(settings: OpencodeProviderSettings): string {
   const clientOptions = settings.clientOptions;
   const shared = [
-    headersKey(clientOptions?.headers),
+    headersIdentity(clientOptions?.headers),
     referenceId(clientOptions?.fetch),
   ];
   if (settings.baseUrl) {
@@ -409,8 +475,12 @@ function registryKeyFor(settings: OpencodeProviderSettings): string {
     typeof service?.version === "string"
       ? service.version
       : referenceId(service?.version),
-    service?.command?.join(" ") ?? "-",
-    service?.env ? JSON.stringify(service.env) : "-",
+    // Arrays/entries kept structural: `["a b"]` must not collide with
+    // `["a","b"]`, and env key order must not affect identity.
+    service?.command ?? "-",
+    service?.env
+      ? Object.entries(service.env).sort(([a], [b]) => a.localeCompare(b))
+      : "-",
     referenceId(service?.onStart),
     ...shared,
   ]);
@@ -460,7 +530,9 @@ export function createClientManager(
  * - caller-supplied `clientManager` → returned as-is;
  * - `baseUrl`/service backends → shared via a registry keyed on the full
  *   effective identity, so two providers with identical config reuse one
- *   manager (disposal is reference-counted).
+ *   manager (disposal is reference-counted). Each call returns a fresh
+ *   per-holder lease whose `dispose()` is idempotent, so one holder's
+ *   duplicate dispose cannot release another holder's reference.
  */
 export function createClientManagerFromSettings(
   settings: OpencodeProviderSettings = {},
@@ -476,7 +548,7 @@ export function createClientManagerFromSettings(
   const existing = managerRegistry.get(key);
   if (existing) {
     existing.retain();
-    return existing;
+    return new SharedManagerLease(existing);
   }
   const manager = new DefaultOpencodeClientManager(
     backendFromSettings(settings),
@@ -484,7 +556,7 @@ export function createClientManagerFromSettings(
     key,
   );
   managerRegistry.set(key, manager);
-  return manager;
+  return new SharedManagerLease(manager);
 }
 
 /**

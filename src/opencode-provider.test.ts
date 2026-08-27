@@ -145,6 +145,40 @@ describe("createOpencode", () => {
     );
   });
 
+  it("dispose is idempotent per provider and cannot release a shared manager twice", async () => {
+    // Two providers with identical settings share one registry manager; a
+    // duplicate dispose of provider A (plausible in cleanup/finally paths)
+    // must not drop provider B's reference.
+    const fetchImpl = (async (input: string | URL | Request) => {
+      const url = String(input instanceof Request ? input.url : input);
+      const body = url.includes("/health")
+        ? { healthy: true, version: "2.0.0", pid: 1 }
+        : { status: "completed" };
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+    const settings = {
+      baseUrl: "http://shared",
+      clientOptions: { fetch: fetchImpl },
+    };
+    const first = createOpencode(settings);
+    const second = createOpencode(settings);
+
+    await first.dispose();
+    await first.dispose(); // duplicate
+    await expect(first.getClientManager().getPort()).rejects.toThrow(
+      /disposed/,
+    );
+    await expect(second.getClientManager().getPort()).resolves.toBeDefined();
+
+    await second.dispose();
+    await expect(second.getClientManager().getPort()).rejects.toThrow(
+      /disposed/,
+    );
+  });
+
   it("prefers a supplied client over an injected manager and warns", () => {
     const injected = createInjectedManager();
     const warnings: string[] = [];

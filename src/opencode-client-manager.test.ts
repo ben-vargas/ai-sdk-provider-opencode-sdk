@@ -203,6 +203,37 @@ describe("backend selection", () => {
     );
   });
 
+  it("mentions version filtering in the discovery error when a predicate is set", async () => {
+    discoverMock.mockResolvedValue(undefined);
+    const manager = createClientManager({
+      service: { version: (v: string) => v.startsWith("2.") },
+    });
+
+    await expect(manager.getPort()).rejects.toThrow(
+      /filtered out by the configured `service\.version` predicate/,
+    );
+  });
+
+  it("wraps auto-start failures in an actionable error", async () => {
+    const cause = new Error(
+      "Timed out waiting for the background service to start",
+    );
+    ensureMock.mockRejectedValue(cause);
+    const manager = createClientManager({
+      autoStart: true,
+      service: { file: "/owned.json" },
+    });
+
+    const failure = await manager.getPort().then(
+      () => undefined,
+      (error: unknown) => error as Error,
+    );
+    expect(failure?.message).toMatch(
+      /Failed to auto-start the OpenCode service.*\/owned\.json.*Timed out waiting.*opencode serve\s+--service` is broken.*baseUrl/s,
+    );
+    expect(failure?.cause).toBe(cause);
+  });
+
   it("auto-starts via Service.ensure and tracks managed state via onStart", async () => {
     const userOnStart = vi.fn();
     ensureMock.mockImplementation(
@@ -458,13 +489,18 @@ describe("ownership and disposal", () => {
 });
 
 describe("registry identity", () => {
-  it("shares one manager for identical effective identity", () => {
+  // Sharing is observed behaviorally: shared identity → one constructed
+  // client (one OpenCode.make call, same cached port); distinct identity →
+  // distinct clients. Holders receive per-holder leases, so lease-object
+  // identity is never the sharing signal.
+  it("shares one manager for identical effective identity", async () => {
     const first = createClientManagerFromSettings({ baseUrl: "http://x" });
     const second = createClientManagerFromSettings({ baseUrl: "http://x" });
-    expect(second).toBe(first);
+    expect(await second.getPort()).toBe(await first.getPort());
+    expect(makeMock).toHaveBeenCalledTimes(1);
   });
 
-  it("distinguishes configs differing only in headers", () => {
+  it("distinguishes configs differing only in headers", async () => {
     const first = createClientManagerFromSettings({
       baseUrl: "http://x",
       clientOptions: { headers: { authorization: "Bearer a" } },
@@ -473,10 +509,37 @@ describe("registry identity", () => {
       baseUrl: "http://x",
       clientOptions: { headers: { authorization: "Bearer b" } },
     });
-    expect(second).not.toBe(first);
+    expect(await second.getPort()).not.toBe(await first.getPort());
+    expect(makeMock).toHaveBeenCalledTimes(2);
   });
 
-  it("distinguishes configs differing only in fetch identity", () => {
+  it("distinguishes header identities that collide under naive key=value,… serialization", async () => {
+    const first = createClientManagerFromSettings({
+      baseUrl: "http://x",
+      clientOptions: { headers: { authorization: "Bearer a,x=y" } },
+    });
+    const second = createClientManagerFromSettings({
+      baseUrl: "http://x",
+      clientOptions: { headers: { authorization: "Bearer a", x: "y" } },
+    });
+    expect(await second.getPort()).not.toBe(await first.getPort());
+    expect(makeMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("distinguishes service commands that join to the same string", async () => {
+    const first = createClientManagerFromSettings({
+      autoStart: true,
+      service: { command: ["opencode", "serve --service"] },
+    });
+    const second = createClientManagerFromSettings({
+      autoStart: true,
+      service: { command: ["opencode", "serve", "--service"] },
+    });
+    expect(await second.getPort()).not.toBe(await first.getPort());
+    expect(makeMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("distinguishes configs differing only in fetch identity", async () => {
     const fetchA = vi.fn() as unknown as typeof fetch;
     const fetchB = vi.fn() as unknown as typeof fetch;
     const first = createClientManagerFromSettings({
@@ -491,11 +554,12 @@ describe("registry identity", () => {
       baseUrl: "http://x",
       clientOptions: { fetch: fetchA },
     });
-    expect(second).not.toBe(first);
-    expect(third).toBe(first);
+    expect(await second.getPort()).not.toBe(await first.getPort());
+    expect(await third.getPort()).toBe(await first.getPort());
+    expect(makeMock).toHaveBeenCalledTimes(2);
   });
 
-  it("distinguishes service configs by registration file and autoStart", () => {
+  it("distinguishes service configs by registration file and autoStart", async () => {
     const discoverDefault = createClientManagerFromSettings({});
     const discoverFile = createClientManagerFromSettings({
       service: { file: "/a.json" },
@@ -504,8 +568,12 @@ describe("registry identity", () => {
       service: { file: "/a.json" },
       autoStart: true,
     });
-    expect(discoverFile).not.toBe(discoverDefault);
-    expect(ensureFile).not.toBe(discoverFile);
+    const defaultPort = await discoverDefault.getPort();
+    const filePort = await discoverFile.getPort();
+    const ensurePort = await ensureFile.getPort();
+    expect(filePort).not.toBe(defaultPort);
+    expect(ensurePort).not.toBe(filePort);
+    expect(makeMock).toHaveBeenCalledTimes(3);
   });
 
   it("does not cache caller-supplied clients", () => {
@@ -518,7 +586,7 @@ describe("registry identity", () => {
   it("reference-counts shared managers across holders", async () => {
     const first = createClientManagerFromSettings({ baseUrl: "http://x" });
     const second = createClientManagerFromSettings({ baseUrl: "http://x" });
-    expect(second).toBe(first);
+    expect(await second.getPort()).toBe(await first.getPort());
 
     await first.dispose();
     // Still retained by the second holder.
@@ -528,8 +596,40 @@ describe("registry identity", () => {
     await expect(second.getPort()).rejects.toThrow(/disposed/);
 
     // Fully disposed managers leave the registry; a new request gets a
-    // fresh manager.
+    // fresh manager (a new constructed client).
     const third = createClientManagerFromSettings({ baseUrl: "http://x" });
-    expect(third).not.toBe(first);
+    await expect(third.getPort()).resolves.toBeDefined();
+    expect(makeMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps duplicate dispose by one holder from releasing another holder", async () => {
+    const first = createClientManagerFromSettings({ baseUrl: "http://x" });
+    const second = createClientManagerFromSettings({ baseUrl: "http://x" });
+
+    await first.dispose();
+    await first.dispose(); // duplicate — must not decrement the shared count
+    await expect(first.getPort()).rejects.toThrow(/disposed/);
+    await expect(second.getPort()).resolves.toBeDefined();
+
+    await second.dispose();
+    await expect(second.getPort()).rejects.toThrow(/disposed/);
+  });
+
+  it("keeps duplicate dispose from stopping another holder's owned service", async () => {
+    const settings = {
+      autoStart: true,
+      service: { file: "/owned.json" },
+    };
+    const first = createClientManagerFromSettings(settings);
+    const second = createClientManagerFromSettings(settings);
+    await second.getPort();
+
+    await first.dispose();
+    await first.dispose(); // duplicate — owned service must keep running
+    expect(stopMock).not.toHaveBeenCalled();
+    await expect(second.getPort()).resolves.toBeDefined();
+
+    await second.dispose();
+    expect(stopMock).toHaveBeenCalledWith({ file: "/owned.json" });
   });
 });
