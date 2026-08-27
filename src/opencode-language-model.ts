@@ -127,6 +127,14 @@ export interface OpencodeLanguageModelConfig {
    * terminal event by only milliseconds on healthy turns). @default 2000
    */
   waitWatchdogGraceMs?: number;
+  /**
+   * Delivery-uncertainty evidence window: after a failed prompt dispatch
+   * whose inbox check finds no pending item, how long to drain the live
+   * subscription for same-session activity (the inbox table is pending-only
+   * — a delivered item leaves it, so absence alone does not prove
+   * non-delivery). @default 3000
+   */
+  deliveryEvidenceWindowMs?: number;
 }
 
 const DEFAULT_READINESS_TIMEOUT_MS = 3000;
@@ -135,6 +143,36 @@ const DEFAULT_SILENCE_WATCHDOG_MS = 30_000;
 const DEFAULT_WAIT_WATCHDOG_GRACE_MS = 2000;
 /** Delivery-uncertainty inbox check: one attempt, bounded. */
 const INBOX_CHECK_TIMEOUT_MS = 3000;
+const DEFAULT_DELIVERY_EVIDENCE_WINDOW_MS = 3000;
+
+/**
+ * Event types that prove this session's prompt was delivered and its turn is
+ * (or was) executing. `session.idle` is deliberately excluded — an idle
+ * transition alone does not prove the prompt reached the session, and the
+ * message-store fallback handles the delivered-and-already-finished case
+ * from stored proof.
+ */
+const DELIVERY_EVIDENCE_TYPE_PREFIXES = [
+  "session.inbox.",
+  "session.execution.",
+  "session.step.",
+  "session.text.",
+  "session.reasoning.",
+  "session.tool.",
+  "session.usage.",
+  "permission.",
+  "form.",
+];
+
+/** Same-session activity that proves prompt delivery (exclusive session). */
+function isDeliveryEvidence(event: V2Event, sessionId: string): boolean {
+  if (extractV2EventSessionId(event) !== sessionId) {
+    return false;
+  }
+  return DELIVERY_EVIDENCE_TYPE_PREFIXES.some((prefix) =>
+    event.type.startsWith(prefix),
+  );
+}
 const DEFAULT_SESSION_TITLE = "AI SDK Session";
 /** Bounded in-model form retry: nothing redelivers a form within a turn. */
 const MAX_FORM_ATTEMPTS = 3;
@@ -259,6 +297,7 @@ interface TurnContext {
   approvalIdleTimeoutMs: number;
   silenceWatchdogMs: number;
   waitWatchdogGraceMs: number;
+  deliveryEvidenceWindowMs: number;
   /**
    * `session.wait` watchdog racing the event-driven completion. Armed once
    * the execution is confirmed started (wait's semantics are pinned only for
@@ -660,6 +699,9 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         this.config.silenceWatchdogMs ?? DEFAULT_SILENCE_WATCHDOG_MS,
       waitWatchdogGraceMs:
         this.config.waitWatchdogGraceMs ?? DEFAULT_WAIT_WATCHDOG_GRACE_MS,
+      deliveryEvidenceWindowMs:
+        this.config.deliveryEvidenceWindowMs ??
+        DEFAULT_DELIVERY_EVIDENCE_WINDOW_MS,
       waitWatchdog: undefined,
       waitWatchdogState: "unarmed",
     };
@@ -1310,8 +1352,14 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
    * prompt was enqueued despite the failed response. A matching pending
    * user item (by caller-supplied id when one was sent, else by exact text)
    * is adopted as this turn's receipt and the pump keeps observing the
-   * running turn. Absent — or the check itself failing/timing out — falls
-   * back to the existing reconciliation/error path.
+   * running turn.
+   *
+   * The inbox table is pending-only on the pinned beta (`projectDelivered`
+   * deletes the row in the same transaction that promotes it), so an empty
+   * list does NOT prove non-delivery: an idle session picks the prompt up
+   * immediately, and the row can be gone before this check runs. A miss —
+   * or the check itself failing/timing out — therefore falls through to
+   * {@link awaitDeliveryEvidence} before the reconciliation/error path.
    */
   private async recoverUncertainDelivery(turn: TurnContext): Promise<boolean> {
     const error = turn.dispatchError;
@@ -1356,22 +1404,70 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
             ? item.id === body.id
             : item.payload.text === body.text),
       );
-      if (!match) {
-        return false;
+      if (match) {
+        this.logger.warn(
+          `session.prompt failed but the prompt is enqueued on session ` +
+            `${turn.sessionId} (inbox ${match.id}); continuing to observe the turn.`,
+        );
+        turn.receipt = match;
+        return true;
       }
-      this.logger.warn(
-        `session.prompt failed but the prompt is enqueued on session ` +
-          `${turn.sessionId} (inbox ${match.id}); continuing to observe the turn.`,
-      );
-      turn.receipt = match;
-      return true;
     } catch (checkError) {
       this.logger.debug?.(
         `inbox delivery check unavailable: ${extractErrorMessage(checkError)}`,
       );
-      return false;
     } finally {
       clearTimeout(timer);
+    }
+    return this.awaitDeliveryEvidence(turn);
+  }
+
+  /**
+   * Delivered-before-check recovery: no pending inbox row was found, but the
+   * prompt may already have been delivered (the pending row is deleted at
+   * promotion). Delivery proof is available on the live subscription — the
+   * pump subscribed before dispatching, so `session.inbox.delivered` /
+   * `session.execution.started` / step and content events for this turn land
+   * in the pre-buffer or the reader. Scan the pre-buffer, then drain the
+   * reader for a bounded window; every drained event is appended to the
+   * pre-buffer so the pump replays it normally. Evidence found → the turn is
+   * enqueued-and-running and stays observed. No evidence — or a broken
+   * stream — falls back to the reconciliation/error path.
+   */
+  private async awaitDeliveryEvidence(turn: TurnContext): Promise<boolean> {
+    const adopt = (event: V2Event): true => {
+      this.logger.warn(
+        `session.prompt failed but session ${turn.sessionId} shows live ` +
+          `turn activity (${event.type}); continuing to observe the turn.`,
+      );
+      return true;
+    };
+    for (const buffered of turn.preBuffer) {
+      if (isDeliveryEvidence(buffered, turn.sessionId)) {
+        return adopt(buffered);
+      }
+    }
+    const deadline = Date.now() + turn.deliveryEvidenceWindowMs;
+    for (;;) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        return false;
+      }
+      let result: IteratorResult<V2Event> | "timeout";
+      try {
+        result = await turn.reader.nextWithTimeout(remaining);
+      } catch {
+        // Broken stream: no live evidence obtainable — the message-store
+        // fallback is the remaining recovery path.
+        return false;
+      }
+      if (result === "timeout" || result.done) {
+        return false;
+      }
+      turn.preBuffer.push(result.value);
+      if (isDeliveryEvidence(result.value, turn.sessionId)) {
+        return adopt(result.value);
+      }
     }
   }
 
@@ -2446,10 +2542,10 @@ function aggregateParts(parts: LanguageModelV4StreamPart[]): AggregatedParts {
 }
 
 /**
- * Client-side validation for json-mode output: `JSON.parse` plus a shallow
- * top-level type check against the supplied JSON schema (full JSON-Schema
- * validation would need a dependency; the AI SDK caller re-validates the
- * object anyway). Returns an error description, or undefined when valid.
+ * Client-side validation for json-mode output: `JSON.parse` plus structural
+ * validation against the AI SDK-supplied JSON schema via
+ * {@link checkJsonSchema}. Returns an error description, or undefined when
+ * valid.
  */
 function validateJsonText(text: string, schema: unknown): string | undefined {
   let parsed: unknown;
@@ -2458,22 +2554,146 @@ function validateJsonText(text: string, schema: unknown): string | undefined {
   } catch (error) {
     return `not valid JSON: ${extractErrorMessage(error)}`;
   }
-  const declaredType =
-    schema !== null && typeof schema === "object" && "type" in schema
-      ? (schema as { type?: unknown }).type
-      : undefined;
-  if (declaredType === "object") {
-    if (
-      parsed === null ||
-      typeof parsed !== "object" ||
-      Array.isArray(parsed)
-    ) {
-      return 'top-level value is not an object (schema declares type "object")';
+  return checkJsonSchema(parsed, schema, "$");
+}
+
+/**
+ * Dependency-free structural validator for the JSON-Schema subset the AI
+ * SDK's zod conversion emits: `type` (including union arrays and
+ * `integer`), `properties`, `required`, `items`, `enum`, `const`, and
+ * `additionalProperties: false`, applied recursively. Deliberately
+ * permissive on everything else (`$ref`, combinators, string/number
+ * constraints are ignored): an unsupported keyword must never reject output
+ * that full validation would accept — a false rejection would trigger a
+ * pointless repair round-trip. The AI SDK caller re-validates the final
+ * object regardless. Returns the first violation, or undefined.
+ */
+function checkJsonSchema(
+  value: unknown,
+  schema: unknown,
+  path: string,
+): string | undefined {
+  if (schema === null || typeof schema !== "object" || Array.isArray(schema)) {
+    return undefined;
+  }
+  const s = schema as Record<string, unknown>;
+  if ("$ref" in s) {
+    // Referenced definitions are not resolved; stay permissive.
+    return undefined;
+  }
+  if (s["type"] !== undefined) {
+    const types = Array.isArray(s["type"]) ? s["type"] : [s["type"]];
+    const matches = types.some(
+      (type) => typeof type === "string" && matchesJsonType(value, type),
+    );
+    if (!matches) {
+      return (
+        `${path}: expected type ${types.map(String).join("|")}, ` +
+        `got ${describeJsonType(value)}`
+      );
     }
-  } else if (declaredType === "array" && !Array.isArray(parsed)) {
-    return 'top-level value is not an array (schema declares type "array")';
+  }
+  if (Array.isArray(s["enum"]) && !s["enum"].some((e) => jsonEquals(e, value))) {
+    return `${path}: value is not one of the enum values`;
+  }
+  if ("const" in s && !jsonEquals(s["const"], value)) {
+    return `${path}: value does not equal the const value`;
+  }
+  if (Array.isArray(value)) {
+    const items = s["items"];
+    if (items !== undefined && !Array.isArray(items)) {
+      for (let index = 0; index < value.length; index += 1) {
+        const failure = checkJsonSchema(
+          value[index],
+          items,
+          `${path}[${index}]`,
+        );
+        if (failure !== undefined) {
+          return failure;
+        }
+      }
+    }
+    return undefined;
+  }
+  if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if (Array.isArray(s["required"])) {
+      for (const key of s["required"]) {
+        if (typeof key === "string" && !(key in record)) {
+          return `${path}: missing required property "${key}"`;
+        }
+      }
+    }
+    const rawProperties = s["properties"];
+    const properties =
+      rawProperties !== null &&
+      typeof rawProperties === "object" &&
+      !Array.isArray(rawProperties)
+        ? (rawProperties as Record<string, unknown>)
+        : undefined;
+    if (properties) {
+      for (const [key, propertySchema] of Object.entries(properties)) {
+        if (key in record) {
+          const failure = checkJsonSchema(
+            record[key],
+            propertySchema,
+            `${path}.${key}`,
+          );
+          if (failure !== undefined) {
+            return failure;
+          }
+        }
+      }
+    }
+    if (
+      s["additionalProperties"] === false &&
+      s["patternProperties"] === undefined
+    ) {
+      for (const key of Object.keys(record)) {
+        if (!properties || !(key in properties)) {
+          return `${path}: unexpected property "${key}"`;
+        }
+      }
+    }
   }
   return undefined;
+}
+
+function matchesJsonType(value: unknown, type: string): boolean {
+  switch (type) {
+    case "object":
+      return value !== null && typeof value === "object" && !Array.isArray(value);
+    case "array":
+      return Array.isArray(value);
+    case "string":
+      return typeof value === "string";
+    case "number":
+      return typeof value === "number";
+    case "integer":
+      return typeof value === "number" && Number.isInteger(value);
+    case "boolean":
+      return typeof value === "boolean";
+    case "null":
+      return value === null;
+    default:
+      // Unknown type keyword: permissive.
+      return true;
+  }
+}
+
+function describeJsonType(value: unknown): string {
+  if (value === null) {
+    return "null";
+  }
+  if (Array.isArray(value)) {
+    return "array";
+  }
+  return typeof value;
+}
+
+/** Structural equality for enum/const members (JSON values only). */
+function jsonEquals(a: unknown, b: unknown): boolean {
+  return a === b || JSON.stringify(a) === JSON.stringify(b);
 }
 
 /** Strip a Markdown code fence when the whole output is wrapped in one. */

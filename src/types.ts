@@ -321,8 +321,9 @@ export interface OpencodeSettings {
    * Opt-in client-side JSON validate/repair loop for
    * `responseFormat: { type: "json" }` (off by default). OpenCode v2 has no
    * server-side structured-output enforcement, so when enabled the provider
-   * validates the final text client-side (`JSON.parse` plus a shallow
-   * top-level type check against the AI SDK-supplied schema when present)
+   * validates the final text client-side (`JSON.parse` plus recursive
+   * structural validation — type/properties/required/items/enum/const/
+   * additionalProperties — against the AI SDK-supplied schema when present)
    * and, on failure, asks the server's `generate.text` route — documented
    * upstream as session-less/tool-less/history-less, so it can never replay
    * the original turn's side effects — to repair the invalid output.

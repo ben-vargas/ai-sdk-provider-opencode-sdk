@@ -323,10 +323,15 @@ function createModel(
   return new OpencodeLanguageModel(
     "test-provider/test-model",
     { logger: false, ...settings },
-    // Fast wait-watchdog grace: the fake port's wait resolves instantly, so
-    // any turn that has to wait for late events would otherwise burn the
-    // full 2 s production grace before continuing.
-    { getPort: () => fake.port, waitWatchdogGraceMs: 25, ...config },
+    // Fast wait-watchdog grace and delivery-evidence window: the fake port's
+    // wait resolves instantly, so any turn that has to wait for late events
+    // would otherwise burn the full production bounds before continuing.
+    {
+      getPort: () => fake.port,
+      waitWatchdogGraceMs: 25,
+      deliveryEvidenceWindowMs: 100,
+      ...config,
+    },
   );
 }
 
@@ -1935,6 +1940,35 @@ describe("delivery-uncertainty inbox reconciliation", () => {
     expect(fake.callsFor("session.prompt").length).toBe(1);
   });
 
+  it("keeps observing when delivery outran the inbox check (pending-only inbox)", async () => {
+    const fake = createFakePort({ promptError: () => transportError() });
+    fake.hooks.inboxItems = () => {
+      // The prompt was already delivered: the pending row is gone (the beta
+      // inbox table is pending-only), and the running turn's events arrive
+      // on the live subscription during the evidence window.
+      setTimeout(() => {
+        const ev = eventFactory(SESSION_ID);
+        fake.emit(
+          ev.executionStarted(),
+          ev.stepStarted("msg_a"),
+          ev.textStarted("msg_a", 0),
+          ev.textDelta("msg_a", 0, "Hello world"),
+          ev.textEnded("msg_a", 0, "Hello world"),
+          ev.stepEnded("msg_a", "stop", tokens(10, 4, 1, 2, 0), 0.01),
+          ev.executionSucceeded(),
+        );
+      }, 10);
+      return [];
+    };
+    const model = createModel(fake);
+
+    const result = await model.doGenerate(callOptions());
+    expect(result.content).toEqual([{ type: "text", text: "Hello world" }]);
+    expect(result.finishReason).toEqual({ unified: "stop", raw: "stop" });
+    expect(fake.callsFor("session.inbox.list").length).toBe(1);
+    expect(fake.callsFor("session.prompt").length).toBe(1);
+  });
+
   it("surfaces the non-retryable error when the inbox shows the prompt was never enqueued", async () => {
     const fake = createFakePort({
       promptError: () => transportError(),
@@ -2064,6 +2098,98 @@ describe("JSON validate/repair loop", () => {
     );
     expect(result.content).toEqual([{ type: "text", text: '{"a": 2}' }]);
     expect(fake.callsFor("generate.text").length).toBe(1);
+  });
+
+  it("repairs output that parses but violates the schema (property type)", async () => {
+    const fake = createFakePort({
+      generateText: () => ({ text: '{"a": 1}' }),
+    });
+    scriptTextTurn(fake, '{"a": "wrong"}');
+    const model = createModel(fake, { jsonRepair: {} });
+
+    const result = await model.doGenerate(
+      callOptions({
+        responseFormat: {
+          type: "json",
+          schema: {
+            type: "object",
+            properties: { a: { type: "number" } },
+            required: ["a"],
+          },
+        },
+      }),
+    );
+    expect(result.content).toEqual([{ type: "text", text: '{"a": 1}' }]);
+    expect(fake.callsFor("generate.text").length).toBe(1);
+  });
+
+  it("repairs deep schema violations: missing required, bad enum, wrong item type", async () => {
+    const NESTED_FORMAT = {
+      type: "json" as const,
+      schema: {
+        type: "object",
+        properties: {
+          kind: { type: "string", enum: ["alpha", "beta"] },
+          nested: {
+            type: "object",
+            properties: { counts: { type: "array", items: { type: "integer" } } },
+            required: ["counts"],
+          },
+        },
+        required: ["kind", "nested"],
+        additionalProperties: false,
+      },
+    };
+    const fake = createFakePort({
+      generateText: () => ({
+        text: '{"kind": "alpha", "nested": {"counts": [1, 2]}}',
+      }),
+    });
+    // Bad enum member AND a non-integer array item AND an extra property.
+    scriptTextTurn(
+      fake,
+      '{"kind": "gamma", "nested": {"counts": [1.5]}, "extra": true}',
+    );
+    const model = createModel(fake, { jsonRepair: {} });
+
+    const result = await model.doGenerate(
+      callOptions({ responseFormat: NESTED_FORMAT }),
+    );
+    expect(result.content).toEqual([
+      { type: "text", text: '{"kind": "alpha", "nested": {"counts": [1, 2]}}' },
+    ]);
+    expect(fake.callsFor("generate.text").length).toBe(1);
+  });
+
+  it("rejects a repair that still violates the schema (attempts exhausted)", async () => {
+    const fake = createFakePort({
+      generateText: () => ({ text: '{"a": "still wrong"}' }),
+    });
+    scriptTextTurn(fake, '{"a": "wrong"}');
+    const model = createModel(fake, { jsonRepair: {} });
+
+    const result = await model.doGenerate(
+      callOptions({
+        responseFormat: {
+          type: "json",
+          schema: {
+            type: "object",
+            properties: { a: { type: "number" } },
+            required: ["a"],
+          },
+        },
+      }),
+    );
+    // The schema-invalid repair is NOT accepted; the original output stands.
+    expect(result.content).toEqual([{ type: "text", text: '{"a": "wrong"}' }]);
+    expect(fake.callsFor("generate.text").length).toBe(1);
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.type === "other" &&
+          warning.message.includes("repair attempt(s) were exhausted"),
+      ),
+    ).toBe(true);
   });
 
   it("keeps the original output after exhausting bounded attempts", async () => {
