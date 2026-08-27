@@ -1,25 +1,90 @@
-# [DRAFT — do not post yet] v2: no per-prompt/per-session system prompt on the network API
+# [DRAFT — do not post yet] v2: document the guarantees of `session.instructions.entry` as the caller-supplied system-prompt channel
 
 **Repo:** anomalyco/opencode
-**Labels (suggested):** v2, api, feature
+**Labels (suggested):** v2, docs
 
-## Problem
+> **Correction note (2026-08-27).** An earlier revision of this draft asked
+> for a per-prompt/per-session system field on the grounds that no working
+> mechanism existed. That premise is **withdrawn**: the mechanism exists and
+> works. `session.instructions.entry` was previously untestable only because
+> we were probing servers that did not implement it (the v1-lineage
+> `opencode-ai` dev/beta CLIs route no `session.instructions.*` at all, and
+> the embedded `@opencode-ai/sdk@0.0.0-beta-18286` host answers `entry.put`
+> and `entry.list` with empty-body 500s). Against the published
+> `@opencode-ai/cli@0.0.0-beta-18286` (`opencode2`) it behaves correctly. We
+> have shipped on it. What remains is a **documentation** request.
 
-v1 accepted `system` on `session.prompt`. In the v2 beta (`@opencode-ai/client@0.0.0-beta-18286`) there is no way to inject a system prompt over the network API:
+## What we verified
 
-- `SessionPromptInput` has no `system` field; `SessionCreateInput` is `{id?, title?, agent?, model?, location?}` — no system/instructions either.
-- The closest candidate, `session.instructions.entry.put({sessionID, key, value})`, is undocumented as to whether entries reach model context, with what role/priority, and whether they survive compaction. We tried to verify empirically (2026-08-26) and could not: the dev-channel CLI (`0.0.0-dev-202608261632`) does not route `session.instructions.*` at all, and on the embedded host (`@opencode-ai/sdk@0.0.0-beta-18286`) both `entry.put` and `entry.list` return empty-body 500s.
-- Plugins restore this in embedded mode via the session `context` hook — `session.hook("context", (ctx) => { ctx.system.push(...) })`, where `SessionContext.system` is a mutable `Array<SystemPart>` (`@opencode-ai/plugin@beta-18286`) — but network-only clients have no equivalent.
+Against `opencode2@0.0.0-beta-18286` with the matching client
+(`spike/14b-instruction-entries.mjs`, raw capture in
+`spike/artifacts/14b-instruction-entries.json`):
+
+| Behaviour                                                         | Result |
+| ----------------------------------------------------------------- | ------ |
+| `entry.put` / `entry.list` / `entry.remove` round-trip            | works  |
+| Entry set before the first prompt reaches the model               | yes    |
+| Still applies on turn 2 of the same session                       | yes    |
+| Entry put **mid-session** applies from the next turn              | yes    |
+| A mid-session put announces a durable `system` message            | yes    |
+| `entry.remove` stops the instruction applying                     | yes    |
+| Key grammar `^[a-z0-9][a-z0-9._-]*$` enforced                     | yes    |
+| Value cap 8192 bytes, measured on the **JSON encoding**           | yes    |
+| An entry instruction overrides default agent formatting behaviour | yes    |
+
+The rendered form observed on the announcing system message is
+
+```
+<context key="ai-sdk.system">
+…value…
+</context>
+```
+
+with `description: "Instructions updated: api/ai-sdk.system"`.
+
+The remove test was designed to exclude transcript contamination: the entry
+was put **and removed before the session was ever prompted**, so the model
+could not have learned the value from conversation history. It did not
+produce it.
+
+## What is still undocumented
+
+None of the above is stated anywhere we could find, so every one of these is
+a behaviour we are relying on by observation rather than by contract:
+
+1. **Role and precedence.** Entries appear to join the instruction baseline
+   _after_ the agent's own system prompt. Is that ordering guaranteed? Can an
+   entry override agent instructions, or is that incidental?
+2. **Compaction.** Do entries survive compaction — are they re-rendered into
+   the compacted context, or can a long session silently lose them? This is
+   the one we most need and could not practically test.
+3. **The size cap is charged on the JSON encoding, not the raw value.** An
+   8190-character ASCII value is accepted (8190 + 2 quotes = 8192); 8191 is
+   rejected at 8193 bytes. Multi-byte characters are charged their UTF-8
+   length and JSON-escaped characters their escaped length. That is a
+   reasonable implementation, but a caller budgeting against "8 KiB" will
+   overshoot. `InstructionEntryValueTooLargeError` does report `actualBytes`
+   and `maxBytes`, which is excellent — it just is not documented that
+   `actualBytes` counts the encoding.
+4. **Key namespacing convention.** Multiple writers share one session's entry
+   map, so keys are a collision surface. We namespace ours (`ai-sdk.system`).
+   Is there an intended convention, or reserved prefixes we should avoid?
+5. **Redundant writes.** We avoid re-`put`ting an unchanged value because a
+   put announces a durable system message. Is a no-op put actually
+   suppressed server-side, or is avoiding it the caller's job?
 
 ## Use case
 
-We maintain `ai-sdk-provider-opencode-sdk` (Vercel AI SDK provider). The AI SDK contract lets every call carry a `system:` message; today we forward it to v1's `prompt.system`. Without a v2 equivalent our only option is prepending a delimited pseudo-system block to the first user turn — which loses system-role priority, leaks into the visible transcript, and breaks on reused sessions where the first turn is long gone. Any AI SDK app that sets `system:` (nearly all of them) silently degrades.
+We maintain `ai-sdk-provider-opencode-sdk` (Vercel AI SDK provider). The AI
+SDK contract lets every call carry a `system:` message. We now map that (and
+our own `systemPrompt` setting) onto a namespaced instruction entry, which
+fixed a real limitation: the previous fallback — prepending a delimited
+pseudo-system block to the first user turn — lost system-role priority,
+leaked into the visible transcript, and did not apply at all to reused
+sessions.
 
 ## Ask
 
-1. What is the intended v2 story for caller-supplied system context on the network API?
-2. If `session.instructions` is that story, please document/confirm:
-   - whether entries are injected into model context (as system role? where in priority order?),
-   - persistence across turns and compaction,
-   - and implement it in the served builds.
-3. Otherwise, concrete suggestion: `session.create({ …, instructions?: string })` and/or `session.prompt({ …, system?: string })` (applied for that turn only), mirroring what agents already get via config. Either placement unblocks us; per-session is enough if per-turn is philosophically off the table.
+Document the guarantees above — particularly **compaction survival** and
+**precedence relative to the agent prompt** — so callers can depend on them
+rather than infer them. No API change requested; the mechanism is right.

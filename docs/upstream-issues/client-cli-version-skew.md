@@ -1,57 +1,115 @@
-# [DRAFT — do not post yet] v2: no published CLI/server matches the contract generation of `@opencode-ai/client@beta`
+# [DRAFT — do not post yet] v2: the CLI that serves the v2 contract is undiscoverable, and its dist-tags do not pair with the client's
 
 **Repo:** anomalyco/opencode
-**Labels (suggested):** v2, packaging, dx
+**Labels (suggested):** v2, packaging, dx, docs
+
+> **Correction note (2026-08-27).** An earlier revision of this draft claimed
+> _no published CLI serves the v2 contract_. That was **wrong**, and the
+> mistake is itself the point of this issue: we had been probing
+> `opencode-ai`, the **v1** package name. The v2 CLI is published as
+> **`@opencode-ai/cli`**, its binary is **`opencode2`**, and
+> `@opencode-ai/cli@0.0.0-beta-18286` serves the pinned
+> `@opencode-ai/client@0.0.0-beta-18286` contract correctly. Everything below
+> is the residual, verified problem: nothing in the docs, package metadata or
+> dist-tags leads you there.
 
 ## Problem
 
-The published packages that make up a working v2 setup are not release-paired, and as of 2026-08-26 no installable CLI serves the API that the current `@opencode-ai/client@beta` speaks:
+### 1. The package name is a trap
 
-- `@opencode-ai/client@beta` resolves to `0.0.0-beta-18286` (beta branch). Its generated contract expects flat `session.prompt` bodies, `session.execution.*` / `session.inbox.*` / `session.text.delta` events, `form.*`, `session.log`, `/api/experimental/migration/v1`, etc.
-- `opencode-ai@dev` (`0.0.0-dev-202608261632`, published the same day as the client build) serves a 51-route partial v2 surface from the dev branch with an **older/different protocol**: nested `{prompt: {...}}` bodies (the beta client's flat body is rejected with `InvalidRequestError: Missing key at ["prompt"]`), `session.next.*` event names, and no execution/inbox/form/log routes at all (`spike/artifacts/01-baseline-cycle.json`, `spike/artifacts/04-dev-full-cycle.json`, `spike/artifacts/doc-openapi.json`).
-- `opencode-ai@beta` (`0.0.0-beta-202608110357`, Aug 11 build) has the **same** partial 51-route surface, only older (`spike/artifacts/doc-openapi-beta-cli.json`) — the beta dist-tag on the CLI does not track the beta dist-tag on the client.
-- Even shared routes diverge in contract: dev's `session.compact` and `session.interrupt` return 204/no-body where client-18286 expects receipt/`{interrupted}` bodies (`spike/artifacts/08-interrupt-resume.json`).
+`opencode-ai` is the **v1** CLI. Its `latest` is `1.18.23` — a real v1
+release — and its `beta`/`dev` tags (`0.0.0-beta-202608110357`,
+`0.0.0-dev-202608261632`) publish a **partial 51-route v2 surface** with a
+different protocol generation: nested `{prompt: {...}}` bodies (the v2
+client's flat body is rejected with `InvalidRequestError: Missing key at
+["prompt"]`), `session.next.*` event names, and no execution/inbox/form/log
+routes at all (`spike/artifacts/01-baseline-cycle.json`,
+`spike/artifacts/04-dev-full-cycle.json`, `spike/artifacts/doc-openapi.json`,
+`spike/artifacts/doc-openapi-beta-cli.json`).
 
-So "install the beta client + install a CLI" currently cannot produce a working pair, and nothing in the version strings reveals that: all three artifacts use `0.0.0-*` builds with a generic `info.version: "1.0.0"` in `/doc`, and `client.health.get()` version gating has nothing documented to gate on.
+Meanwhile the v2 CLI lives at **`@opencode-ai/cli`** with binary
+**`opencode2`**. A consumer who reads "install the OpenCode CLI", reaches for
+`opencode-ai`, and pairs it with `@opencode-ai/client` gets a
+protocol-mismatched pair and opaque `InvalidRequestError` /
+`UnsupportedContentType` failures. Nothing in either package's metadata says
+"this is v1" or "the v2 CLI is elsewhere".
 
-## Stage-6 addendum: source build is the only compatible server; embedded host is Bun-only
+We lost real time to exactly this, and concluded in writing that no published
+v2 server existed. It did.
 
-Verified 2026-08-26 against the `beta` branch **built from source** at
-`f4a9b930` (the commit matching client build `0.0.0-beta-18286`, via
-`bun install` + `bun run --cwd packages/cli --conditions=browser src/index.ts
-serve`):
+### 2. `@opencode-ai/cli`'s own dist-tags are misleading
 
-- The source-built server speaks the pinned client's contract **verbatim**:
-  flat `session.prompt` bodies, `session.inbox.*`/`session.execution.*`/
-  `session.text.delta` events, `{interrupted}` interrupt body, form/inbox
-  routes, `/openapi.json` covering every operation the client generation
-  expects — 130 method+path pairs over 110 unique paths, against a server
-  document of 112 paths / 133 operations
-  (our integration suite asserts client-operations ⊆ server-spec and passes a
-  full prompt→stream→finish/abort/queue/approval matrix against it). So the
-  contract itself is fine — **the only way to obtain a matching server today
-  is building the beta branch from source with bun**, which no downstream
-  consumer of the published npm packages can be expected to do.
-- The embedded-host alternative is closed off for Node consumers:
-  `@opencode-ai/sdk@0.0.0-beta-18286` ships extensionless relative ESM
-  imports (`import ... from "./promise"`), which Node cannot resolve
-  (`ERR_MODULE_NOT_FOUND`); it only runs under Bun. A provider package
-  cannot ship a `./embedded` entrypoint for Node users until the beta sdk
-  publishes Node-resolvable ESM (file extensions or an exports map).
-- Additional runtime requirement worth documenting: the beta server requires
-  HTTP Basic auth (`opencode:<password>`) on every route including
-  `/api/health`; foreground `serve` reads `OPENCODE_PASSWORD` or generates
-  and prints one. Clients pointed at a `baseUrl` need the credential — one
-  more thing `health.get()` gating cannot discover by itself today.
+Observed 2026-08-27:
+
+| Package               | `latest`           | `next`             | `beta`             | `dev`             |
+| --------------------- | ------------------ | ------------------ | ------------------ | ----------------- |
+| `@opencode-ai/cli`    | `0.0.0-beta-17823` | `0.0.0-beta-17823` | `0.0.0-beta-18314` | `0.0.0-dev-18370` |
+| `@opencode-ai/client` | `0.0.0`            | `0.0.0-next-17444` | `0.0.0-beta-18371` | `0.0.0-dev-18372` |
+
+Two independent problems:
+
+- **`latest`/`next` point at an older build than `beta`.** `npm i
+@opencode-ai/cli` installs `0.0.0-beta-17823`, which is _behind_
+  the `beta` tag's `18314`. `latest` normally means newest-stable; here it
+  means neither newest nor stable.
+- **The same dist-tag does not pair across packages.** Today `cli@beta` is
+  `18314` while `client@beta` is `18371` — installing both at `beta` yields a
+  **57-build skew**, and `client@latest` is literally `0.0.0`. There is no
+  documented rule saying build numbers must match, yet in practice they must:
+  we pin `client` and `cli` to the _same_ build (`0.0.0-beta-18286`)
+  and that pair works verbatim.
+
+### 3. Nothing at runtime tells you whether a client and a server are compatible
+
+`health.get()` returns `{healthy, version, pid}` where `version` is the build
+number (`0.0.0-beta-18286`) — which is usable, but there is no documented
+statement that "client build X requires server build X", so a client cannot
+know what to assert. `/api/doc` does not exist on this build (404 when
+authenticated). The OpenAPI document _is_ served, at **`/openapi.json`** —
+useful, but undocumented and not where the v1 CLI put it.
+
+Compounding it: unknown routes on `/api/...` do not 404 cleanly on the older
+builds — they return **SPA HTML with 200**, so a client cannot distinguish
+"route not implemented on this build" from "wrong content type".
+
+## What does work (for the record)
+
+`@opencode-ai/cli@0.0.0-beta-18286` (`opencode2 serve`) serves
+`@opencode-ai/client@0.0.0-beta-18286` correctly. We run a full gated
+integration suite against it — prompt→stream→finish, abort, queue/steer
+delivery, approvals, file ingestion, `session.wait`, `session.log`,
+`migration.v1.status`, and session instruction entries — and assert
+client-operations ⊆ `/openapi.json`. Captures:
+`spike/artifacts/14-opencode2-verification.json`,
+`spike/artifacts/14b-instruction-entries.json`.
+
+One runtime requirement worth documenting: `serve` requires HTTP Basic auth
+(`opencode:<password>`) on **every** route including `/api/health`. It reads
+`OPENCODE_PASSWORD`, or generates one and prints `server password <...>` to
+stdout.
 
 ## Use case
 
-We maintain `ai-sdk-provider-opencode-sdk` (Vercel AI SDK provider). We develop against the typed beta client (the analysis-recommended path) but can only validate behavior against a live server — and today every live server speaks a different contract generation than the client we ship against. We had to build our reducer/fixtures purely from the generated types because captured live streams are not valid fixtures for the beta contract. Users hitting the skew see opaque `InvalidRequestError`/`UnsupportedContentType` failures with no hint that the problem is client↔server generation mismatch.
+We maintain `ai-sdk-provider-opencode-sdk` (Vercel AI SDK provider). We ship
+against the typed v2 client and must tell our users how to run a compatible
+server. Right now the honest instruction is "install `@opencode-ai/cli` at
+the _exact same build number_ as your `@opencode-ai/client`, and do not use
+`latest`" — which is not something a user could derive from the published
+metadata.
 
 ## Ask
 
-1. **Paired publishes**: when a `@opencode-ai/client` build is published to a dist-tag, publish an `opencode-ai` CLI build of the same contract generation to the matching dist-tag (or gate the client publish on one existing).
-2. Failing that, a **documented compatibility matrix**: which client builds speak to which CLI/server builds, and which dist-tags are expected to interoperate.
-3. Expose a **contract-generation identifier** at runtime (e.g. in `health.get()`/`server.get()` or `/doc` `info.version`) so clients can fail fast with an actionable version-skew message instead of a route-level 4xx/`UnsupportedContentType`.
+1. **Say what the v2 CLI is.** A note in `opencode-ai`'s README/description
+   ("this is OpenCode v1; for v2 use `@opencode-ai/cli`, binary `opencode2`")
+   would have saved this entirely.
+2. **Fix `@opencode-ai/cli`'s `latest`/`next`** so they do not point behind
+   `beta`, or document what they are meant to track.
+3. **Publish client and CLI in pairs**, or state the pairing rule explicitly
+   ("`@opencode-ai/client@X` requires `@opencode-ai/cli@X`"). Build numbers
+   already encode it; only the guarantee is missing.
+4. **Document `/openapi.json`** as the v2 spec location, and expose the
+   contract generation somewhere a client can assert on so version skew fails
+   fast with an actionable message.
 
-Raw captures for all of the above are available (spike artifacts cited inline) and we're happy to attach them.
+Raw captures for all of the above are available (spike artifacts cited
+inline) and we're happy to attach them.

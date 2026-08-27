@@ -11,13 +11,20 @@ Clean-break rewrite targeting **OpenCode v2** via `@opencode-ai/client`
 (exact pin `0.0.0-beta-18286`). See **[docs/migrating-v4-to-v5.md](docs/migrating-v4-to-v5.md)**
 for the full setting-by-setting migration.
 
-> **Contract-first caveat:** the client is pinned to the beta-18286 contract
-> and **no published OpenCode binary serves it yet** — the only compatible
-> server is the upstream `anomalyco/opencode` `beta` branch built from
-> source (commit `f4a9b93`). The provider's behavior was developed and
-> verified against that server (unit suite + a gated live integration suite
-> and spike artifacts). Published dev/beta CLIs speak an older, incompatible
-> protocol; use the 4.x line for OpenCode 1.18.x servers.
+> **Server requirement:** the client is pinned to the beta-18286 contract,
+> and the matching server is published — as **`@opencode-ai/cli`**, binary
+> **`opencode2`**, at the same build number:
+>
+> ```bash
+> npx @opencode-ai/cli@0.0.0-beta-18286 serve --port 4096
+> ```
+>
+> `opencode-ai` on npm is the **v1** CLI and speaks an incompatible
+> protocol; use the 4.x line of this package for OpenCode 1.18.x servers.
+> Install the CLI at the same build number as the client — the two packages'
+> dist-tags do not pair. The provider's behavior is verified against
+> `opencode2` (unit suite + a gated live integration suite and spike
+> artifacts).
 
 ### Breaking
 
@@ -82,9 +89,19 @@ for the full setting-by-setting migration.
 - Expanded `providerMetadata.opencode`: `inboxId`, approval/form IDs,
   native `finish`/`rawFinish`, `outcome`, `interruptReason`, `cost`,
   native `tokens` (incl. cache), structured `error`, `retry`.
-- Gated live integration suite with a self-contained beta-source server
-  harness (`npm run test:integration`), contract-drift snapshot test, and
-  packed-artifact smoke test.
+- **System prompts are real, not degraded.** `systemPrompt` and AI SDK
+  `system:` messages are written as a session instruction entry under the
+  namespaced key `ai-sdk.system`, which the server renders into the
+  instruction baseline and re-renders on every turn — so a system prompt
+  applies to the whole session, not just its first prompt (the v4-era
+  limitation). Writes are reconciled: an unchanged value skips the request,
+  and dropping system content removes the entry rather than leaking it into
+  later turns. Falls back to the delimited prepend plus an `unsupported`
+  warning when the route is absent, the value exceeds the server's
+  8192-byte cap (measured on the JSON encoding), or the write fails.
+- Gated live integration suite (`npm run test:integration`) driving the
+  published `opencode2` binary in an isolated sandbox, contract-drift
+  snapshot test, and packed-artifact smoke test.
 
 ## [4.1.0] - 2026-08-05
 

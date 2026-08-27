@@ -13,7 +13,14 @@ A community provider for the [Vercel AI SDK](https://sdk.vercel.ai/docs) (v7) th
 >
 > This 5.x line targets the **OpenCode v2 beta contract** and is pinned to `@opencode-ai/client@0.0.0-beta-18286`.
 >
-> **No published OpenCode binary currently serves this contract.** The dev- and beta-channel CLIs speak an older, incompatible protocol. The only known compatible server is the upstream [`anomalyco/opencode`](https://github.com/anomalyco/opencode) `beta` branch **built from source** (commit `f4a9b93`, matching the pinned client). This repo's integration harness clones, builds, and serves it in an isolated sandbox — see [`integration/harness/beta-server.ts`](integration/harness/beta-server.ts) and the reproduction steps in [`docs/v2-spike-findings.md`](docs/v2-spike-findings.md).
+> **The compatible server is published — but not under the name you would guess.** `opencode-ai` on npm is the **v1** CLI (`latest` is `1.18.23`) and speaks an incompatible protocol. The v2 CLI is **`@opencode-ai/cli`**, and its binary is **`opencode2`**:
+>
+> ```bash
+> npm install -D @opencode-ai/cli@0.0.0-beta-18286   # exact build of the pinned client
+> npx opencode2 serve --port 4096
+> ```
+>
+> Install the **same build number** as the pinned client — the dist-tags do not pair across the two packages (`@opencode-ai/cli`'s `latest` currently points _behind_ its `beta`). `serve` requires HTTP Basic auth on every route: username `opencode`, password from `OPENCODE_PASSWORD` or printed at startup as `server password <...>`. This repo's integration harness runs exactly this binary in an isolated sandbox — see [`integration/harness/beta-server.ts`](integration/harness/beta-server.ts) and [`docs/v2-spike-findings.md`](docs/v2-spike-findings.md).
 >
 > For OpenCode 1.18.x servers (the current published CLI), use the **4.x** line of this package.
 >
@@ -21,16 +28,16 @@ A community provider for the [Vercel AI SDK](https://sdk.vercel.ai/docs) (v7) th
 
 ## Version compatibility
 
-| Provider | AI SDK | OpenCode server             | Status                        |
-| -------- | ------ | --------------------------- | ----------------------------- |
-| 5.x      | v7     | v2 beta (built from source) | Beta                          |
-| 4.x      | v7     | 1.18.x (published CLI)      | Maintenance                   |
-| 3.x      | v6     | 1.x                         | Maintenance (`ai-sdk-v6` tag) |
+| Provider | AI SDK | OpenCode server                                  | Status                        |
+| -------- | ------ | ------------------------------------------------ | ----------------------------- |
+| 5.x      | v7     | v2 beta (`@opencode-ai/cli`, binary `opencode2`) | Beta                          |
+| 4.x      | v7     | 1.18.x (published CLI)                           | Maintenance                   |
+| 3.x      | v6     | 1.x                                              | Maintenance (`ai-sdk-v6` tag) |
 
 ## Requirements
 
 - Node.js >= 22
-- An OpenCode v2 server that speaks the beta-18286 contract (see the status banner)
+- An OpenCode v2 server at the same build as the pinned client — `npx @opencode-ai/cli@0.0.0-beta-18286 serve` (see the status banner; note the package is `@opencode-ai/cli`, **not** `opencode-ai`)
 - Credentials configured on that server for the providers you want to use (e.g. OpenCode zen)
 
 ```bash
@@ -83,7 +90,7 @@ await opencode.dispose();
 
 3. **`baseUrl`** — the provider constructs the client with `clientOptions` (`headers`, `fetch`).
 
-4. **Service discovery** — `Service.discover()` via the local registration file, with the registered endpoint's auth merged automatically. `autoStart: true` additionally spawns via `Service.ensure`. **Caveat:** no published CLI supports `opencode serve --service` yet (only source builds write a registration), so the default is discovery-only (`autoStart: false`), and the zero-config default provider (`import { opencode }`) only works once a registered service exists.
+4. **Service discovery** — `Service.discover()` via the local registration file, with the registered endpoint's auth merged automatically. `autoStart: true` additionally spawns via `Service.ensure`. `@opencode-ai/cli`'s `opencode2 serve --service` does write a registration (the _v1_ `opencode-ai` CLI has no such flag — the origin of an earlier "unsupported" note here). The default stays discovery-only (`autoStart: false`) because `Service.ensure`'s default spawn command names the v1 binary; the zero-config default provider (`import { opencode }`) works once a registered service exists.
 
 Every backend runs a connection preflight (`health.get` + `migration.v1.status`) on first use.
 
@@ -208,23 +215,23 @@ await generateText({
 
 ### Model settings (`opencode(modelId, {...})`)
 
-| Setting                 | Type                                        | Notes                                                                                                                           |
-| ----------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `sessionId`             | `string`                                    | Pin an existing session (shared-session caveat)                                                                                 |
-| `sessionMode`           | `"ephemeral" \| "persistent" \| "existing"` | Default `"ephemeral"`; `"persistent"` currently behaves identically to it (see above)                                           |
-| `createNewSession`      | `boolean`                                   | Fresh session per ordinary call; approval continuations still reattach to the blocked session                                   |
-| `sessionTitle`          | `string`                                    | Title for created sessions                                                                                                      |
-| `agent`                 | `string`                                    | Session state, set at create                                                                                                    |
-| `systemPrompt`          | `string`                                    | **Degraded**: prepended to the first user turn as a delimited block, with a warning — v2 has no per-prompt/session system field |
-| `variant`               | `string`                                    | Model variant (requires a resolvable `providerID`)                                                                              |
-| `location`              | `{ directory, workspaceID? }`               | Session location, bound at create (replaces v4 `directory`/`cwd`)                                                               |
-| `directory`             | `string`                                    | Deprecated alias for `location.directory`                                                                                       |
-| `delivery`              | `"queue" \| "steer"`                        | Busy-session delivery; provider default `"queue"`, sent explicitly                                                              |
-| `resume`                | `boolean`                                   | v2 `resume` flag (semantics provisional upstream)                                                                               |
-| `onForm` / `formPolicy` | see above                                   | Forms handling; policy default `"cancel"`                                                                                       |
-| `resolveFileToUri`      | hook                                        | Custom file→`data:` URI resolution                                                                                              |
-| `jsonRepair`            | `{ maxAttempts? }`                          | Opt-in client-side JSON validate/repair (non-streaming)                                                                         |
-| `logger` / `verbose`    | `Logger \| false` / `boolean`               | Logging                                                                                                                         |
+| Setting                 | Type                                        | Notes                                                                                                                                                                                                                                         |
+| ----------------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sessionId`             | `string`                                    | Pin an existing session (shared-session caveat)                                                                                                                                                                                               |
+| `sessionMode`           | `"ephemeral" \| "persistent" \| "existing"` | Default `"ephemeral"`; `"persistent"` currently behaves identically to it (see above)                                                                                                                                                         |
+| `createNewSession`      | `boolean`                                   | Fresh session per ordinary call; approval continuations still reattach to the blocked session                                                                                                                                                 |
+| `sessionTitle`          | `string`                                    | Title for created sessions                                                                                                                                                                                                                    |
+| `agent`                 | `string`                                    | Session state, set at create                                                                                                                                                                                                                  |
+| `systemPrompt`          | `string`                                    | Written as a session instruction entry (`ai-sdk.system`) — applies to **every** turn of the session, not just the first. Falls back to a delimited prepend + warning when the route is absent or the value exceeds the server's 8192-byte cap |
+| `variant`               | `string`                                    | Model variant (requires a resolvable `providerID`)                                                                                                                                                                                            |
+| `location`              | `{ directory, workspaceID? }`               | Session location, bound at create (replaces v4 `directory`/`cwd`)                                                                                                                                                                             |
+| `directory`             | `string`                                    | Deprecated alias for `location.directory`                                                                                                                                                                                                     |
+| `delivery`              | `"queue" \| "steer"`                        | Busy-session delivery; provider default `"queue"`, sent explicitly                                                                                                                                                                            |
+| `resume`                | `boolean`                                   | v2 `resume` flag (semantics provisional upstream)                                                                                                                                                                                             |
+| `onForm` / `formPolicy` | see above                                   | Forms handling; policy default `"cancel"`                                                                                                                                                                                                     |
+| `resolveFileToUri`      | hook                                        | Custom file→`data:` URI resolution                                                                                                                                                                                                            |
+| `jsonRepair`            | `{ maxAttempts? }`                          | Opt-in client-side JSON validate/repair (non-streaming)                                                                                                                                                                                       |
+| `logger` / `verbose`    | `Logger \| false` / `boolean`               | Logging                                                                                                                                                                                                                                       |
 
 ### Response metadata
 
@@ -264,7 +271,7 @@ await opencode.dispose();
 
 ## Examples
 
-All examples need a running beta-source server — see [`examples/env.ts`](examples/env.ts) for the environment variables (`OPENCODE_BETA_URL`, `OPENCODE_BETA_PASSWORD`, `OPENCODE_MODEL`, `OPENCODE_DIRECTORY`).
+All examples need a running `opencode2` server — see [`examples/env.ts`](examples/env.ts) for the environment variables (`OPENCODE_BETA_URL`, `OPENCODE_BETA_PASSWORD`, `OPENCODE_MODEL`, `OPENCODE_DIRECTORY`).
 
 - [`examples/basic-usage.ts`](examples/basic-usage.ts) — minimal `generateText` (`npm run example:basic`)
 - [`examples/streaming.ts`](examples/streaming.ts) — streaming deltas + final usage (`npm run example:streaming`)

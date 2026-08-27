@@ -1,5 +1,17 @@
 # Stage 8 — Ship prep: docs, examples, migration guide, version
 
+> **Stage-9 correction (2026-08-27).** This brief's premise — that the only
+> server speaking the pinned client's contract is the `anomalyco/opencode`
+> `beta` branch built from source — is **wrong**, and was wrong when written.
+> The matching server is published as **`@opencode-ai/cli`** (binary
+> **`opencode2`**) at the same build number as the pinned client. The earlier
+> conclusion came from probing **`opencode-ai`**, the *v1* package name.
+> Stage 9 retargeted the harness to the published binary; the source build
+> survives only as an opt-in fallback behind `OPENCODE_BETA_SRC_DIR`. The
+> deliverables below were executed as written and their *findings* stand —
+> only the "source-build-only" framing is superseded.
+
+
 ## Goal
 
 Make the package presentable and honest: README, examples, migration guide, CHANGELOG, model shortcuts, version metadata. **No publishing** — everything stops at a commit; the user decides when/whether to publish.

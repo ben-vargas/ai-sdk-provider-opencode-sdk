@@ -1,5 +1,17 @@
 # Stage 6 — Beta-source integration harness + spike re-verification
 
+> **Stage-9 correction (2026-08-27).** This brief's premise — that the only
+> server speaking the pinned client's contract is the `anomalyco/opencode`
+> `beta` branch built from source — is **wrong**, and was wrong when written.
+> The matching server is published as **`@opencode-ai/cli`** (binary
+> **`opencode2`**) at the same build number as the pinned client. The earlier
+> conclusion came from probing **`opencode-ai`**, the *v1* package name.
+> Stage 9 retargeted the harness to the published binary; the source build
+> survives only as an opt-in fallback behind `OPENCODE_BETA_SRC_DIR`. The
+> deliverables below were executed as written and their *findings* stand —
+> only the "source-build-only" framing is superseded.
+
+
 ## Goal
 
 Real integration tests against the only server that speaks our contract: the `anomalyco/opencode` **`beta` branch built from source**. Then re-verify the spike answers that came from the mismatched dev CLI, and correct any design decision they change.
