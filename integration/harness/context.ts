@@ -89,6 +89,36 @@ export function integrationContext(): IntegrationContext {
   };
 }
 
+/** Poll until `fn` returns a value (undefined = keep polling). */
+export async function pollUntil<T>(
+  fn: () => Promise<T | undefined>,
+  { timeoutMs = 90_000, intervalMs = 1000, label = "condition" } = {},
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = await fn();
+    if (value !== undefined) {
+      return value;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`pollUntil timed out after ${timeoutMs}ms: ${label}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
+/** Parse `providerID/modelID` (integration model ids always carry both). */
+export function parseModelRef(modelId: string): {
+  providerID: string;
+  modelID: string;
+} {
+  const slash = modelId.indexOf("/");
+  return {
+    providerID: modelId.slice(0, slash),
+    modelID: modelId.slice(slash + 1),
+  };
+}
+
 /** Collect a LanguageModelV4 stream into an array of parts. */
 export async function collectStream<T>(result: {
   stream: ReadableStream<T>;
