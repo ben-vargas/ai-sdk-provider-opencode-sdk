@@ -75,9 +75,10 @@ describe.skipIf(!canRun)(
         }
       }
 
-      // `--service` binds the channel's fixed default port unless the
-      // service config overrides it — pre-seed a free port so the test
-      // cannot collide with a real local opencode service.
+      // Port pre-seed for the source fallback, which binds the channel's
+      // fixed default port and would collide with a real local opencode
+      // service. The published `opencode2` build ignores this file and
+      // binds an ephemeral port, which cannot collide by construction.
       const port = await new Promise<number>((resolve, reject) => {
         const probe = createServer();
         probe.once("error", reject);
@@ -142,13 +143,16 @@ describe.skipIf(!canRun)(
       };
 
       // `--service` writes the registration once the server is listening.
-      const registrationFile = join(
-        stateHome,
-        "opencode",
-        "service-local.json",
+      // The published `opencode2` build writes `service.json` — which is
+      // also the only name the client's own `Service` module knows (it
+      // falls back to `<state>/opencode/service.json`). `service-local.json`
+      // is accepted as a second candidate so the opt-in source fallback,
+      // whose channel naming differs, still exercises this test.
+      const candidates = ["service.json", "service-local.json"].map((name) =>
+        join(stateHome, "opencode", name),
       );
-      await pollUntil(
-        async () => (existsSync(registrationFile) ? true : undefined),
+      const registrationFile = await pollUntil(
+        async () => candidates.find((file) => existsSync(file)),
         { timeoutMs: 60_000, label: "service registration file appears" },
       );
 

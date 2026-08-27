@@ -484,6 +484,40 @@ This changes no shipped behaviour — the provider already treats
 than as the completion signal (deferred-ledger item 1). It does mean the
 earlier `false` should not have been recorded as a property.
 
+### `serve --service` works, and the registration filename moved
+
+`opencode2 serve --service` writes a registration — the _v1_ `opencode-ai`
+CLI's missing `--service` flag was the basis of stage-0 finding 0.1's claim
+that no published CLI supports it. On the published binary it writes
+`$XDG_STATE_HOME/opencode/service.json`:
+
+```json
+{
+  "id": "…",
+  "version": "0.0.0-beta-18286",
+  "url": "http://127.0.0.1:49374",
+  "pid": 28022,
+  "password": "…"
+}
+```
+
+and mirrors the generated password into
+`$XDG_CONFIG_HOME/opencode/service.json`.
+
+Two differences from the source build caught the integration test, which had
+been written against it:
+
+- the registration is `service.json`, **not** `service-local.json` — and
+  `service.json` is the only name the client's own `Service` module knows
+  (its fallback is `<state>/opencode/service.json`), so the published binary
+  is the one that matches the client here;
+- a `service-local.json` port override in the config home is **ignored** —
+  the published build binds an ephemeral port regardless.
+
+`integration/service-backend.test.ts` now accepts either filename (the
+source fallback keeps working) and notes that the port pre-seed exists only
+for that fallback: an ephemeral port cannot collide by construction.
+
 ### A probe that had to be thrown away
 
 The first stage-9 run of the file-ingestion check used the server's default

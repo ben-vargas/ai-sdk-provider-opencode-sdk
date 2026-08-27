@@ -90,7 +90,7 @@ await opencode.dispose();
 
 3. **`baseUrl`** — the provider constructs the client with `clientOptions` (`headers`, `fetch`).
 
-4. **Service discovery** — `Service.discover()` via the local registration file, with the registered endpoint's auth merged automatically. `autoStart: true` additionally spawns via `Service.ensure`. `@opencode-ai/cli`'s `opencode2 serve --service` does write a registration (the _v1_ `opencode-ai` CLI has no such flag — the origin of an earlier "unsupported" note here). The default stays discovery-only (`autoStart: false`) because `Service.ensure`'s default spawn command names the v1 binary; the zero-config default provider (`import { opencode }`) works once a registered service exists.
+4. **Service discovery** — `Service.discover()` via the local registration file, with the registered endpoint's auth merged automatically. `autoStart: true` additionally spawns via `Service.ensure`. `opencode2 serve --service` writes `$XDG_STATE_HOME/opencode/service.json` (`{id, version, url, pid, password}`) — verified live; the _v1_ `opencode-ai` CLI has no such flag, which is where an earlier "no published CLI supports it" note came from. The default stays discovery-only (`autoStart: false`) because `Service.ensure`'s default spawn command is `["opencode", "serve", "--service"]`, naming the **v1** binary — pass `command: ["opencode2", "serve", "--service"]` to auto-start a v2 service. The zero-config default provider (`import { opencode }`) works once a registered service exists.
 
 Every backend runs a connection preflight (`health.get` + `migration.v1.status`) on first use.
 

@@ -13,6 +13,8 @@ OpenCode v1 supported `session.prompt({ format: { type: "json_schema", schema } 
 
 We could not verify a hidden/server-side variant either: on the embedded host (`@opencode-ai/sdk@0.0.0-beta-18286`) the prompt route itself currently 500s, and the dev-channel CLI (`0.0.0-dev-202608261632`) exposes a `{prompt: {text, files, agents}}` body with no format member in its own OpenAPI (`GET /doc`, `PromptInput` schema — captured 2026-08-26).
 
+**Verified against the real server (2026-08-27).** The two sentences above were written from servers we now know were the wrong ones. Re-checked against the published `@opencode-ai/cli@0.0.0-beta-18286` (`opencode2`), which is the exact build of the pinned client, the finding is **stronger, not weaker**: its own `/openapi.json` (112 paths) declares the prompt body as `{id, text, files, agents, skills, metadata, delivery, resume}` — no format member — and the strings `responseFormat`, `response_format`, `json_schema`, `outputSchema` and `structuredOutput` do not occur **anywhere** in the document. So there is no structured-output surface on v2, hidden or otherwise.
+
 ## Use case
 
 We maintain `ai-sdk-provider-opencode-sdk`, a Vercel AI SDK provider backed by OpenCode. The AI SDK's `generateObject`/`streamObject`/`Output.object()` flows depend on `responseFormat: {type: "json", schema}` reaching the backend. On v1 we map this 1:1 to `format: json_schema` and it is one of the provider's most used features. On v2 our only fallback is prompt-engineering ("respond with JSON matching …") plus client-side parse/repair loops — strictly worse: no grammar constraint, wasted tokens on retries, and a documented behavioral regression for every downstream `generateObject` user.
