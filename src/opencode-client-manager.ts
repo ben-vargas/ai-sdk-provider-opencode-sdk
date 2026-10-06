@@ -41,13 +41,8 @@ export class OpencodeClientManager {
   private initPromise: Promise<OpencodeClient> | null = null;
   private isDisposed = false;
   private activeEventSubscriptions = new Set<AbortController>();
-  private cleanupHandlersRegistered = false;
-  private cleanupHandlers: {
-    exit?: () => void;
-    sigint?: () => void;
-    sigterm?: () => void;
-    uncaughtException?: (error: Error) => void;
-  } = {};
+  private exitHandler: (() => void) | null = null;
+  private startupAbort: AbortController | null = null;
 
   private constructor(options: ClientManagerOptions) {
     // Filter out undefined values to prevent them from overwriting defaults
@@ -63,9 +58,6 @@ export class OpencodeClientManager {
       ...filteredOptions,
     };
     this.logger = getLogger(options.logger);
-
-    // Register cleanup on process exit
-    this.registerCleanupHandlers();
   }
 
   /**
@@ -203,7 +195,12 @@ export class OpencodeClientManager {
     const serverUrl = `http://${this.options.hostname}:${this.options.port}`;
 
     // Try to connect to existing server first
-    if (await this.isServerRunning(serverUrl)) {
+    const serverRunning = await this.isServerRunning(serverUrl);
+    // Disposed during the health check: neither adopt nor spawn a server.
+    if (this.isDisposed) {
+      throw new Error("Client manager has been disposed");
+    }
+    if (serverRunning) {
       this.logger.debug?.(
         `Connected to existing OpenCode server at ${serverUrl}`,
       );
@@ -214,19 +211,22 @@ export class OpencodeClientManager {
     if (this.options.autoStartServer) {
       this.logger.debug?.(`Starting OpenCode server at ${serverUrl}`);
 
+      // dispose() aborts a startup still in flight; the SDK then stops the
+      // child it spawned.
+      const startupAbort = new AbortController();
+      this.startupAbort = startupAbort;
+      let server: OpencodeServer;
       try {
-        this.server = await createOpencodeServer({
+        server = await createOpencodeServer({
           hostname: this.options.hostname,
           port: this.options.port,
           timeout: this.options.serverTimeout,
+          signal: startupAbort.signal,
         });
-
-        this.logger.debug?.(`OpenCode server started at ${this.server.url}`);
-
-        return createOpencodeClient(
-          this.createManagedClientOptions(this.server.url),
-        );
       } catch (error) {
+        if (this.isDisposed) {
+          throw new Error("Client manager has been disposed");
+        }
         const message = extractErrorMessage(error);
 
         if (message.includes("Timeout")) {
@@ -237,7 +237,27 @@ export class OpencodeClientManager {
         }
 
         throw new Error(`Failed to start OpenCode server: ${message}`);
+      } finally {
+        if (this.startupAbort === startupAbort) {
+          this.startupAbort = null;
+        }
       }
+
+      // Disposed while the server was starting: stop it rather than adopt it.
+      if (this.isDisposed) {
+        try {
+          server.close();
+        } catch {
+          // Ignore errors during cleanup
+        }
+        throw new Error("Client manager has been disposed");
+      }
+
+      this.server = server;
+      this.logger.debug?.(`OpenCode server started at ${server.url}`);
+      this.registerExitHandler();
+
+      return createOpencodeClient(this.createManagedClientOptions(server.url));
     }
 
     throw new Error(
@@ -342,7 +362,9 @@ export class OpencodeClientManager {
     }
 
     this.isDisposed = true;
-    this.unregisterCleanupHandlers();
+    this.startupAbort?.abort();
+    this.startupAbort = null;
+    this.unregisterExitHandler();
 
     // Abort any SSE event streams still open; stopping a managed server does
     // not close them, and for reused servers nothing else would.
@@ -374,76 +396,47 @@ export class OpencodeClientManager {
   }
 
   /**
-   * Register cleanup handlers for process exit.
+   * Stop the spawned server when the process exits.
+   *
+   * Registered only once this manager has actually spawned a server, so
+   * importing the package, or using an external or preconfigured server,
+   * installs no process listeners. The provider never listens for signals:
+   * how the process responds to SIGINT/SIGTERM is the host application's
+   * decision. Node emits `exit` on normal exit, `process.exit()` and uncaught
+   * exceptions. A process killed by a signal skips `exit`: a signal sent to
+   * the whole process group (e.g. Ctrl+C in a terminal) also reaches the
+   * server child, but one sent only to this process (e.g. `kill <pid>`) can
+   * leave it running unless the host handles the signal and calls
+   * `dispose()` or exits via `process.exit()`.
    */
-  private registerCleanupHandlers(): void {
-    if (this.cleanupHandlersRegistered) {
+  private registerExitHandler(): void {
+    if (this.exitHandler) {
       return;
     }
 
-    const cleanup = () => {
-      if (this.server) {
-        try {
-          this.server.close();
-        } catch {
-          // Ignore errors during cleanup
-        }
+    const stopServer = () => {
+      const server = this.server;
+      if (!server) {
+        return;
+      }
+      this.server = null;
+      try {
+        server.close();
+      } catch {
+        // Ignore errors during cleanup
       }
     };
 
-    const handleSigint = () => {
-      cleanup();
-      process.exit(0);
-    };
-
-    const handleSigterm = () => {
-      cleanup();
-      process.exit(0);
-    };
-
-    const handleUncaughtException = (error: Error) => {
-      this.logger.error(`Uncaught exception: ${error.message}`);
-      cleanup();
-      process.exit(1);
-    };
-
-    this.cleanupHandlers = {
-      exit: cleanup,
-      sigint: handleSigint,
-      sigterm: handleSigterm,
-      uncaughtException: handleUncaughtException,
-    };
-
-    // Handle various exit signals
-    process.once("exit", cleanup);
-    process.once("SIGINT", handleSigint);
-    process.once("SIGTERM", handleSigterm);
-    process.once("uncaughtException", handleUncaughtException);
-    this.cleanupHandlersRegistered = true;
+    this.exitHandler = stopServer;
+    process.once("exit", stopServer);
   }
 
-  private unregisterCleanupHandlers(): void {
-    if (!this.cleanupHandlersRegistered) {
+  private unregisterExitHandler(): void {
+    if (!this.exitHandler) {
       return;
     }
-
-    const { exit, sigint, sigterm, uncaughtException } = this.cleanupHandlers;
-
-    if (exit) {
-      process.removeListener("exit", exit);
-    }
-    if (sigint) {
-      process.removeListener("SIGINT", sigint);
-    }
-    if (sigterm) {
-      process.removeListener("SIGTERM", sigterm);
-    }
-    if (uncaughtException) {
-      process.removeListener("uncaughtException", uncaughtException);
-    }
-
-    this.cleanupHandlers = {};
-    this.cleanupHandlersRegistered = false;
+    process.removeListener("exit", this.exitHandler);
+    this.exitHandler = null;
   }
 }
 

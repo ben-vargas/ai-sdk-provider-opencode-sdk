@@ -5,10 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.0.7] - 2026-10-06
+
+3.x is now a **legacy** line (AI SDK v6 + OpenCode 1.x): it stays installable
+under the `ai-sdk-v6` tag but is no longer actively developed. This release
+ships two fixes; on AI SDK v7 use 4.x (`opencode-v1`, OpenCode 1.x) or 5.x
+(`latest`, OpenCode 2.x).
 
 ### Fixed
 
+- **The provider no longer hijacks process shutdown.** Importing the package
+  (which creates the default `opencode` instance) registered `SIGINT` and
+  `SIGTERM` handlers that called `process.exit()`, plus an
+  `uncaughtException` handler that replaced Node's crash output with
+  `exit(1)` — so host applications could not shut down gracefully. The
+  provider now never listens for signals or uncaught exceptions: importing
+  it installs no process listeners, and only once the client manager
+  actually spawns a server does it add a single `exit` listener that stops
+  that server. Hosts that strip these listeners as a workaround no longer
+  need to. A signal sent only to the host process (not its process group)
+  now leaves Node's default handling intact, so a spawned server can
+  outlive it; handle the signal and call `dispose()` if that matters (see
+  README "Cleanup").
+- **Disposing during server startup no longer leaks the server.** `dispose()`
+  (or `resetInstance()`) while a spawned server was still starting let the
+  startup finish and adopt the server on the disposed manager, and disposing
+  during the initial health check still went on to spawn one. Startup now
+  stops at a disposal: a pending server start is aborted, no server is
+  spawned after the health check, and a server that finishes starting anyway
+  is stopped instead of adopted.
 - **Silent permission reply failures** ([#35](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/pull/35)) - `replyToPendingApprovals` never inspected the resolved value of `permission.reply`. Managed clients use `responseStyle: "fields"` without `throwOnError`, so API-level failures resolve as `{ error }` instead of throwing — a failed reply was silently recorded as replied and never retried, leaving OpenCode waiting on the permission request. The result is now checked via `extractSdkResult` (matching the question-reply handling): on error, a warning is logged and surfaced in the response `warnings`, and the approval id is not recorded as replied so the next turn retries it.
 
 ## [3.0.6] - 2026-06-11

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/status-beta-orange" alt="beta status">
+  <img src="https://img.shields.io/badge/status-legacy-lightgrey" alt="legacy status">
   <a href="https://www.npmjs.com/package/ai-sdk-provider-opencode-sdk"><img src="https://img.shields.io/npm/v/ai-sdk-provider-opencode-sdk?color=00A79E" alt="npm version" /></a>
   <a href="https://www.npmjs.com/package/ai-sdk-provider-opencode-sdk"><img src="https://img.shields.io/npm/unpacked-size/ai-sdk-provider-opencode-sdk?color=00A79E" alt="install size" /></a>
   <a href="https://www.npmjs.com/package/ai-sdk-provider-opencode-sdk"><img src="https://img.shields.io/npm/dy/ai-sdk-provider-opencode-sdk.svg?color=00A79E" alt="npm downloads" /></a>
@@ -9,20 +9,35 @@
 
 # AI SDK Provider for OpenCode
 
-> **Latest Release**: Version 3.x supports AI SDK v6. Version 2.x is the previous AI SDK v6 line. For AI SDK v5 support, use the `ai-sdk-v5` tag (0.x.x).
+> **This is the 3.x line (legacy): AI SDK v6 with OpenCode 1.x servers.** It stays installable (`npm install ai-sdk-provider-opencode-sdk@ai-sdk-v6`) but is no longer actively developed. On AI SDK v7, use 4.x (OpenCode 1.x) or 5.x (OpenCode 2.x) — see [Which version do I need?](#which-version-do-i-need)
 
-A community provider for the [Vercel AI SDK](https://sdk.vercel.ai/docs) that enables using AI models through [OpenCode](https://opencode.ai) and the `@opencode-ai/sdk/v2` APIs. OpenCode is a terminal-based AI coding assistant that supports multiple providers (Anthropic, OpenAI, Google, and more).
+A community provider for the [Vercel AI SDK](https://sdk.vercel.ai/docs) (v6) that enables using AI models through an [OpenCode](https://opencode.ai) **1.x** server via `@opencode-ai/sdk` (its `/v2` API entrypoint — an SDK API version, not OpenCode 2.x). OpenCode is a terminal-based AI coding assistant that supports multiple providers (Anthropic, OpenAI, Google, and more).
 
 This provider enables you to use OpenCode's AI capabilities through the familiar Vercel AI SDK interface, supporting `generateText()`, `streamText()`, `streamObject()`, native JSON-schema structured output with practical fallback patterns, tool approval flows, and file/source streaming parts.
 
+## Which version do I need?
+
+Two things decide it: your **AI SDK** major version and your **OpenCode server** major version.
+
+|               | OpenCode 2.x                               | OpenCode 1.x                                                      |
+| ------------- | ------------------------------------------ | ----------------------------------------------------------------- |
+| **AI SDK v7** | 5.x — `npm i ai-sdk-provider-opencode-sdk` | 4.x — `npm i ai-sdk-provider-opencode-sdk@opencode-v1`            |
+| **AI SDK v6** | not supported                              | **3.x** (legacy) — `npm i ai-sdk-provider-opencode-sdk@ai-sdk-v6` |
+| **AI SDK v5** | not supported                              | 0.x (legacy) — `npm i ai-sdk-provider-opencode-sdk@ai-sdk-v5`     |
+
+**Which OpenCode do I have?** `opencode --version` prints a bare `1.x.y` on OpenCode 1 and `opencode v2.x.y` on OpenCode 2. The npm package **`opencode-ai` is OpenCode 1.x**; OpenCode 2.x is published as **`@opencode/cli`**.
+
 ## Version Compatibility
 
-| Provider Version | AI SDK Version | NPM Tag     | Status      | Branch                                                                                   |
-| ---------------- | -------------- | ----------- | ----------- | ---------------------------------------------------------------------------------------- |
-| 3.x.x            | v6             | `latest`    | Stable      | `main`                                                                                   |
-| 2.x.x            | v6             | N/A         | Legacy      | historical                                                                               |
-| 1.x.x            | v6             | N/A         | Legacy      | historical                                                                               |
-| 0.x.x            | v5             | `ai-sdk-v5` | Maintenance | [`ai-sdk-v5`](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/tree/ai-sdk-v5) |
+| Provider | AI SDK | OpenCode server                              | npm tag       | Branch                                                                                       | Status      |
+| -------- | ------ | -------------------------------------------- | ------------- | -------------------------------------------------------------------------------------------- | ----------- |
+| 5.x      | v7     | 2.x (`@opencode/cli`; tested against 2.0.24) | `latest`      | [`main`](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk)                         | Active      |
+| 4.x      | v7     | 1.x (`opencode-ai`)                          | `opencode-v1` | [`opencode-v1`](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/tree/opencode-v1) | Maintenance |
+| 3.x      | v6     | 1.x                                          | `ai-sdk-v6`   | [`ai-sdk-v6`](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/tree/ai-sdk-v6)     | Legacy      |
+| 2.x, 1.x | v6     | 1.x                                          | —             | historical                                                                                   | Legacy      |
+| 0.x      | v5     | 1.x                                          | `ai-sdk-v5`   | [`ai-sdk-v5`](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/tree/ai-sdk-v5)     | Legacy      |
+
+**Maintenance** lines get bug fixes; **Legacy** lines stay installable but receive no further releases.
 
 ## Breaking Changes in 2.0.0
 
@@ -37,13 +52,15 @@ For production object extraction, use a two-step pattern: try `Output.object(...
 
 ### Installing the Right Version
 
-**For AI SDK v6 (recommended):**
+**For AI SDK v6 + OpenCode 1.x (this line):**
 
 ```bash
-npm install ai-sdk-provider-opencode-sdk ai@^6.0.0
+npm install ai-sdk-provider-opencode-sdk@ai-sdk-v6 ai@^6.0.0
 ```
 
-**For AI SDK v5:**
+**For AI SDK v7:** use 4.x (`@opencode-v1`, OpenCode 1.x) or 5.x (`latest`, OpenCode 2.x) and their READMEs.
+
+**For AI SDK v5 (legacy, OpenCode 1.x):**
 
 ```bash
 npm install ai-sdk-provider-opencode-sdk@ai-sdk-v5 ai@^5.0.0
@@ -55,16 +72,16 @@ This package is compatible with **Zod 3 and Zod 4** (aligned with `ai`):
 
 ```bash
 # With Zod 3
-npm install ai-sdk-provider-opencode-sdk ai zod@^3.25.76
+npm install ai-sdk-provider-opencode-sdk@ai-sdk-v6 ai@^6 zod@^3.25.76
 
 # With Zod 4
-npm install ai-sdk-provider-opencode-sdk ai zod@^4.1.8
+npm install ai-sdk-provider-opencode-sdk@ai-sdk-v6 ai@^6 zod@^4.1.8
 ```
 
 ## Prerequisites
 
 - Node.js >= 18
-- [OpenCode CLI](https://opencode.ai) installed (`npm install -g opencode`)
+- [OpenCode CLI](https://opencode.ai) installed (OpenCode **1.x**: `npm install -g opencode-ai`)
 - Valid API keys configured in OpenCode for your preferred providers
 
 ## Quick Start
@@ -393,6 +410,15 @@ const opencode = createOpencode();
 
 // Clean up
 await opencode.dispose?.();
+```
+
+The provider never touches how your process handles signals. Importing it installs no process listeners; only when it spawns a server does it add a single `exit` listener, to stop that server when the process exits (normal exit, `process.exit()` or an uncaught exception). A process killed by a signal skips `exit`: Ctrl+C in a terminal reaches the server too, but a signal sent only to your process (e.g. `kill <pid>`) can leave the server running — if that matters, handle the signal and call `dispose()`:
+
+```typescript
+process.once("SIGTERM", async () => {
+  await opencode.dispose?.();
+  process.exit(0);
+});
 ```
 
 ## License
