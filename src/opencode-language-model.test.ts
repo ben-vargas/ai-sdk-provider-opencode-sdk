@@ -1,3 +1,4 @@
+import { APICallError } from "@ai-sdk/provider";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { OpencodeLanguageModel } from "./opencode-language-model.js";
 import { OpencodeClientManager } from "./opencode-client-manager.js";
@@ -759,6 +760,107 @@ describe("opencode-language-model", () => {
       });
 
       expect(result.request?.body).toBeDefined();
+    });
+
+    describe("event stream ending before the session finishes", () => {
+      const partialText = {
+        type: "message.part.updated",
+        properties: {
+          part: {
+            id: "part-1",
+            sessionID: "session-123",
+            messageID: "msg-1",
+            type: "text",
+            text: "Partial",
+          },
+          delta: "Partial",
+        },
+      };
+
+      async function readAll(stream: ReadableStream<unknown>) {
+        const parts: any[] = [];
+        const reader = stream.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          parts.push(value);
+        }
+        return parts;
+      }
+
+      it("surfaces a non-retryable error instead of ending silently", async () => {
+        // A clean close by the server (restart, proxy timeout): the SDK's
+        // SSE client does not reconnect after a normal completion.
+        mockClient.event.subscribe.mockResolvedValueOnce({
+          stream: (async function* () {
+            yield partialText;
+          })(),
+        });
+
+        const result = await model.doStream({ prompt: basicPrompt });
+        const parts = await readAll(result.stream);
+
+        const error = parts.find((p) => p.type === "error");
+        expect(error).toBeDefined();
+        expect(APICallError.isInstance(error.error)).toBe(true);
+        expect(error.error.isRetryable).toBe(false);
+        expect(error.error.message).toContain(
+          "event stream ended before the session finished",
+        );
+        expect(parts.some((p) => p.type === "finish")).toBe(false);
+      });
+
+      for (const order of ["prompt-first", "eof-first"] as const) {
+        it(`reports exactly one error when the prompt fails and the stream ends (${order})`, async () => {
+          mockClient.event.subscribe.mockResolvedValueOnce({
+            stream: (async function* () {
+              yield partialText;
+              if (order === "prompt-first") {
+                // Let the prompt rejection settle before the stream ends.
+                await new Promise((resolve) => setTimeout(resolve, 5));
+              }
+            })(),
+          });
+          mockClient.session.prompt.mockImplementationOnce(
+            () =>
+              new Promise((_, reject) =>
+                setTimeout(
+                  () => reject(new Error("fetch failed")),
+                  order === "prompt-first" ? 0 : 5,
+                ),
+              ),
+          );
+
+          const result = await model.doStream({ prompt: basicPrompt });
+          const parts = await readAll(result.stream);
+          // Give a late prompt rejection the chance to report a second error.
+          await new Promise((resolve) => setTimeout(resolve, 20));
+
+          expect(parts.filter((p) => p.type === "error")).toHaveLength(1);
+          expect(mockClient.session.prompt).toHaveBeenCalledTimes(1);
+        });
+      }
+
+      it("does not report an error when the session finished first", async () => {
+        mockClient.event.subscribe.mockResolvedValueOnce({
+          stream: (async function* () {
+            yield partialText;
+            yield {
+              type: "session.status",
+              properties: {
+                sessionID: "session-123",
+                status: { type: "idle" },
+              },
+            };
+          })(),
+        });
+
+        const result = await model.doStream({ prompt: basicPrompt });
+        const parts = await readAll(result.stream);
+
+        expect(parts.some((p) => p.type === "error")).toBe(false);
+        expect(parts.some((p) => p.type === "finish")).toBe(true);
+      });
     });
 
     it("should emit StructuredOutput tool as text stream parts", async () => {
