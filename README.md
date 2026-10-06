@@ -459,6 +459,15 @@ const opencode = createOpencode();
 await opencode.dispose?.();
 ```
 
+The provider never touches how your process handles signals. Importing it installs no process listeners; only when it spawns a server does it add a single `exit` listener, to stop that server when the process exits (normal exit, `process.exit()` or an uncaught exception). A process killed by a signal skips `exit`: Ctrl+C in a terminal reaches the server too, but a signal sent only to your process (e.g. `kill <pid>`) can leave the server running — if that matters, handle the signal and call `dispose()`:
+
+```typescript
+process.once("SIGTERM", async () => {
+  await opencode.dispose?.();
+  process.exit(0);
+});
+```
+
 ## License
 
 MIT

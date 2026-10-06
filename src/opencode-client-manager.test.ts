@@ -575,6 +575,166 @@ describe("opencode-client-manager", () => {
     });
   });
 
+  describe("process lifecycle", () => {
+    const EVENTS = ["SIGINT", "SIGTERM", "exit", "uncaughtException"] as const;
+    const counts = () =>
+      Object.fromEntries(EVENTS.map((e) => [e, process.listenerCount(e)]));
+
+    async function spawnedServer() {
+      const { createOpencodeServer } = await import("@opencode-ai/sdk/v2");
+      const mock = createOpencodeServer as ReturnType<typeof vi.fn>;
+      return (await mock.mock.results[mock.mock.results.length - 1].value) as {
+        url: string;
+        close: ReturnType<typeof vi.fn>;
+      };
+    }
+
+    /** Make the next server start wait until `release()` is called. */
+    async function deferNextServerStart() {
+      const { createOpencodeServer } = await import("@opencode-ai/sdk/v2");
+      const server = { url: "http://127.0.0.1:4096", close: vi.fn() };
+      let release!: () => void;
+      let options: { signal?: AbortSignal } = {};
+      (createOpencodeServer as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        (opts: { signal?: AbortSignal }) => {
+          options = opts;
+          return new Promise((resolve) => {
+            release = () => resolve(server);
+          });
+        },
+      );
+      return { server, release: () => release(), options: () => options };
+    }
+
+    afterEach(() => {
+      OpencodeClientManager.resetInstance();
+    });
+
+    it("installs no process listeners when created", () => {
+      const before = counts();
+      OpencodeClientManager.getInstance();
+      OpencodeClientManager.createInstance({});
+      expect(counts()).toEqual(before);
+    });
+
+    it("installs no process listeners for an external or existing server", async () => {
+      const before = counts();
+      await OpencodeClientManager.createInstance({
+        baseUrl: "http://127.0.0.1:9999",
+      }).getClient();
+      mockFetch.mockResolvedValueOnce({ ok: true });
+      await OpencodeClientManager.createInstance({}).getClient();
+      expect(counts()).toEqual(before);
+    });
+
+    it("never listens for signals or uncaught exceptions; only exit once a server is spawned, removed on dispose", async () => {
+      const before = counts();
+      const instance = OpencodeClientManager.getInstance();
+      await instance.getClient();
+      expect(instance.isServerManaged()).toBe(true);
+      expect(counts()).toEqual({ ...before, exit: before.exit + 1 });
+
+      await instance.dispose();
+      expect(counts()).toEqual(before);
+    });
+
+    it("stops the spawned server on process exit, and dispose does not close it twice", async () => {
+      const instance = OpencodeClientManager.getInstance();
+      await instance.getClient();
+      const server = await spawnedServer();
+
+      process.emit("exit", 0);
+      expect(server.close).toHaveBeenCalledTimes(1);
+      expect(instance.isServerManaged()).toBe(false);
+
+      await instance.dispose();
+      expect(server.close).toHaveBeenCalledTimes(1);
+    });
+
+    it("passes an abort signal to server startup and aborts it on dispose", async () => {
+      const startup = await deferNextServerStart();
+      const instance = OpencodeClientManager.getInstance();
+      const pending = instance.getClient();
+      await vi.waitFor(() => expect(startup.options().signal).toBeDefined());
+      expect(startup.options().signal!.aborted).toBe(false);
+
+      await instance.dispose();
+      expect(startup.options().signal!.aborted).toBe(true);
+
+      startup.release();
+      await expect(pending).rejects.toThrow("disposed");
+    });
+
+    it("reports disposal when the aborted startup rejects, as the SDK does", async () => {
+      const { createOpencodeServer } = await import("@opencode-ai/sdk/v2");
+      (createOpencodeServer as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        (opts: { signal?: AbortSignal }) =>
+          new Promise((_, reject) => {
+            opts.signal?.addEventListener("abort", () =>
+              reject(opts.signal?.reason),
+            );
+          }),
+      );
+      const before = counts();
+      const instance = OpencodeClientManager.getInstance();
+      const pending = instance.getClient();
+      await vi.waitFor(() =>
+        expect(
+          createOpencodeServer as ReturnType<typeof vi.fn>,
+        ).toHaveBeenCalled(),
+      );
+
+      await instance.dispose();
+
+      await expect(pending).rejects.toThrow("Client manager has been disposed");
+      expect(counts()).toEqual(before);
+    });
+
+    it("dispose during the health check never spawns a server", async () => {
+      const { createOpencodeServer } = await import("@opencode-ai/sdk/v2");
+      let failHealthCheck!: () => void;
+      mockFetch.mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            failHealthCheck = () => reject(new Error("Connection refused"));
+          }),
+      );
+      const before = counts();
+      const instance = OpencodeClientManager.getInstance();
+      const pending = instance.getClient();
+      await vi.waitFor(() => expect(failHealthCheck).toBeDefined());
+
+      await instance.dispose();
+      failHealthCheck();
+
+      await expect(pending).rejects.toThrow("Client manager has been disposed");
+      expect(createOpencodeServer).not.toHaveBeenCalled();
+      expect(counts()).toEqual(before);
+    });
+
+    for (const how of ["dispose", "resetInstance"] as const) {
+      it(`${how} during startup closes the late server and installs no listeners`, async () => {
+        const before = counts();
+        const startup = await deferNextServerStart();
+        const instance = OpencodeClientManager.getInstance();
+        const pending = instance.getClient();
+        await vi.waitFor(() => expect(startup.options().signal).toBeDefined());
+
+        if (how === "dispose") {
+          await instance.dispose();
+        } else {
+          OpencodeClientManager.resetInstance();
+        }
+        startup.release();
+
+        await expect(pending).rejects.toThrow("disposed");
+        expect(startup.server.close).toHaveBeenCalledTimes(1);
+        expect(instance.isServerManaged()).toBe(false);
+        expect(counts()).toEqual(before);
+      });
+    }
+  });
+
   describe("createClientManager", () => {
     it("should return singleton instance", () => {
       const manager1 = createClientManager();

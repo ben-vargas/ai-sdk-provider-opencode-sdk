@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.2] - 2026-10-06
+
+### Fixed
+
+- **The provider no longer hijacks process shutdown.** Importing the package
+  (which creates the default `opencode` instance) registered `SIGINT` and
+  `SIGTERM` handlers that called `process.exit()`, plus an
+  `uncaughtException` handler that replaced Node's crash output with
+  `exit(1)` — so host applications could not shut down gracefully. The
+  provider now never listens for signals or uncaught exceptions: importing
+  it installs no process listeners, and only once the client manager
+  actually spawns a server does it add a single `exit` listener that stops
+  that server. Hosts that strip these listeners as a workaround no longer
+  need to. A signal sent only to the host process (not its process group)
+  now leaves Node's default handling intact, so a spawned server can
+  outlive it; handle the signal and call `dispose()` if that matters (see
+  README "Cleanup").
+- **Disposing during server startup no longer leaks the server.** `dispose()`
+  (or `resetInstance()`) while a spawned server was still starting let the
+  startup finish and adopt the server on the disposed manager, and disposing
+  during the initial health check still went on to spawn one. Startup now
+  stops at a disposal: a pending server start is aborted, no server is
+  spawned after the health check, and a server that finishes starting anyway
+  is stopped instead of adopted.
+
 ## [4.1.1] - 2026-10-06
 
 ### Changed
