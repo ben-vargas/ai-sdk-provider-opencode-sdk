@@ -46,6 +46,7 @@ import {
   extractErrorMessage,
   isAbortError,
   createEmptyResponseDataError,
+  createAPICallError,
 } from "./errors.js";
 import {
   safeStringifyToolInput,
@@ -641,7 +642,15 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
             }
           }
 
+          // Prompt failure and an unexpected event-stream end can settle in
+          // either order; only the first may report the turn's error.
+          let turnErrorReported = false;
           const handlePromptFailure = (error: unknown) => {
+            if (turnErrorReported) {
+              resolvePromptFailed?.();
+              return;
+            }
+            turnErrorReported = true;
             const wrappedError = wrapError(error, {
               sessionId,
               modelId: this.modelId,
@@ -744,6 +753,23 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
               const { done, value: event } = result.value;
               if (done) {
                 iteratorClosed = true;
+                // The SDK reconnects only after a connection error; a clean
+                // close by the server (restart, proxy timeout) ends the event
+                // stream for good. Ending here without a finish would make a
+                // truncated answer look complete, so surface it instead. The
+                // prompt is never replayed: the turn may still be running.
+                if (!options.abortSignal?.aborted && !turnErrorReported) {
+                  turnErrorReported = true;
+                  controller.enqueue({
+                    type: "error",
+                    error: createAPICallError(
+                      new Error(
+                        "OpenCode event stream ended before the session finished; the response may be incomplete.",
+                      ),
+                      { sessionId, modelId: this.modelId, isRetryable: false },
+                    ),
+                  });
+                }
                 break;
               }
 
