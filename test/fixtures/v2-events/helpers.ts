@@ -43,7 +43,7 @@ import type {
   SessionToolInputStarted,
   SessionToolSuccess,
   TokenUsageInfo,
-} from "@opencode-ai/client";
+} from "@opencode/client";
 import type { OpencodeReducerInput } from "../../../src/convert-from-opencode-events.js";
 
 /** Session ID shared by all fixtures unless a fixture needs a foreign one. */
@@ -145,6 +145,7 @@ export function eventFactory(sessionId: string = SESSION_ID) {
           assistantMessageID,
           agent: "default",
           model: { id: "fixture-model", providerID: "fixture" },
+          started: 0,
         },
       };
     },

@@ -1,6 +1,6 @@
 /**
  * Tool-approval round-trip (stage-6 brief, deliverable 2): the harness
- * server runs with `permission: { bash: "ask" }`, so a bash tool call blocks
+ * server runs with `permission: { shell: "ask" }`, so a shell tool call blocks
  * on a real `permission.asked`. Phase 1 must surface the approval request
  * and finish on quiescence; the phase-2 continuation replies and returns the
  * resumed execution's result.
@@ -22,7 +22,7 @@ const PHASE1_PROMPT: LanguageModelV4Prompt = [
       {
         type: "text",
         text:
-          "Use the bash tool to run exactly `echo approval-ok` and report " +
+          "Use the shell tool to run exactly `echo approval-ok` and report " +
           "its stdout. Do not answer without running the command.",
       },
     ],
@@ -44,13 +44,13 @@ describe.skipIf(!ctx.canGenerate)(suiteTitle("tool approvals", ctx), () => {
       (part) => part.type === "tool-approval-request",
     );
     if (approval === undefined) {
-      // The model answered without attempting the bash tool — nothing to
+      // The model answered without attempting the shell tool — nothing to
       // approve. Not a provider defect, but the skip must be LOUD: the
       // approval round-trip (permission.asked → reply → resumed execution)
       // went completely untested this run.
       console.warn(
         `[integration] APPROVAL PATH UNTESTED: ${ctx.modelId} answered without ` +
-          `calling the bash tool, so the permission.asked → approval-reply → ` +
+          `calling the shell tool, so the permission.asked → approval-reply → ` +
           `resume round-trip was NOT exercised. Re-run with a model that ` +
           `tool-calls (OPENCODE_TEST_MODEL=providerID/modelID) to cover it.`,
       );
@@ -83,7 +83,7 @@ describe.skipIf(!ctx.canGenerate)(suiteTitle("tool approvals", ctx), () => {
             : {
                 type: "tool-call",
                 toolCallId: approval.toolCallId ?? "tool_unknown",
-                toolName: "bash",
+                toolName: "shell",
                 input: "{}",
               },
         ],
@@ -117,5 +117,8 @@ describe.skipIf(!ctx.canGenerate)(suiteTitle("tool approvals", ctx), () => {
       .map((part) => (part.type === "text" ? part.text : ""))
       .join("");
     expect(text.toLowerCase()).toContain("approval-ok");
-  }, 180_000);
+    // Free-tier models have taken 130+ s to produce the first step of
+    // phase 1 alone (observed on 2.0.24: the gap is model latency between
+    // delivery and the first step, not the provider), so 180 s flaked.
+  }, 300_000);
 });

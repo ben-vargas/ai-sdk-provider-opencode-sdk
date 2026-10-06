@@ -102,7 +102,17 @@ describe.skipIf(!ctx.canGenerate)(suiteTitle("abort", ctx), () => {
         },
       ],
     });
-    expect(recovery.finishReason.unified).toBe("stop");
+    // Diagnostics ride the assertion (one unreproduced `other` finish was
+    // seen here): record the raw finish, content kinds and metadata.
+    expect(
+      recovery.finishReason.unified,
+      JSON.stringify({
+        finishReason: recovery.finishReason,
+        content: recovery.content.map((part) => part.type),
+        providerMetadata: recovery.providerMetadata,
+        warnings: recovery.warnings,
+      }),
+    ).toBe("stop");
   });
 
   it("pre-delivery: inbox.cancel on a queued undelivered item prevents the turn", async () => {

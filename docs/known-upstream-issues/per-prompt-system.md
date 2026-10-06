@@ -1,7 +1,7 @@
 # `session.instructions.entry` precedence and compaction semantics are undocumented
 
 **Status:** Known upstream issue — tracked locally, not filed.
-**Last verified:** 2026-08-27, against `opencode2 0.0.0-beta-18286` (`@opencode-ai/cli`, same build as the pinned `@opencode-ai/client`).
+**Last verified:** 2026-10-06, against the `@opencode/cli@2.0.24` source — both guarantees are now **answered from source**, still undocumented upstream (see "2.0.24 source answers" below). First verified 2026-08-27 on `opencode2 0.0.0-beta-18286`.
 **How to re-check** (re-runs the entry round-trip and the E7 precedence probe; see the script header for the server + agent setup):
 
 ```bash
@@ -17,7 +17,8 @@ The mechanism itself **works** and this provider ships on it:
 `session.instructions.entry` is the real caller-supplied system-prompt
 channel (`put`/`list`/`remove` round-trip, applies before the first prompt
 and on later turns, `remove` stops it applying, key grammar and the
-8192-byte JSON-encoded value cap are enforced). Those behaviors are settled
+JSON-encoded value cap are enforced — 8192 bytes on the betas, 256 KiB on
+2.x). Those behaviors are settled
 empirically — the answers live in `docs/v2-spike-findings.md`, not here.
 
 What remains open is that none of it is documented upstream, and two
@@ -42,7 +43,7 @@ written to a namespaced `ai-sdk.system` entry, and a session that silently
 dropped or deprioritized it would degrade every later turn with no signal.
 
 Three smaller documentation gaps, empirically characterized but nowhere
-stated as contract: the 8192-byte value cap is charged on the **JSON
+stated as contract: the value cap is charged on the **JSON
 encoding** of the value, not the raw string (`actualBytes` in
 `InstructionEntryValueTooLargeError` counts the encoding); there is no
 stated key-namespacing convention or reserved-prefix list for the shared
@@ -50,6 +51,22 @@ per-session entry map (we namespace ours as `ai-sdk.system`); and it is
 unstated whether a no-op re-`put` of an unchanged value is suppressed
 server-side or announces another durable system message (we avoid re-puts
 client-side to be safe).
+
+## 2.0.24 source answers
+
+Read from the `v2.0.24` source (not yet re-verified live, and not contract):
+
+- **Precedence:** the model request's system prompt is
+  `[agent.system || default, instruction baseline]` as separate parts
+  (`packages/core/src/session/model-request.ts`), and entries are the last
+  source in the baseline (`context.ts`). An entry is added after the agent
+  prompt and never replaces it.
+- **Compaction:** entries survive — `Compaction.Ended` rebases the
+  instruction baseline to the current entry values (`projector.ts`,
+  `instruction-state.ts`). This was already true at the beta commit.
+- **No-op re-put:** a `put` of an unchanged value is a no-op server-side
+  (`instruction-entry.ts`), so it does not announce another system message.
+- **Cap:** `MaxValueBytes = 256 * 1024`, still charged on the JSON encoding.
 
 ## What would fix it upstream
 

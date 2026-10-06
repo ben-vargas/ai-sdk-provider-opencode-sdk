@@ -821,3 +821,43 @@ curl -s -H "Authorization: Basic $(printf 'opencode:%s' "$PW" | base64)" \
 # then POST /api/session (model: {providerID, id}) + /api/session/{id}/prompt
 # and poll GET /api/session/{id}/message for a `type: "assistant"` entry.
 ```
+
+## Release addendum — OpenCode 2.0.24 (2026-10-06)
+
+OpenCode v2 shipped as **2.0.24** under a new npm scope (`@opencode/client`,
+`@opencode/cli`; `latest` tags pair). Porting from the beta-18286 pin
+surfaced these differences, each verified live against a sandboxed
+`@opencode/cli@2.0.24` server unless marked "source":
+
+- **Health → info.** `/api/health` is gone; `GET /api/info` returns
+  `{version, pid, urls, paths, capabilities?}` with the release semver.
+- **Client renames** (compile-time): forms moved to `session.form.*`
+  (`form.state` removed; `session.form.get` returns state), permission
+  replies send `decision`, interrupts take `resume` (was `continue`),
+  `session.step.started` carries `started`, `session.message` is a
+  namespace (`.get`), and a new interrupt reason `inactivity` exists.
+- **Abort semantics.** Aborting the `event.subscribe` signal now ends the
+  iterator quietly instead of throwing (found by `integration/abort.test.ts`
+  resolving instead of rejecting). `inbox.cancel` returns success for an
+  already-delivered item (source), so a successful cancel no longer proves
+  non-delivery.
+- **Idle messages.** The message store appends a durable `idle` message
+  (with the execution `outcome`) after each execution, so "the last message"
+  is no longer the assistant reply (found by `integration/busy-queue.test.ts`).
+- **Async catalog.** `model.list` (and `model.default`) answer empty/null
+  for the first few seconds after `serve` starts; the catalog fills
+  asynchronously (0 → 38 models between ~2 s and ~4 s in one probe).
+- **Zen without credentials.** A credential-less server lists the zen free
+  tier and serves it with a public key; the default model was
+  `opencode/fledge-alpha-free`. Three beta-era free IDs were retired.
+- **Service mode works.** `opencode serve --service` binds the channel's
+  fixed port (49374 for `latest`) and writes
+  `$XDG_STATE_HOME/opencode/service.json`; it exits silently if that port is
+  taken, and honors a `{port}` seed in `$XDG_CONFIG_HOME/opencode/service.json`.
+  `Service.ensure` / `discover` / `stop` round-tripped.
+- **Instruction entries.** Value cap is 256 KiB (source); precedence and
+  compaction survival are answered from source in
+  `docs/known-upstream-issues/per-prompt-system.md`.
+- **Unchanged:** no structured output on the prompt path (live
+  `/openapi.json` re-check), no inbox → execution correlation key,
+  `receipt.id` equals the stored user message id (live).

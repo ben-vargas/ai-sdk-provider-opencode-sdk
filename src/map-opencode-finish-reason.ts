@@ -3,7 +3,7 @@ import type {
   SessionExecutionInterrupted,
   SessionStepEnded,
   SessionStructuredError,
-} from "@opencode-ai/client";
+} from "@opencode/client";
 
 /**
  * Native OpenCode v2 finish value (closed union, aligned with the AI SDK
@@ -70,6 +70,8 @@ export function mapStructuredErrorToFinishReason(
  * - `"superseded"` → `other`: another inbox item steered over this turn;
  *   surfaced in provider metadata so callers can distinguish it.
  * - `"shutdown"` → `error`: the server went away mid-turn.
+ * - `"inactivity"` → `error`: the server evicted the session's idle location
+ *   and stopped its executions.
  */
 export function mapInterruptReasonToFinishReason(
   reason: OpencodeInterruptReason,
@@ -81,5 +83,7 @@ export function mapInterruptReasonToFinishReason(
       return { unified: "other", raw: "interrupted:superseded" };
     case "shutdown":
       return { unified: "error", raw: "interrupted:shutdown" };
+    case "inactivity":
+      return { unified: "error", raw: "interrupted:inactivity" };
   }
 }

@@ -34,7 +34,7 @@ import type {
   SessionToolFailed,
   SessionToolSuccess,
   V2Event,
-} from "@opencode-ai/client";
+} from "@opencode/client";
 import type { Logger } from "./types.js";
 import {
   mapInterruptReasonToFinishReason,
@@ -107,13 +107,17 @@ export function extractV2EventSessionId(
   return typeof sessionID === "string" ? sessionID : undefined;
 }
 
-/** The two delta-native content kinds, which share the ordinal keyspace. */
+/**
+ * The two delta-native content kinds. Ordinals are numbered per kind by the
+ * server, so a block's identity includes its kind.
+ */
 type V2ContentKind = "text" | "reasoning";
 
 /**
  * State for one text/reasoning block, keyed by
  * `${assistantMessageID}:${kind}:${ordinal}`. The kind is part of the
- * identity because text and reasoning ordinals share one keyspace.
+ * identity because the server numbers text and reasoning ordinals
+ * separately (`text#0` and `reasoning#0` can coexist in one step).
  */
 interface V2BlockState {
   kind: V2ContentKind;
@@ -244,6 +248,12 @@ export interface V2StreamState {
   finishEmitted: boolean;
   /** Set when the `log.synced` sentinel has been observed. */
   logSynced: boolean;
+  /**
+   * Tool names by call id from the caller's prompt history. An approval
+   * continuation observes a tool whose `tool.input.started` (the only event
+   * carrying the name) was seen in the previous call.
+   */
+  knownToolNames: Map<string, string>;
 }
 
 /**
@@ -282,6 +292,7 @@ export function createV2StreamState(options: {
     terminal: undefined,
     finishEmitted: false,
     logSynced: false,
+    knownToolNames: new Map(),
   };
 }
 
@@ -684,7 +695,7 @@ function getTool(
   if (!tool) {
     tool = {
       toolId,
-      toolName: name ?? UNKNOWN_TOOL_NAME,
+      toolName: name ?? state.knownToolNames.get(toolId) ?? UNKNOWN_TOOL_NAME,
       inputStarted: false,
       inputEnded: false,
       callEmitted: false,

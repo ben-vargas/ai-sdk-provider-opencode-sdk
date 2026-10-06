@@ -32,7 +32,7 @@ export type {
   PermissionReplied,
   V2Event,
   OpenCodeEvent,
-} from "@opencode-ai/client";
+} from "@opencode/client";
 
 // Type exports
 export type {

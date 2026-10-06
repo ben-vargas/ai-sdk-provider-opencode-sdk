@@ -1,11 +1,11 @@
 # The v2 CLI is hard to discover, and its dist-tags do not pair with the client's
 
-**Status:** Known upstream issue — tracked locally, not filed.
-**Last verified:** 2026-08-27, against the npm registry state and `opencode2 0.0.0-beta-18286` (`@opencode-ai/cli`, same build as the pinned `@opencode-ai/client`).
+**Status:** Largely resolved by the OpenCode 2.0 release — kept for the residual `opencode-ai` naming trap.
+**Last verified:** 2026-10-06, against the npm registry. 2.x ships as **`@opencode/cli`** / **`@opencode/client`** (new scope), and their dist-tags now pair: both have `latest = 2.0.24`, and `beta`/`dev` resolve the same build numbers. The CLI exposes both `opencode` and `opencode2` binaries, and `GET /api/info` reports the release semver. Still open: `opencode-ai@latest` remains the **v1** CLI (1.18.x), so the obvious package name is still the wrong one. First verified 2026-08-27 against `opencode2 0.0.0-beta-18286` (`@opencode-ai/cli`).
 **How to re-check** (issue stands while `latest`/`next` trail `beta` and the same tag resolves different build numbers across the two packages):
 
 ```bash
-npm view @opencode-ai/cli dist-tags && npm view @opencode-ai/client dist-tags
+npm view @opencode/cli dist-tags && npm view @opencode/client dist-tags && npm view opencode-ai dist-tags.latest
 ```
 
 **Evidence:** `spike/artifacts/01-baseline-cycle.json`, `spike/artifacts/04-dev-full-cycle.json`, `spike/artifacts/doc-openapi.json`, `spike/artifacts/doc-openapi-beta-cli.json`, `spike/artifacts/14-opencode2-verification.json`.

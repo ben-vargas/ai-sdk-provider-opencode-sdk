@@ -1,27 +1,28 @@
 /**
  * Shared connection plumbing for the examples.
  *
- * Server requirement (all examples): a running OpenCode v2 server that
- * speaks the `@opencode-ai/client@0.0.0-beta-18286` contract. That is the
- * published `@opencode-ai/cli` at the SAME build number — binary
- * `opencode2`:
+ * Server requirement (all examples): a running OpenCode 2.x server. The
+ * provider pins `@opencode/client@2.0.24`; the matching server is the
+ * published `@opencode/cli` at the same version (binary `opencode`, also
+ * exposed as `opencode2`):
  *
- *   npx @opencode-ai/cli@0.0.0-beta-18286 serve --port 4096
+ *   npx @opencode/cli@2.0.24 serve --port 4096
  *
  * `opencode-ai` is the **v1** package and speaks a different protocol; it
  * will not work. The repo's integration harness starts the right binary for
- * you (`npm run test:integration`, isolated from your real config), or see
- * the "Reproduction" section of `docs/v2-spike-findings.md`.
+ * you (`npm run test:integration`, isolated from your real config).
  *
  * Environment variables:
- *   OPENCODE_BETA_URL       server base URL, e.g. http://127.0.0.1:4096 (required)
- *   OPENCODE_BETA_PASSWORD  the serve password; every v2 route requires
- *                           Basic auth `opencode:<password>`. Set it via
- *                           `OPENCODE_PASSWORD` when starting `serve`, or
- *                           copy the `server password <...>` line it prints
+ *   OPENCODE_URL            server base URL, e.g. http://127.0.0.1:4096
+ *                           (required; `OPENCODE_BETA_URL` is accepted too)
+ *   OPENCODE_PASSWORD       the serve password; every v2 route requires
+ *                           Basic auth `opencode:<password>`. Use the same
+ *                           value you started `serve` with, or copy the
+ *                           `server password <...>` line it prints
+ *                           (`OPENCODE_BETA_PASSWORD` is accepted too)
  *   OPENCODE_MODEL          providerID/modelID (default:
  *                           opencode/nemotron-3.5-lightning-free — the zen
- *                           free tier; needs zen credentials on the server)
+ *                           free tier; no credentials needed on 2.x)
  *   OPENCODE_DIRECTORY      directory sessions bind to (optional; when set,
  *                           it is passed as the session `location`)
  */
@@ -31,7 +32,7 @@ import type {
 } from "../dist/index.js";
 
 export interface ExampleConfig {
-  /** Provider settings preconfigured for the beta server endpoint. */
+  /** Provider settings preconfigured for the server endpoint. */
   providerSettings: OpencodeProviderSettings;
   /** Model settings every example starts from (session location). */
   modelSettings: OpencodeSettings;
@@ -40,29 +41,30 @@ export interface ExampleConfig {
 }
 
 export function exampleConfig(): ExampleConfig {
-  const baseUrl = process.env.OPENCODE_BETA_URL;
+  const baseUrl = process.env.OPENCODE_URL ?? process.env.OPENCODE_BETA_URL;
   if (!baseUrl) {
     console.error(
       [
-        "OPENCODE_BETA_URL is not set.",
+        "OPENCODE_URL is not set.",
         "",
         "These examples need an OpenCode v2 server (see the header of",
         "examples/env.ts). Start one with:",
         "",
         "  OPENCODE_PASSWORD=<password> \\",
-        "    npx @opencode-ai/cli@0.0.0-beta-18286 serve --port 4096",
+        "    npx @opencode/cli@2.0.24 serve --port 4096",
         "",
         "then:",
         "",
-        "  OPENCODE_BETA_URL=http://127.0.0.1:4096 \\",
-        "  OPENCODE_BETA_PASSWORD=<password> \\",
+        "  OPENCODE_URL=http://127.0.0.1:4096 \\",
+        "  OPENCODE_PASSWORD=<password> \\",
         "  npx tsx examples/basic-usage.ts",
       ].join("\n"),
     );
     process.exit(1);
   }
 
-  const password = process.env.OPENCODE_BETA_PASSWORD ?? "";
+  const password =
+    process.env.OPENCODE_PASSWORD ?? process.env.OPENCODE_BETA_PASSWORD ?? "";
   const authHeader =
     "Basic " + Buffer.from(`opencode:${password}`).toString("base64");
 

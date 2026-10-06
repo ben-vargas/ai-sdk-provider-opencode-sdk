@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { OpenCode } from "@opencode-ai/client";
-import type { OpenCodeClient } from "@opencode-ai/client";
+import { OpenCode } from "@opencode/client";
+import type { OpenCodeClient } from "@opencode/client";
 import { asClientPort, type OpencodeClientPort } from "./client-port.js";
 
 // Compile-time assertions: the generated client must satisfy the port
@@ -28,7 +28,7 @@ describe("client-port", () => {
   it("exposes exactly the surfaces the provider needs", () => {
     const port = asClientPort(OpenCode.make({ baseUrl: "http://127.0.0.1:0" }));
 
-    expect(typeof port.health.get).toBe("function");
+    expect(typeof port.server.info).toBe("function");
     expect(typeof port.session.create).toBe("function");
     expect(typeof port.session.get).toBe("function");
     expect(typeof port.session.prompt).toBe("function");
@@ -36,7 +36,7 @@ describe("client-port", () => {
     expect(typeof port.session.interrupt).toBe("function");
     expect(typeof port.session.switchModel).toBe("function");
     expect(typeof port.session.switchAgent).toBe("function");
-    expect(typeof port.session.message).toBe("function");
+    expect(typeof port.session.message.get).toBe("function");
     expect(typeof port.session.context).toBe("function");
     expect(typeof port.session.log).toBe("function");
     expect(typeof port.session.inbox.cancel).toBe("function");
@@ -48,10 +48,9 @@ describe("client-port", () => {
     expect(typeof port.permission.list).toBe("function");
     expect(typeof port.permission.get).toBe("function");
     expect(typeof port.permission.reply).toBe("function");
-    expect(typeof port.form.list).toBe("function");
-    expect(typeof port.form.state).toBe("function");
-    expect(typeof port.form.reply).toBe("function");
-    expect(typeof port.form.cancel).toBe("function");
+    expect(typeof port.session.form.list).toBe("function");
+    expect(typeof port.session.form.reply).toBe("function");
+    expect(typeof port.session.form.cancel).toBe("function");
     expect(typeof port.migration.v1.status).toBe("function");
   });
 });

@@ -1,4 +1,4 @@
-import type { ToolContent1 } from "@opencode-ai/client";
+import type { ToolContent1 } from "@opencode/client";
 import {
   asJson,
   eventFactory,

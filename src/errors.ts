@@ -29,7 +29,7 @@ import {
   isUnauthorizedError,
   type ClientErrorReason,
   type SessionStructuredError,
-} from "@opencode-ai/client";
+} from "@opencode/client";
 
 /**
  * Where in the generation lifecycle the error was thrown.

@@ -44,13 +44,13 @@ describe.skipIf(!ctx.canGenerate)(suiteTitle("wait watchdog", ctx), () => {
       .join("");
     expect(text.length).toBeGreaterThan(0);
 
-    // No recovery path fired: the wait watchdog armed, lost the race to the
-    // event stream's terminal, and was torn down silently.
+    // The wait watchdog never recovered: it armed, lost the race to the
+    // event stream's terminal, and was torn down silently. (The separate
+    // silence probe — "…the event stream stayed silent…" — may legitimately
+    // engage when a free-tier model emits nothing for longer than the 30 s
+    // silence window, which has been observed; it is not under test here.)
     const recovery = warnings.filter(
-      (message) =>
-        /session\.wait/i.test(message) ||
-        /finalizing from the message store/i.test(message) ||
-        /watchdog/i.test(message),
+      (message) => /session\.wait/i.test(message) || /watchdog/i.test(message),
     );
     expect(recovery).toEqual([]);
   }, 180_000);

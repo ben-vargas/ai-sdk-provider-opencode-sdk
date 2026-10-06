@@ -1,15 +1,15 @@
 /**
  * Contract snapshot check (stage-6 brief, deliverable 4): every route the
- * pinned `@opencode-ai/client` can call must exist on the OpenAPI document
+ * pinned `@opencode/client` can call must exist on the OpenAPI document
  * of the server the harness runs — by default the published
- * `@opencode-ai/cli` binary (`opencode2`) at the same build as the pinned
+ * `@opencode/cli` binary (`opencode2`) at the same build as the pinned
  * client — and the response contracts the provider depends on must have the
  * expected shape. Drift is reported in the failure output
  * (and logged when server-only operations appear — those are findings, not
  * failures).
  */
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { integrationContext, suiteTitle } from "./harness/context.js";
 
@@ -36,12 +36,28 @@ const HTTP_METHODS = new Set([
  * `${encodeURIComponent(input.sessionID)}` → `{sessionID}`.
  */
 function pinnedClientRoutes(): ClientRoute[] {
-  const source = readFileSync(
+  // The generated client is bundled: `client.js` re-exports `make` from
+  // hashed chunks, so follow its relative imports to collect the descriptors.
+  const visited = new Set<string>();
+  let source = "";
+  const collect = (file: string): void => {
+    if (visited.has(file)) {
+      return;
+    }
+    visited.add(file);
+    const text = readFileSync(file, "utf8");
+    source += text;
+    for (const match of text.matchAll(
+      /(?:from|import)\s*"(\.{1,2}\/[^"]+)"/g,
+    )) {
+      collect(resolve(dirname(file), match[1]!));
+    }
+  };
+  collect(
     join(
       process.cwd(),
-      "node_modules/@opencode-ai/client/dist/promise/generated/client.js",
+      "node_modules/@opencode/client/dist/promise/generated/client.js",
     ),
-    "utf8",
   );
   const routes: ClientRoute[] = [];
   const descriptor = /method: "(\w+)",\s*path: [`"]([^`"]+)[`"]/g;
@@ -146,9 +162,9 @@ describe.skipIf(!ctx.available)(suiteTitle("contract snapshot", ctx), () => {
   it("serves every route the pinned client speaks", async () => {
     const spec = await fetchSpec();
     const routes = pinnedClientRoutes();
-    // The pinned client generation carries exactly 130 method+path pairs
-    // (110 unique paths); a change here means the extraction regex drifted.
-    expect(routes.length).toBe(130);
+    // The pinned client generation carries exactly 139 method+path pairs;
+    // a change here means the extraction regex (or chunk walk) drifted.
+    expect(routes.length).toBe(139);
 
     const specPaths = Object.keys(spec.paths);
     const missing = routes.filter(

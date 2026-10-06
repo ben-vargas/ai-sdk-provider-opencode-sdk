@@ -22,10 +22,11 @@
  *     first obeys it is recorded there as unmeasured),
  *   - `remove` drops the entry from `list` and the instruction stops
  *     applying (E1/E5),
- *   - whether an entry outranks the agent's own system prompt is **not**
- *     established: E7's contested arm was inconclusive (see the probe
- *     corrections in docs/v2-spike-findings.md); the ordering the source
- *     suggests is undocumented upstream,
+ *   - precedence vs the agent's own system prompt: E7's contested arm was
+ *     inconclusive live; on the 2.0.24 source the system prompt is sent as
+ *     `[agent prompt, instruction baseline]` parts with entries last in the
+ *     baseline, so an entry is added after the agent prompt and never
+ *     replaces it (still undocumented upstream),
  *   - keys must match {@link INSTRUCTION_KEY_PATTERN}; uppercase, empty and
  *     leading `_`/`.` keys are rejected (E6),
  *   - values are capped at {@link INSTRUCTION_VALUE_MAX_BYTES} bytes
@@ -48,18 +49,22 @@ export const SYSTEM_INSTRUCTION_KEY = "ai-sdk.system";
  */
 export const INSTRUCTION_KEY_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 
-/** Server-side cap on an instruction entry value, in bytes. */
-export const INSTRUCTION_VALUE_MAX_BYTES = 8192;
+/**
+ * Server-side cap on an instruction entry value, in bytes (OpenCode 2.x:
+ * 256 KiB; the pre-release betas capped at 8 KiB).
+ */
+export const INSTRUCTION_VALUE_MAX_BYTES = 256 * 1024;
 
 /**
  * Byte size the server charges for an instruction value.
  *
  * The cap is measured on the **JSON encoding**, not the raw string: an
- * 8190-character ASCII value is accepted (8190 + 2 quotes = 8192) while an
- * 8191-character one is rejected at 8193 bytes. Multi-byte characters are
- * charged their UTF-8 length (4095 × `é` = 8190 bytes + quotes = 8192, and
- * is accepted), and characters JSON must escape are charged their escaped
- * length. `JSON.stringify` reproduces all three rules exactly.
+ * ASCII value of `cap - 2` characters is accepted (plus 2 quotes = cap)
+ * while one more character is rejected. Multi-byte characters are charged
+ * their UTF-8 length, and characters JSON must escape are charged their
+ * escaped length. `JSON.stringify` reproduces all three rules exactly
+ * (verified live against the 8 KiB beta cap; the 2.x server measures the
+ * same encoding).
  */
 export function instructionValueBytes(value: string): number {
   return Buffer.byteLength(JSON.stringify(value), "utf8");

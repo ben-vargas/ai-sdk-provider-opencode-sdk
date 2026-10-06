@@ -18,11 +18,12 @@ import type { OpencodeClient, OpencodeClientManager } from "./types.js";
 
 function createFakeClient(): OpencodeClient {
   return {
-    health: {
-      get: vi.fn(async () => ({
-        healthy: true as const,
+    server: {
+      info: vi.fn(async () => ({
         version: "2.0.0",
         pid: 1,
+        urls: [],
+        paths: { tmp: "/tmp" },
       })),
     },
     migration: {
@@ -151,7 +152,7 @@ describe("createOpencode", () => {
     // must not drop provider B's reference.
     const fetchImpl = (async (input: string | URL | Request) => {
       const url = String(input instanceof Request ? input.url : input);
-      const body = url.includes("/health")
+      const body = url.includes("/api/info")
         ? { healthy: true, version: "2.0.0", pid: 1 }
         : { status: "completed" };
       return new Response(JSON.stringify(body), {

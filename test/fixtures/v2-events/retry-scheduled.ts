@@ -1,4 +1,4 @@
-import type { SessionStructuredError } from "@opencode-ai/client";
+import type { SessionStructuredError } from "@opencode/client";
 import {
   eventFactory,
   finishPart,

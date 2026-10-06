@@ -20,7 +20,7 @@
  * question under test is a server-side one.
  */
 import { describe, expect, it } from "vitest";
-import type { V2Event } from "@opencode-ai/client";
+import type { V2Event } from "@opencode/client";
 import {
   integrationContext,
   parseModelRef,
@@ -31,8 +31,8 @@ import {
 const ctx = integrationContext();
 
 const MULTI_STEP_PROMPT =
-  "First use the bash tool to run exactly `sleep 6 && echo STEP-ONE-DONE`. " +
-  "After it completes, use the bash tool again in a separate call to run " +
+  "First use the shell tool to run exactly `sleep 6 && echo STEP-ONE-DONE`. " +
+  "After it completes, use the shell tool again in a separate call to run " +
   "exactly `echo STEP-TWO-RAN`. Finally reply with exactly: ALL-STEPS-DONE. " +
   "Do not skip any step.";
 
@@ -48,8 +48,9 @@ describe.skipIf(!ctx.canGenerate)(suiteTitle("steer supersession", ctx), () => {
       model: { id: model.modelID, providerID: model.providerID },
     });
 
-    // Collect this session's events; auto-approve bash permissions ("always"
-    // so every subsequent step runs unattended).
+    // Collect this session's events; auto-approve each shell permission
+    // ask with "once" — "always" would persist a saved rule in the sandbox
+    // database and silently pre-approve the approval test's command.
     const subscription = new AbortController();
     const events: V2Event[] = [];
     const replied = new Set<string>();
@@ -70,7 +71,7 @@ describe.skipIf(!ctx.canGenerate)(suiteTitle("steer supersession", ctx), () => {
             if (!replied.has(requestID)) {
               replied.add(requestID);
               await raw.permission
-                .reply({ sessionID: session.id, requestID, reply: "always" })
+                .reply({ sessionID: session.id, requestID, decision: "once" })
                 .catch(() => undefined);
             }
           }
@@ -86,7 +87,7 @@ describe.skipIf(!ctx.canGenerate)(suiteTitle("steer supersession", ctx), () => {
         text: MULTI_STEP_PROMPT,
       });
 
-      // Wait for the first bash call to actually be running; a model that
+      // Wait for the first shell call to actually be running; a model that
       // never calls the tool leaves nothing to supersede — skip.
       const sawTool = await pollUntil(
         async () => {
@@ -144,16 +145,19 @@ describe.skipIf(!ctx.canGenerate)(suiteTitle("steer supersession", ctx), () => {
                 part.type === "text" && part.text.includes("STEERED-REPLY"),
             ),
         );
-        if (steeredAnswered) {
-          settleOutcome = "answered";
-          break;
-        }
         const sinceLastEvent = Date.now() - lastEventAt;
         const sawTerminal = events.some(
           (event) =>
             event.type === "session.execution.succeeded" ||
             event.type === "session.execution.failed",
         );
+        // A model that honors the steered text answers it INSIDE the
+        // in-flight turn; that answer can land before the execution's
+        // terminal event, so "answered" settles only once the turn ended.
+        if (steeredAnswered && sawTerminal) {
+          settleOutcome = "answered";
+          break;
+        }
         // Post-terminal, a short quiet window suffices (nothing more is
         // coming); pre-terminal, wait long enough to distinguish a stall
         // from slow model latency.

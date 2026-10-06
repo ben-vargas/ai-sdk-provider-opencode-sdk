@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { APICallError, LoadAPIKeyError } from "@ai-sdk/provider";
-import { ClientError } from "@opencode-ai/client";
+import { ClientError } from "@opencode/client";
 import {
   extractErrorMessage,
   getClientErrorStatus,

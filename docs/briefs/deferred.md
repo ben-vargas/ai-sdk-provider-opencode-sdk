@@ -179,3 +179,36 @@ started` is observed (the one case whose wait semantics stage 6 pinned)
     _Re-examined stage 7, still deferred:_ upstream-blocked — the free zen
     catalog still reports no cache activity, so there is no run that could
     confirm or refute the disjointness assumption.
+
+## Release re-check (5.0.0 against OpenCode 2.0.24, 2026-10-06)
+
+The provider was moved from the `@opencode-ai/*@0.0.0-beta-18286` betas to
+the released `@opencode/client@2.0.24` / `@opencode/cli@2.0.24` (1,946
+upstream commits of drift). Open items, re-examined:
+
+- **2 (`session.log` catch-up): still deferred.** Historical replay exists
+  in core, but events are only persisted when the server is built with
+  `events.persist`, which `opencode serve` does not set (2.0.24 source), so
+  the log still yields only `log.synced` there. The route also moved to
+  `/api/experimental/...`. Message-store recovery stays.
+- **5 (embedded backend): still deferred**, no demonstrated need.
+- **6 (version gating outside the service backend): still deferred**, but
+  the preflight now distinguishes a pre-2.0 server (no `/api/info` → an
+  "incompatible server" error) from an unreachable one, and `server.info`
+  reports the release semver, so a predicate is cheap to add if needed.
+- **9 (`file:` URIs): still deferred.** 2.x reads `file:` URIs and rejects
+  other schemes at prompt time, and the pre-2.0 detection above is now a
+  usable capability signal — but `file:` resolves against the _server's_
+  filesystem, which a remote `baseUrl` does not share with the caller.
+  Allowing it is a surface decision, not a compatibility fix.
+- **11 (cache-read disjointness): still deferred** (free zen catalog).
+
+New, found during the 2.0.24 port and deliberately not adopted for 5.0.0:
+
+- `session.create` accepts `permissions` (per-session ruleset) and
+  `metadata` again — candidates for new settings.
+- `RequestOptions.onActivity` (fires on SSE keepalives) could feed the
+  silence watchdog; the durable `idle` message / `session.get` outcome could
+  serve as stored proof of turn completion for the wait watchdog.
+- The 2.x client shares one SSE connection per client and drops per-request
+  headers on `event.subscribe`; documented as a limitation.

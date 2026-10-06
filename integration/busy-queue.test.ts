@@ -71,8 +71,14 @@ describe.skipIf(!ctx.canGenerate)(suiteTitle("busy + queue", ctx), () => {
     expect(queuedUser!.message.id).toBe(queued.id);
     expect(firstUser!.index).toBeLessThan(queuedUser!.index);
 
-    // The queued turn answered its own question.
-    const finalAssistant = messages[messages.length - 1];
+    // The queued turn answered its own question. 2.x appends `idle` marker
+    // messages after each execution, so the reply is the last assistant
+    // message, not the last message.
+    const finalAssistantIndex = messages
+      .map((message) => message.type)
+      .lastIndexOf("assistant");
+    expect(finalAssistantIndex).toBeGreaterThan(queuedUser!.index);
+    const finalAssistant = messages[finalAssistantIndex];
     expect(finalAssistant?.type).toBe("assistant");
     if (finalAssistant?.type === "assistant") {
       const text = finalAssistant.content

@@ -34,7 +34,7 @@ import type {
   SharedV4ProviderMetadata,
   SharedV4Warning,
 } from "@ai-sdk/provider";
-import { isConflictError, isSessionBusyError } from "@opencode-ai/client";
+import { isConflictError, isSessionBusyError } from "@opencode/client";
 import type {
   FormCreated,
   FormInfo,
@@ -45,7 +45,7 @@ import type {
   SessionPromptInput,
   SessionToolSuccess,
   V2Event,
-} from "@opencode-ai/client";
+} from "@opencode/client";
 import type {
   OpencodeClientPort,
   OpencodeRequestOptions,
@@ -142,6 +142,14 @@ export interface OpencodeLanguageModelConfig {
    * non-delivery). @default 3000
    */
   deliveryEvidenceWindowMs?: number;
+  /**
+   * Cold-catalog window for bare-model + variant resolution: OpenCode 2.x
+   * answers `model.list` with an empty catalog for the first seconds after
+   * the server starts and fills it asynchronously, so an EMPTY catalog is
+   * re-polled (abort-aware) for up to this long before the lookup fails.
+   * A non-empty catalog is authoritative immediately. @default 10000
+   */
+  catalogSettleMs?: number;
 }
 
 const DEFAULT_READINESS_TIMEOUT_MS = 3000;
@@ -150,6 +158,20 @@ const DEFAULT_SILENCE_WATCHDOG_MS = 30_000;
 const DEFAULT_WAIT_WATCHDOG_GRACE_MS = 2000;
 /** Delivery-uncertainty inbox check: one attempt, bounded. */
 const INBOX_CHECK_TIMEOUT_MS = 3000;
+const DEFAULT_CATALOG_SETTLE_MS = 10_000;
+const CATALOG_POLL_INTERVAL_MS = 250;
+/**
+ * Per-request bound on abort cleanup (`inbox.cancel`, the delivery lookup,
+ * `session.interrupt`). Cleanup gates the instance's next turn, so it must
+ * never wait unboundedly on a hung server.
+ */
+const ABORT_CLEANUP_REQUEST_TIMEOUT_MS = 10_000;
+/**
+ * Bound on confirming, via `session.wait`, that an interrupted execution
+ * has settled. 2.x acknowledges `session.interrupt` before the execution's
+ * cleanup finishes and publishes its terminal event later.
+ */
+const ABORT_SETTLE_TIMEOUT_MS = 30_000;
 const DEFAULT_DELIVERY_EVIDENCE_WINDOW_MS = 3000;
 
 /**
@@ -212,18 +234,32 @@ interface EventReader {
   ): Promise<IteratorResult<V2Event> | "timeout">;
 }
 
-function createEventReader(iterable: AsyncIterable<V2Event>): EventReader {
-  const iterator = iterable[Symbol.asyncIterator]();
+function createEventReader(
+  iterable: AsyncIterable<V2Event>,
+  callSignal?: AbortSignal,
+): EventReader {
+  const source = iterable[Symbol.asyncIterator]();
+  // The client ends the subscription quietly (`done`, no AbortError) when
+  // its signal fires. A caller abort must not read as a clean end of stream
+  // — every consumer would finalize a truncated turn — so it rejects with
+  // the abort reason instead.
+  const read = (): Promise<IteratorResult<V2Event>> =>
+    source.next().then((result) => {
+      if (result.done && callSignal?.aborted) {
+        throw abortReason(callSignal) ?? new Error("Request aborted");
+      }
+      return result;
+    });
   let pending: Promise<IteratorResult<V2Event>> | undefined;
 
   return {
     next() {
-      const promise = pending ?? iterator.next();
+      const promise = pending ?? read();
       pending = undefined;
       return promise;
     },
     nextWithTimeout(ms: number, interrupt?: Promise<unknown>) {
-      const promise = pending ?? iterator.next();
+      const promise = pending ?? read();
       pending = undefined;
       let timer: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<"timeout">((resolve) => {
@@ -274,6 +310,17 @@ interface TurnContext {
   subscription: AbortController;
   headers: Record<string, string> | undefined;
   callSignal: AbortSignal | undefined;
+  /**
+   * Fires on stream-consumer cancellation (doStream `cancel()`), which —
+   * unlike a caller abort — does not touch `callSignal`.
+   */
+  consumerCancel: AbortController;
+  /**
+   * Cancellation for everything the pump does on the caller's behalf:
+   * aborted by the caller's signal OR by consumer cancellation. In-pump
+   * requests (recovery reads, waits) and cancellation checks use this.
+   */
+  pumpSignal: AbortSignal;
   warnings: SharedV4Warning[];
   /** Events consumed during the readiness handshake, replayed by the pump. */
   preBuffer: V2Event[];
@@ -287,6 +334,14 @@ interface TurnContext {
   turnStartedAt: number;
   /** The prompt (or first permission reply) has been delivered/observed. */
   delivered: boolean;
+  /**
+   * Set once this turn's prompt was accepted (receipt in hand) and cleared
+   * when the stream shows `session.inbox.enqueued` or `.delivered` for that
+   * receipt (the 2.x server publishes both for every prompt). While set,
+   * execution-scoped events for the session are stale — see
+   * {@link isPreDeliveryStaleEvent}.
+   */
+  awaitingOwnDelivery: boolean;
   /** Approval requests surfaced to the caller and not yet replied. */
   outstandingApprovals: Set<string>;
   /** Assistant messages whose `step.started` was observed. */
@@ -388,6 +443,22 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
    */
   private turnQueue: Promise<void> = Promise.resolve();
 
+  /**
+   * Server-side abort cleanups still in flight. A cleanup can end in
+   * `session.interrupt`, which targets whatever execution is active on the
+   * session — so the next turn on this instance must not dispatch until
+   * every cleanup has settled, or the interrupt can kill the new turn.
+   */
+  private readonly pendingAbortCleanups = new Set<Promise<void>>();
+
+  /**
+   * Sessions whose interrupted execution could not be confirmed settled.
+   * The next turn on such a session must confirm settlement before it
+   * subscribes and dispatches — otherwise the old execution's late terminal
+   * event would finish the new turn.
+   */
+  private readonly unsettledSessions = new Set<string>();
+
   constructor(
     modelId: string,
     settings: OpencodeSettings | undefined,
@@ -454,6 +525,9 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
 
     await this.reconcileGenerateResult(turn, aggregated);
     await this.repairJsonOutput(turn, aggregated);
+    // Post-pump work runs outside the emission gate: a caller abort during
+    // it must still reject rather than return a result.
+    throwIfAborted(options.abortSignal);
 
     return {
       content: aggregated.content,
@@ -511,6 +585,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         // Consumer cancellation mid-turn: same server-side cleanup as a
         // caller abort — the execution is still running server-side.
         turn.consumerCanceled = true;
+        turn.consumerCancel.abort();
         void this.abortServerSide(turn);
         turn.subscription.abort();
       },
@@ -535,8 +610,11 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     });
     this.turnQueue = previous.then(() => current);
 
+    // The slot opens once the previous turn released it AND every abort
+    // cleanup started so far has settled (each request is bounded).
+    const ready = previous.then(() => this.settleAbortCleanups());
     if (!signal) {
-      await previous;
+      await ready;
       return release;
     }
     try {
@@ -548,7 +626,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
           return;
         }
         signal.addEventListener("abort", onAbort, { once: true });
-        previous.then(() => {
+        void ready.then(() => {
           signal.removeEventListener("abort", onAbort);
           resolve();
         });
@@ -558,6 +636,13 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       throw error;
     }
     return release;
+  }
+
+  /** Wait for every in-flight abort cleanup, including ones started meanwhile. */
+  private async settleAbortCleanups(): Promise<void> {
+    while (this.pendingAbortCleanups.size > 0) {
+      await Promise.allSettled([...this.pendingAbortCleanups]);
+    }
   }
 
   // --- turn setup -------------------------------------------------------
@@ -590,9 +675,11 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       warnings.push({ type: "other", message });
     }
 
+    // The AI SDK passes `toolChoice: { type: "auto" }` on every call, even
+    // with no tools, so only a non-default choice is caller intent.
     if (
       (options.tools !== undefined && options.tools.length > 0) ||
-      options.toolChoice !== undefined
+      (options.toolChoice !== undefined && options.toolChoice.type !== "auto")
     ) {
       const message =
         "Custom tool definitions and toolChoice are ignored: OpenCode " +
@@ -633,7 +720,9 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       (approval) => !this.repliedApprovals.has(approval.approvalId),
     );
 
-    if (approvals.length > 0 && !approvalOnly) {
+    // Approval responses already replied on this instance are ordinary
+    // conversation history on later turns, not a mixed continuation.
+    if (unrepliedApprovals.length > 0 && !approvalOnly) {
       const message =
         "Prompt mixes tool-approval responses with new user content; " +
         "approvals are replied first, then the new content is prompted " +
@@ -687,12 +776,22 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       freshSession = established.fresh;
     }
 
+    if (this.unsettledSessions.has(sessionId)) {
+      await this.requireSessionSettled(
+        port,
+        sessionId,
+        headers,
+        options.abortSignal,
+      );
+    }
+
     // Subscribe BEFORE dispatching, then complete the readiness handshake.
     const subscription = new AbortController();
     const subscribeSignal = options.abortSignal
       ? AbortSignal.any([subscription.signal, options.abortSignal])
       : subscription.signal;
 
+    const consumerCancel = new AbortController();
     const state = createV2StreamState({
       sessionId,
       includeRawChunks: options.includeRawChunks ?? false,
@@ -703,6 +802,18 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     for (const approvalId of this.repliedApprovals) {
       state.emittedApprovals.add(approvalId);
     }
+    // A resumed tool's name arrived in the previous call; recover it from
+    // the history's tool-call parts so its result is not named "unknown".
+    for (const message of options.prompt) {
+      if (message.role !== "assistant") {
+        continue;
+      }
+      for (const part of message.content) {
+        if (part.type === "tool-call") {
+          state.knownToolNames.set(part.toolCallId, part.toolName);
+        }
+      }
+    }
 
     const turn: TurnContext = {
       port,
@@ -712,6 +823,10 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       subscription,
       headers,
       callSignal: options.abortSignal,
+      consumerCancel,
+      pumpSignal: options.abortSignal
+        ? AbortSignal.any([options.abortSignal, consumerCancel.signal])
+        : consumerCancel.signal,
       warnings,
       preBuffer: [],
       receipt: undefined,
@@ -722,6 +837,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
           : undefined,
       turnStartedAt: Date.now(),
       delivered: approvalOnly,
+      awaitingOwnDelivery: false,
       outstandingApprovals: new Set(),
       assistantMessageIds: new Set(),
       stepClosedMessageIds: new Set(),
@@ -754,7 +870,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       const iterable = turn.port.event.subscribe(
         this.requestOptions(headers, subscribeSignal),
       );
-      turn.reader = createEventReader(iterable);
+      turn.reader = createEventReader(iterable, options.abortSignal);
       await this.awaitReadiness(turn);
     } catch (error) {
       subscription.abort();
@@ -897,27 +1013,24 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       return undefined;
     }
 
-    const location = resolveSessionLocation(this.settings);
-    let catalog;
-    try {
-      catalog = await port.model.list(
-        location
-          ? {
-              location: {
-                directory: location.directory,
-                ...(location.workspaceID !== undefined
-                  ? { workspace: location.workspaceID }
-                  : {}),
-              },
-            }
-          : undefined,
-        requestOptions,
-      );
-    } catch (error) {
-      throw wrapError(error, {
-        phase: "pre-dispatch",
-        operation: "model.list",
-        modelId: this.modelId,
+    const catalog = await this.listCatalog(port, requestOptions);
+    if (catalog.data.length === 0) {
+      // Still empty after the settle window: the server never finished
+      // loading its catalog. Pre-dispatch, so retrying is safe.
+      throw new APICallError({
+        message:
+          `Model "${this.parsedModelID}" with variant "${variant}" could not ` +
+          "be resolved: the server's model catalog is still empty (a freshly " +
+          "started OpenCode server loads it asynchronously). Retry, or use " +
+          '"providerID/modelID" to skip the catalog lookup.',
+        url: "opencode://model.list",
+        requestBodyValues: {},
+        isRetryable: true,
+        data: {
+          phase: "pre-dispatch",
+          reconcile: false,
+          operation: "model.list",
+        } satisfies OpencodeErrorData,
       });
     }
 
@@ -944,6 +1057,45 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       variant,
     };
     return this.resolvedModelRef;
+  }
+
+  /**
+   * `model.list`, re-polled while the catalog is empty for up to
+   * `catalogSettleMs` (2.x fills it asynchronously after startup). Rejects
+   * with the call's abort reason if the call is aborted while waiting.
+   */
+  private async listCatalog(
+    port: OpencodeClientPort,
+    requestOptions: OpencodeRequestOptions,
+  ) {
+    const location = resolveSessionLocation(this.settings);
+    const deadline =
+      Date.now() + (this.config.catalogSettleMs ?? DEFAULT_CATALOG_SETTLE_MS);
+    const signal = requestOptions.signal;
+    for (;;) {
+      let catalog;
+      try {
+        catalog = await port.model.list(
+          location
+            ? { location: { directory: location.directory } }
+            : undefined,
+          requestOptions,
+        );
+      } catch (error) {
+        throw wrapError(error, {
+          phase: "pre-dispatch",
+          operation: "model.list",
+          modelId: this.modelId,
+        });
+      }
+      if (catalog.data.length > 0 || Date.now() >= deadline) {
+        return catalog;
+      }
+      await abortableDelay(
+        Math.min(CATALOG_POLL_INTERVAL_MS, deadline - Date.now()),
+        signal,
+      );
+    }
   }
 
   /** Readiness handshake: wait (bounded) for `server.connected`. */
@@ -1004,7 +1156,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
           {
             sessionID: approvalSessionId,
             requestID: approval.approvalId,
-            reply: approval.approved ? "once" : "reject",
+            decision: approval.approved ? "once" : "reject",
             ...(approval.reason !== undefined
               ? { message: approval.reason }
               : {}),
@@ -1280,7 +1432,10 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       sessionID: turn.sessionId,
       text,
       ...(conversion.files.length > 0 ? { files: conversion.files } : {}),
-      ...(providerOptions?.id !== undefined ? { id: providerOptions.id } : {}),
+      // Always sent: the id is this turn's correlation key for its own inbox
+      // events, and must be known even if the prompt's response is lost
+      // (see matchOwnInboxEvent). The caller's id wins when supplied.
+      id: providerOptions?.id ?? createPromptMessageId(),
       // Always sent explicitly: the provider default is "queue" while the
       // observed server default is "steer" (documented divergence).
       delivery: this.settings.delivery ?? "queue",
@@ -1291,6 +1446,10 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     turn.requestBody = promptInput;
 
     const requestOptions = this.requestOptions(turn.headers, turn.callSignal);
+    // Armed before dispatch, not after: if the response is lost the server
+    // may still have accepted the prompt, and the recovery paths must not
+    // mistake an earlier execution's in-transit events for this turn's.
+    turn.awaitingOwnDelivery = true;
     try {
       turn.receipt = await turn.port.session.prompt(
         promptInput,
@@ -1378,7 +1537,13 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       modelId: this.modelId,
     });
 
+    // The single emission gate. Once the caller aborted, nothing more is
+    // emitted — no recovered content, no finish — whichever path (live
+    // events, watchdog/silence reconciliation, lost-response recovery)
+    // produced it; the throw unwinds to the pump, which rejects with the
+    // abort reason.
     const push = (parts: LanguageModelV4StreamPart[]): void => {
+      throwIfTurnCancelled(turn);
       for (const part of parts) {
         emit(this.postProcessPart(turn, part));
       }
@@ -1394,6 +1559,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         if (await this.recoverUncertainDelivery(turn)) {
           turn.dispatchError = undefined;
         } else {
+          throwIfTurnCancelled(turn);
           await this.recoverPumpFailure(turn, turn.dispatchError, push);
           return;
         }
@@ -1494,11 +1660,33 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     push: (parts: LanguageModelV4StreamPart[]) => void,
   ): boolean {
     const sessionMatches = extractV2EventSessionId(event) === turn.sessionId;
+    if (
+      sessionMatches &&
+      turn.awaitingOwnDelivery &&
+      isPreDeliveryStaleEvent(event)
+    ) {
+      // An earlier execution's event still in transit (the 2.x client
+      // shares one SSE connection, so it can reach this subscription after
+      // the server already settled). It cannot belong to this turn.
+      this.logger.debug?.(
+        `Ignoring ${event.type} for session ${turn.sessionId}: it precedes ` +
+          "this turn's own delivery.",
+      );
+      return true;
+    }
     if (sessionMatches) {
       switch (event.type) {
+        case "session.inbox.enqueued":
+          // Published when this prompt was accepted — after any earlier
+          // execution's terminal — so it also ends the stale window.
+          if (matchOwnInboxEvent(turn, event)) {
+            turn.awaitingOwnDelivery = false;
+          }
+          break;
         case "session.inbox.delivered":
-          if (turn.receipt && event.data.inboxID === turn.receipt.id) {
+          if (matchOwnInboxEvent(turn, event)) {
             turn.delivered = true;
+            turn.awaitingOwnDelivery = false;
           }
           break;
         case "session.execution.started":
@@ -1579,9 +1767,9 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
    * is adopted as this turn's receipt and the pump keeps observing the
    * running turn.
    *
-   * The inbox table is pending-only on the pinned beta (`projectDelivered`
-   * deletes the row in the same transaction that promotes it), so an empty
-   * list does NOT prove non-delivery: an idle session picks the prompt up
+   * The inbox table is pending-only (`projectDelivered` deletes the row in
+   * the same transaction that promotes it), so an empty list does NOT prove
+   * non-delivery: an idle session picks the prompt up
    * immediately, and the row can be gone before this check runs. A miss —
    * or the check itself failing/timing out — therefore falls through to
    * {@link awaitDeliveryEvidence} before the reconciliation/error path.
@@ -1603,7 +1791,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     try {
       const listPromise = turn.port.session.inbox.list(
         { sessionID: turn.sessionId },
-        this.requestOptions(turn.headers, undefined),
+        this.requestOptions(turn.headers, turn.pumpSignal),
       );
       // A rejection after the timeout won the race must not surface as an
       // unhandled rejection.
@@ -1617,17 +1805,11 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
           );
         }),
       ]);
-      // Text-match caveat (documented): with no caller-supplied prompt id
-      // there is no delivery key, so an identical-text pending item from
-      // another client on a shared session could be misattributed. The
-      // provider's exclusive-session contract makes that the same caveat
-      // the rest of the turn correlation already carries.
+      // Matched by the prompt id the provider always sends (never by text:
+      // an identical-text item may belong to an earlier call).
       const match = items.find(
         (item): item is SessionInboxUser =>
-          item.type === "user" &&
-          (body.id !== undefined
-            ? item.id === body.id
-            : item.payload.text === body.text),
+          item.type === "user" && item.id === body.id,
       );
       if (match) {
         this.logger.warn(
@@ -1638,6 +1820,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         return true;
       }
     } catch (checkError) {
+      rethrowIfCallAborted(turn, checkError);
       this.logger.debug?.(
         `inbox delivery check unavailable: ${extractErrorMessage(checkError)}`,
       );
@@ -1667,8 +1850,21 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       );
       return true;
     };
+    // While this turn's own inbox event has not been seen, only that event
+    // proves delivery: anything else for the session may be an earlier
+    // execution's activity still in transit (see isPreDeliveryStaleEvent).
+    // Simulated locally — the pump replays the pre-buffer through
+    // observeEvent, which applies the same rule in order.
+    let awaiting = turn.awaitingOwnDelivery;
+    const isEvidence = (event: V2Event): boolean => {
+      if (matchOwnInboxEvent(turn, event)) {
+        awaiting = false;
+        return true;
+      }
+      return !awaiting && isDeliveryEvidence(event, turn.sessionId);
+    };
     for (const buffered of turn.preBuffer) {
-      if (isDeliveryEvidence(buffered, turn.sessionId)) {
+      if (isEvidence(buffered)) {
         return adopt(buffered);
       }
     }
@@ -1681,7 +1877,9 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       let result: IteratorResult<V2Event> | "timeout";
       try {
         result = await turn.reader.nextWithTimeout(remaining);
-      } catch {
+      } catch (error) {
+        // A caller abort is not a broken stream: it must reach the caller.
+        rethrowIfCallAborted(turn, error);
         // Broken stream: no live evidence obtainable — the message-store
         // fallback is the remaining recovery path.
         return false;
@@ -1690,7 +1888,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         return false;
       }
       turn.preBuffer.push(result.value);
-      if (isDeliveryEvidence(result.value, turn.sessionId)) {
+      if (isEvidence(result.value)) {
         return adopt(result.value);
       }
     }
@@ -1707,6 +1905,9 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     error: unknown,
     push: (parts: LanguageModelV4StreamPart[]) => void,
   ): Promise<void> {
+    // Recovery finalizes the turn; a caller abort (before or during it) must
+    // reject instead of being converted into a finish.
+    throwIfTurnCancelled(turn);
     const wrapped = wrapError(error, {
       phase: "post-dispatch",
       operation: "event.subscribe",
@@ -1721,6 +1922,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       );
       try {
         const outcome = await this.reconcileFromMessages(turn, push);
+        throwIfTurnCancelled(turn);
         if (
           outcome.blocked ||
           outcome.messages > 0 ||
@@ -1734,12 +1936,14 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         // Nothing observed, nothing stored, no pending interaction: the
         // failure stands — an empty "success" would mask a lost turn.
       } catch (reconcileError) {
+        rethrowIfCallAborted(turn, reconcileError);
         this.logger.warn(
           `Session reconciliation failed: ${extractErrorMessage(reconcileError)}`,
         );
       }
     }
 
+    throwIfTurnCancelled(turn);
     if (!turn.state.finishEmitted) {
       push([{ type: "error", error: wrapped }]);
       push(finalizeV2Stream(turn.state, { unified: "error", raw: undefined }));
@@ -1784,7 +1988,8 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     turn: TurnContext,
     push: (parts: LanguageModelV4StreamPart[]) => void,
   ): Promise<void> {
-    const requestOptions = this.requestOptions(turn.headers, undefined);
+    // Recovery reads belong to the call: a caller abort or consumer cancel cancels them.
+    const requestOptions = this.requestOptions(turn.headers, turn.pumpSignal);
     try {
       const permissions = await turn.port.permission.list(
         { sessionID: turn.sessionId },
@@ -1799,12 +2004,13 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         );
       }
     } catch (listError) {
+      rethrowIfCallAborted(turn, listError);
       this.logger.debug?.(
         `permission.list unavailable during recovery: ${extractErrorMessage(listError)}`,
       );
     }
     try {
-      const forms = await turn.port.form.list(
+      const forms = await turn.port.session.form.list(
         { sessionID: turn.sessionId },
         requestOptions,
       );
@@ -1817,6 +2023,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         );
       }
     } catch (listError) {
+      rethrowIfCallAborted(turn, listError);
       this.logger.debug?.(
         `form.list unavailable during recovery: ${extractErrorMessage(listError)}`,
       );
@@ -1856,8 +2063,19 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       new Promise<"timeout">((resolve) => {
         timer = setTimeout(() => resolve("timeout"), boundMs);
       }),
+      // A caller abort ends the bounded wait early; callers re-check the
+      // signal before using the outcome.
+      new Promise<"timeout">((resolve) => {
+        if (turn.pumpSignal.aborted) {
+          resolve("timeout");
+        }
+        turn.pumpSignal.addEventListener("abort", () => resolve("timeout"), {
+          once: true,
+        });
+      }),
     ]);
     clearTimeout(timer);
+    throwIfTurnCancelled(turn);
     return outcome;
   }
 
@@ -1965,6 +2183,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       }
       return true;
     } catch (probeError) {
+      rethrowIfCallAborted(turn, probeError);
       this.logger.debug?.(
         `Wait-watchdog reconciliation failed: ${extractErrorMessage(probeError)}`,
       );
@@ -1976,9 +2195,10 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
   private async fetchTurnMessages(
     turn: TurnContext,
   ): Promise<SessionMessageAssistant[]> {
+    // Recovery reads carry the call signal: an abort cancels them promptly.
     const response = await turn.port.message.list(
       { sessionID: turn.sessionId, order: "asc" },
-      this.requestOptions(turn.headers, undefined),
+      this.requestOptions(turn.headers, turn.pumpSignal),
     );
     return selectTurnAssistantMessages(response.data, turn);
   }
@@ -2059,6 +2279,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       }
       return true;
     } catch (probeError) {
+      rethrowIfCallAborted(turn, probeError);
       this.logger.debug?.(
         `Silence probe failed: ${extractErrorMessage(probeError)}`,
       );
@@ -2082,7 +2303,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     try {
       const response = await turn.port.message.list(
         { sessionID: turn.sessionId, order: "asc" },
-        this.requestOptions(turn.headers, undefined),
+        this.requestOptions(turn.headers, turn.callSignal),
       );
       messages = response.data.filter(
         (message): message is SessionMessageAssistant =>
@@ -2090,6 +2311,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
           turn.assistantMessageIds.has(message.id),
       );
     } catch (error) {
+      rethrowIfCallAborted(turn, error);
       this.logger.debug?.(
         `doGenerate message reconciliation skipped: ${extractErrorMessage(error)}`,
       );
@@ -2101,16 +2323,16 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
 
     // Content: the reducer assembled it from deltas. Restore any stored
     // block or tool call the stream never delivered — matched by the
-    // reducer's key scheme (`${messageId}:${kind}:${ordinal}` for blocks, a
-    // running ordinal over text+reasoning in array order; the v2 tool id for
-    // tools). Partially streamed blocks are left alone (the reducer's
-    // ended-event tail-fill is the recovery path for those).
+    // reducer's key scheme (`${messageId}:${kind}:${ordinal}` for blocks,
+    // with a separate ordinal per kind in array order — see
+    // {@link storedBlockOrdinals}; the v2 tool id for tools). Partially
+    // streamed blocks are left alone (the reducer's ended-event tail-fill is
+    // the recovery path for those).
     for (const message of messages) {
-      let ordinal = 0;
+      const nextOrdinal = storedBlockOrdinals();
       for (const entry of message.content) {
         if (entry.type === "text" || entry.type === "reasoning") {
-          const key = `${message.id}:${entry.type}:${ordinal}`;
-          ordinal += 1;
+          const key = `${message.id}:${entry.type}:${nextOrdinal(entry.type)}`;
           if (entry.text.length > 0 && !aggregated.streamedBlockIds.has(key)) {
             aggregated.content.push({ type: entry.type, text: entry.text });
           }
@@ -2266,6 +2488,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     let attemptsUsed = 0;
     let candidate = text;
     while (attemptsUsed < maxAttempts) {
+      throwIfTurnCancelled(turn);
       attemptsUsed += 1;
       let repaired: string;
       try {
@@ -2274,10 +2497,11 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
             prompt: buildJsonRepairPrompt(candidate, turn.jsonSchema, failure),
             ...(model ? { model } : {}),
           },
-          this.requestOptions(turn.headers, undefined),
+          this.requestOptions(turn.headers, turn.callSignal),
         );
         repaired = response.text;
       } catch (repairError) {
+        rethrowIfCallAborted(turn, repairError);
         // Post-dispatch side call: internal only (phase rule) — count the
         // attempt and keep going while the budget lasts.
         this.logger.warn(
@@ -2334,23 +2558,45 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
    * Server-side abort: cancel the undelivered inbox item, falling back to
    * interrupting the running execution (the `delivered` flag is client-side
    * knowledge — the item may have been delivered in the window before its
-   * events were pumped, making the cancel fail). Best-effort — the caller
-   * is leaving either way. Cleanup calls carry headers but never the
-   * (already aborted) call signal.
+   * events were pumped). `inbox.cancel` succeeds as a no-op for an item that
+   * was already delivered, so a successful cancel is confirmed against the
+   * message store: delivery promotes the inbox item to a user message with
+   * the same id. Best-effort — the caller is leaving either way. Cleanup
+   * calls carry headers and a per-request timeout, never the (already
+   * aborted) call signal. The returned cleanup is tracked so the instance's
+   * next turn waits for it (see {@link pendingAbortCleanups}).
    */
-  private async abortServerSide(turn: TurnContext): Promise<void> {
+  private abortServerSide(turn: TurnContext): Promise<void> {
     if (turn.abortHandled || turn.state.finishEmitted) {
-      return;
+      return Promise.resolve();
     }
     turn.abortHandled = true;
-    const requestOptions = this.requestOptions(turn.headers, undefined);
+    const cleanup = this.runAbortCleanup(turn);
+    this.pendingAbortCleanups.add(cleanup);
+    void cleanup.finally(() => this.pendingAbortCleanups.delete(cleanup));
+    return cleanup;
+  }
+
+  private async runAbortCleanup(turn: TurnContext): Promise<void> {
+    const requestOptions = (): OpencodeRequestOptions =>
+      this.requestOptions(
+        turn.headers,
+        AbortSignal.timeout(ABORT_CLEANUP_REQUEST_TIMEOUT_MS),
+      );
     if (turn.receipt && !turn.delivered) {
       try {
         await turn.port.session.inbox.cancel(
           { sessionID: turn.sessionId, inboxID: turn.receipt.id },
-          requestOptions,
+          requestOptions(),
         );
-        return;
+        if (
+          !(await this.wasDelivered(turn, turn.receipt.id, requestOptions()))
+        ) {
+          return;
+        }
+        this.logger.debug?.(
+          `inbox item ${turn.receipt.id} was already delivered; interrupting.`,
+        );
       } catch (cancelError) {
         this.logger.warn(
           `inbox.cancel failed for session ${turn.sessionId} ` +
@@ -2360,13 +2606,109 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     }
     try {
       await turn.port.session.interrupt(
-        { sessionID: turn.sessionId, continue: false },
-        requestOptions,
+        { sessionID: turn.sessionId, resume: false },
+        requestOptions(),
       );
     } catch (error) {
       this.logger.warn(
         `Abort cleanup failed for session ${turn.sessionId}: ${extractErrorMessage(error)}`,
       );
+    }
+    // The interrupt is acknowledged before the execution's cleanup finishes
+    // (its terminal event is published later), so the cleanup — and with it
+    // the instance's next turn — waits for the session to go idle.
+    if (
+      !(await this.waitSessionSettled(turn.port, turn.sessionId, turn.headers))
+    ) {
+      this.unsettledSessions.add(turn.sessionId);
+      this.logger.warn(
+        `Could not confirm that the interrupted execution on session ` +
+          `${turn.sessionId} settled; the next call on it will re-check first.`,
+      );
+    }
+  }
+
+  /**
+   * Bounded `session.wait`: true once the session is idle. A server without
+   * the route cannot confirm anything better, so a missing route counts as
+   * settled; any other failure or the timeout answers false.
+   */
+  private async waitSessionSettled(
+    port: OpencodeClientPort,
+    sessionId: string,
+    headers: Record<string, string> | undefined,
+    callSignal?: AbortSignal,
+  ): Promise<boolean> {
+    const timeout = AbortSignal.timeout(ABORT_SETTLE_TIMEOUT_MS);
+    try {
+      await port.session.wait(
+        { sessionID: sessionId },
+        this.requestOptions(
+          headers,
+          callSignal ? AbortSignal.any([timeout, callSignal]) : timeout,
+        ),
+      );
+      this.unsettledSessions.delete(sessionId);
+      return true;
+    } catch (error) {
+      if (isMissingRouteError(error)) {
+        this.unsettledSessions.delete(sessionId);
+        return true;
+      }
+      if (callSignal?.aborted) {
+        throw abortReason(callSignal) ?? asError(error);
+      }
+      return false;
+    }
+  }
+
+  /**
+   * Pre-dispatch gate for a session whose interrupted execution was never
+   * confirmed settled: re-check (bounded); still unconfirmed → a retryable
+   * error, since nothing has been dispatched.
+   */
+  private async requireSessionSettled(
+    port: OpencodeClientPort,
+    sessionId: string,
+    headers: Record<string, string> | undefined,
+    callSignal: AbortSignal | undefined,
+  ): Promise<void> {
+    if (await this.waitSessionSettled(port, sessionId, headers, callSignal)) {
+      return;
+    }
+    throw new APICallError({
+      message:
+        `OpenCode session ${sessionId} still has an interrupted execution ` +
+        "that has not settled; not dispatching onto it. Retry shortly.",
+      url: "opencode://session.wait",
+      requestBodyValues: {},
+      isRetryable: true,
+      data: {
+        phase: "pre-dispatch",
+        reconcile: false,
+        operation: "session.wait",
+      } satisfies OpencodeErrorData,
+    });
+  }
+
+  /**
+   * Whether an inbox item became a stored user message (was delivered).
+   * Only a `MessageNotFoundError` proves it was not; any other failure
+   * answers true so the caller falls back to interrupting.
+   */
+  private async wasDelivered(
+    turn: TurnContext,
+    inboxId: string,
+    requestOptions: OpencodeRequestOptions,
+  ): Promise<boolean> {
+    try {
+      await turn.port.session.message.get(
+        { sessionID: turn.sessionId, messageID: inboxId },
+        requestOptions,
+      );
+      return true;
+    } catch (error) {
+      return !(isTaggedError(error) && error._tag === "MessageNotFoundError");
     }
   }
 
@@ -2491,12 +2833,12 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     const action = answer ? "reply" : "cancel";
     try {
       if (answer) {
-        await turn.port.form.reply(
+        await turn.port.session.form.reply(
           { sessionID: form.sessionID, formID: form.id, answer },
           requestOptions,
         );
       } else {
-        await turn.port.form.cancel(
+        await turn.port.session.form.cancel(
           { sessionID: form.sessionID, formID: form.id },
           requestOptions,
         );
@@ -2537,6 +2879,28 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
 }
 
 // --- module-level helpers -----------------------------------------------
+
+/**
+ * Rethrow when the turn was cancelled — by the caller's abort (as its abort
+ * reason) or by stream-consumer cancellation (the pump then ends quietly).
+ */
+function rethrowIfCallAborted(turn: TurnContext, error: unknown): void {
+  if (turn.pumpSignal.aborted) {
+    throw abortReason(turn.callSignal) ?? asError(error);
+  }
+}
+
+/** Throw if the caller aborted or the stream consumer cancelled. */
+function throwIfTurnCancelled(turn: TurnContext): void {
+  if (turn.pumpSignal.aborted) {
+    throw (
+      abortReason(turn.callSignal) ??
+      Object.assign(new Error("Stream canceled by the consumer"), {
+        name: "AbortError",
+      })
+    );
+  }
+}
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted) {
@@ -2588,6 +2952,105 @@ function synthesizeFormCreatedEvent(form: FormInfo): V2Event {
     type: "form.created",
     data: { form },
   } as unknown as V2Event;
+}
+
+/**
+ * Whether `event` is this turn's own `session.inbox.enqueued`/`.delivered`,
+ * matched strictly by id: the receipt's, else the prompt id the provider
+ * sent (always present — see {@link createPromptMessageId}), so a lost
+ * prompt response still leaves an exact key. Never by text: an earlier
+ * aborted call with identical text can still have its inbox events in
+ * transit.
+ */
+function matchOwnInboxEvent(turn: TurnContext, event: V2Event): boolean {
+  if (
+    (event.type !== "session.inbox.enqueued" &&
+      event.type !== "session.inbox.delivered") ||
+    event.data.sessionID !== turn.sessionId
+  ) {
+    return false;
+  }
+  const body = turn.requestBody as SessionPromptInput | undefined;
+  const known = turn.receipt?.id ?? body?.id;
+  return known !== undefined && known !== null && event.data.inboxID === known;
+}
+
+const PROMPT_ID_CHARS =
+  "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+let lastPromptIdTimestamp = 0;
+let promptIdCounter = 0;
+
+/**
+ * A fresh `msg_` prompt id in OpenCode's own ascending format
+ * (`packages/schema/src/identifier.ts`: 12 hex chars of
+ * `timestamp * 0x1000 + counter`, then 14 random base62 chars). The server
+ * only requires the `msg_` prefix and orders messages and inbox items by its
+ * own sequence numbers, so a client-generated id is safe; generating it
+ * client-side makes the turn's inbox events correlatable even when the
+ * prompt's HTTP response is lost.
+ */
+function createPromptMessageId(): string {
+  const timestamp = Date.now();
+  if (timestamp !== lastPromptIdTimestamp) {
+    lastPromptIdTimestamp = timestamp;
+    promptIdCounter = 0;
+  }
+  promptIdCounter += 1;
+  const value = BigInt(timestamp) * 0x1000n + BigInt(promptIdCounter);
+  const time = value.toString(16).padStart(12, "0").slice(-12);
+  const random = Array.from(
+    crypto.getRandomValues(new Uint8Array(14)),
+    (byte) => PROMPT_ID_CHARS[byte % 62],
+  ).join("");
+  return `msg_${time}${random}`;
+}
+
+/**
+ * Events that can only come from an execution already running (or ending)
+ * before this turn's prompt was delivered: execution terminals, steps,
+ * content, tools, usage, retries, permission/form requests, and the idle
+ * backstop.
+ * (An interrupted execution's pending permission is removed server-side
+ * without a `permission.replied`, so a stale ask would otherwise linger as
+ * a phantom approval in this turn's result.) The server publishes a
+ * previous execution's terminal before it even accepts the next prompt, and
+ * SSE preserves order, so any of these seen ahead of the turn's own
+ * `session.inbox.enqueued`/`.delivered` is stale. `session.execution.started` is NOT
+ * stale: a fresh execution starts before the delivery event is published.
+ */
+function isPreDeliveryStaleEvent(event: V2Event): boolean {
+  switch (event.type) {
+    case "session.execution.succeeded":
+    case "session.execution.failed":
+    case "session.execution.interrupted":
+    case "session.usage.updated":
+    case "session.retry.scheduled":
+    case "session.idle":
+    case "permission.asked":
+    case "form.created":
+      return true;
+    default:
+      return /^session\.(step|text|reasoning|tool)\./.test(event.type);
+  }
+}
+
+/** Sleep for `ms`, rejecting with the abort reason if `signal` fires. */
+function abortableDelay(ms: number, signal: AbortSignal | undefined) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortReason(signal) ?? new Error("Request aborted"));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(abortReason(signal) ?? new Error("Request aborted"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function nonRetryableError(message: string, operation: string): APICallError {
@@ -2988,15 +3451,30 @@ function selectTurnAssistantMessages(
 }
 
 /**
+ * Ordinal source for a stored assistant message's text/reasoning entries.
+ *
+ * The server numbers text and reasoning fragments with **separate**
+ * counters per step (`packages/core/src/session/runner/publish-llm-event.ts`:
+ * one `nextOrdinal` per fragment kind), so a message streamed as
+ * `reasoning#0, text#0` is stored as `[reasoning, text]`. A shared running
+ * ordinal would key that text as `text:1`, miss the streamed `text:0`, and
+ * duplicate it.
+ */
+function storedBlockOrdinals(): (kind: "text" | "reasoning") => number {
+  const next = { text: 0, reasoning: 0 };
+  return (kind) => next[kind]++;
+}
+
+/**
  * Synthesize reducer events from stored assistant messages so the recovery
  * path reuses the reducer's idempotent handlers instead of a second
  * assembly code path.
  *
  * Ordinal assumption (documented): stored text/reasoning entries take a
- * running ordinal over the message's text+reasoning content in array order —
- * matching the shared `{assistantMessageID, ordinal}` keyspace of the live
- * delta events. A mismatch degrades to duplicated block content on this
- * rare recovery path, never to data loss.
+ * per-kind ordinal in array order ({@link storedBlockOrdinals}) — matching
+ * the `{assistantMessageID, kind, ordinal}` keyspace of the live delta
+ * events. A mismatch degrades to duplicated block content on this rare
+ * recovery path, never to data loss.
  */
 function synthesizeReconciliationEvents(
   messages: SessionMessageAssistant[],
@@ -3031,13 +3509,15 @@ function synthesizeReconciliationEvents(
           assistantMessageID: message.id,
           agent: message.agent,
           model: message.model,
+          started: message.time.created,
         },
       });
     }
 
-    let ordinal = 0;
+    const nextOrdinal = storedBlockOrdinals();
     for (const entry of message.content) {
       if (entry.type === "text" || entry.type === "reasoning") {
+        const ordinal = nextOrdinal(entry.type);
         events.push({
           ...envelope(),
           type:
@@ -3052,7 +3532,6 @@ function synthesizeReconciliationEvents(
             text: entry.text,
           },
         });
-        ordinal += 1;
         continue;
       }
 

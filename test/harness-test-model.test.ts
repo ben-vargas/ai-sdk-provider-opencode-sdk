@@ -35,6 +35,8 @@ const FAST: ResolverTimeouts = {
   probeTimeoutMs: 300,
   probePollMs: 50,
   catalogTimeoutMs: 300,
+  catalogSettleMs: 1_000,
+  catalogPollMs: 20,
 };
 
 /** Generous wall-clock ceiling every bounded resolution must beat. */
@@ -51,6 +53,8 @@ interface FakeServerBehavior {
   hangMessagesFor?: string[];
   /** Never respond to `model.list` (catalog unreachable via hang). */
   hangCatalog?: boolean;
+  /** Answer `model.list` with `[]` this many times first (async load). */
+  emptyCatalogPolls?: number;
 }
 
 interface FakeServer {
@@ -84,6 +88,11 @@ function startFakeServer(behavior: FakeServerBehavior): Promise<FakeServer> {
     if (req.method === "GET" && url.pathname === "/api/model") {
       if (behavior.hangCatalog === true) {
         return; // accept and never respond
+      }
+      if ((behavior.emptyCatalogPolls ?? 0) > 0) {
+        behavior.emptyCatalogPolls! -= 1;
+        respond({ data: [] });
+        return;
       }
       respond({
         data: behavior.catalog.map((id) => {
@@ -227,6 +236,16 @@ describe("harness test-model resolution", () => {
         modelID: "override",
         source: "env",
       });
+    });
+
+    it("waits out an empty catalog while the server loads it asynchronously", async () => {
+      fake = await startFakeServer({
+        catalog: [PIN, DEFAULT_ID],
+        working: [PIN, DEFAULT_ID],
+        emptyCatalogPolls: 3,
+      });
+      const resolved = await resolveAgainst(fake, mode);
+      expect(resolved).toEqual({ ...PINNED_TEST_MODEL, source: "pin" });
     });
 
     it("probes and picks the pinned model without any host OLLAMA_API_KEY", async () => {

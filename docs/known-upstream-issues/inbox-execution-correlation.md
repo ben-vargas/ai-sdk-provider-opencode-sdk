@@ -1,7 +1,7 @@
 # v2 has no correlation key from prompt receipt → execution/steps → assistant messages
 
 **Status:** Known upstream issue — tracked locally, not filed.
-**Last verified:** 2026-08-27, against `opencode2 0.0.0-beta-18286` (`@opencode-ai/cli`, same build as the pinned `@opencode-ai/client`).
+**Last verified:** 2026-10-06, against the `@opencode/cli@2.0.24` source and a live 2.0.24 run — still present: execution lifecycle events carry only `{sessionID}` and `session.step.started` has no back-reference to the prompt (`packages/schema/src/session-event.ts`). `receipt.id` still equals the stored user message id (observed live in the integration suite's steer capture). 2.x adds a durable `idle` message recording each execution's outcome, which marks turn boundaries but does not correlate them. First verified 2026-08-27 on `opencode2 0.0.0-beta-18286`.
 **How to re-check** (against a newer build; issue stands while `inboxID` stays undefined on execution events):
 
 ```bash

@@ -1,4 +1,4 @@
-import type { SessionLogItem } from "@opencode-ai/client";
+import type { SessionLogItem } from "@opencode/client";
 import {
   eventFactory,
   finishPart,

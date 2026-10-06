@@ -13,7 +13,7 @@
  */
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -40,8 +40,9 @@ describe.skipIf(!canRun)(
   }),
   () => {
     // Outside the real home: the server's config discovery walks upward
-    // from the workdir to the filesystem root.
-    const sandbox = join(tmpdir(), "opencode-beta-service-sandbox");
+    // from the workdir to the filesystem root. A fresh directory per run,
+    // so concurrent runs never share (or delete) each other's sandbox.
+    let sandbox = "";
     let stopChild: (() => Promise<void>) | undefined;
 
     afterAll(async () => {
@@ -50,7 +51,7 @@ describe.skipIf(!canRun)(
 
     it("discovers a --service registration and generates through it", async () => {
       // Fresh, dedicated sandbox for the service instance.
-      await rm(sandbox, { recursive: true, force: true });
+      sandbox = await mkdtemp(join(tmpdir(), "opencode-beta-service-sandbox-"));
       const dataHome = join(sandbox, "data");
       const stateHome = join(sandbox, "state");
       const workdir = join(sandbox, "workdir");
@@ -75,10 +76,12 @@ describe.skipIf(!canRun)(
         }
       }
 
-      // Port pre-seed for the source fallback, which binds the channel's
-      // fixed default port and would collide with a real local opencode
-      // service. The published `opencode2` build ignores this file and
-      // binds an ephemeral port, which cannot collide by construction.
+      // Port pre-seed: `serve --service` binds its channel's fixed default
+      // port (0xc0de = 49374 for the published `latest` channel) and exits
+      // silently when a real local opencode service already holds it. The
+      // service config file is named per channel — `service.json` for the
+      // published build, `service-local.json` for the source fallback — so
+      // seed both.
       const port = await new Promise<number>((resolve, reject) => {
         const probe = createServer();
         probe.once("error", reject);
@@ -92,11 +95,13 @@ describe.skipIf(!canRun)(
         });
       });
       await mkdir(join(sandbox, "config", "opencode"), { recursive: true });
-      await writeFile(
-        join(sandbox, "config", "opencode", "service-local.json"),
-        JSON.stringify({ port }) + "\n",
-        "utf8",
-      );
+      for (const name of ["service.json", "service-local.json"]) {
+        await writeFile(
+          join(sandbox, "config", "opencode", name),
+          JSON.stringify({ port }) + "\n",
+          "utf8",
+        );
+      }
 
       // Same launcher the harness uses, so this works on both the
       // published-binary path and the opt-in source fallback.

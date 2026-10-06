@@ -2,16 +2,16 @@
  * Integration harness for a server that speaks the pinned client's contract.
  *
  * The default (and intended) path is the **published** OpenCode v2 CLI:
- * `@opencode-ai/cli@0.0.0-beta-18286`, binary `opencode2`, installed as a
- * devDependency at the exact same build number as the pinned
- * `@opencode-ai/client@0.0.0-beta-18286`. Same build ⇒ same wire contract,
- * verified live (spike/14-opencode2-verification.mjs).
+ * `@opencode/cli@2.0.24`, binary `opencode2` (also exposed as `opencode`),
+ * installed as a devDependency at the exact same version as the pinned
+ * `@opencode/client@2.0.24`. Same release ⇒ same wire contract.
  *
  * Package-name trap: `opencode-ai` on npm is the **v1** CLI and speaks a
- * different, incompatible protocol. The v2 CLI is `@opencode-ai/cli` and its
- * binary is `opencode2`. Probing `opencode-ai` is what produced this repo's
- * earlier "no published server serves this contract" conclusion; it was
- * wrong about the package, not about the contract.
+ * different, incompatible protocol. The v2 CLI is `@opencode/cli` (the
+ * pre-release betas were published as `@opencode-ai/cli`). Probing
+ * `opencode-ai` is what produced this repo's earlier "no published server
+ * serves this contract" conclusion; it was wrong about the package, not
+ * about the contract.
  *
  * Responsibilities:
  *   - resolve the `opencode2` binary from the devDependency and assert its
@@ -43,9 +43,12 @@
  *     nor the source checkout, so attach mode works on a machine that has
  *     neither. Tests that spawn a server variant of their own skip unless a
  *     local binary happens to be installed.
- *   - `OPENCODE_BETA_SANDBOX_DIR`: sandbox root for XDG homes + workdir
- *     (default `$TMPDIR/opencode-beta-sandbox` — deliberately outside the
- *     real home so upward config discovery cannot reach it).
+ *   - `OPENCODE_BETA_SANDBOX_DIR`: parent directory for the per-run
+ *     sandboxes (XDG homes + workdir; default `$TMPDIR/opencode-beta-sandbox`
+ *     — deliberately outside the real home so upward config discovery
+ *     cannot reach it). Every run gets a fresh `run-*` directory inside it,
+ *     so runs never share server state (sessions, saved "always" permission
+ *     rules) and concurrent runs cannot clobber each other's database.
  *   - `OPENCODE_BETA_SRC_DIR`: opt-in fallback ONLY. When set, the harness
  *     builds and serves the pinned beta branch from source instead of using
  *     the published binary. Kept for the case where a future published
@@ -55,29 +58,32 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { existsSync, readFileSync } from "node:fs";
-import { copyFile, mkdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 /**
  * The published CLI build the harness expects, and the same build as the
- * pinned `@opencode-ai/client`. Kept in lockstep with the `@opencode-ai/cli`
+ * pinned `@opencode/client`. Kept in lockstep with the `@opencode/cli`
  * devDependency in package.json.
  */
-export const OPENCODE_CLI_PIN = "0.0.0-beta-18286";
+export const OPENCODE_CLI_PIN = "2.0.24";
 /** Upstream commit matching {@link OPENCODE_CLI_PIN} (source-fallback only). */
-export const BETA_PIN = "f4a9b93013695aa7a1b56ab5d91855965d5cc727";
+export const BETA_PIN = "e7a34f09bfd9134dfade5a8ddb843f7030bc9a69";
 const BETA_REPO_URL = "https://github.com/anomalyco/opencode.git";
 const HEALTH_TIMEOUT_MS = 60_000;
+/** Bound on waiting for the async catalog load to yield a default model. */
+const DEFAULT_MODEL_SETTLE_MS = 30_000;
 
 /**
  * Server-side permission rules for the sandbox server, injected via
- * `OPENCODE_CONFIG_CONTENT` (v1 `permission` shape; the v2 config loader
- * migrates it). `bash: ask` lets the approval-round-trip test trigger a real
- * `permission.asked` without affecting text-only turns.
+ * `OPENCODE_CONFIG_CONTENT`. `shell: ask` lets the approval-round-trip test
+ * trigger a real `permission.asked` without affecting text-only turns.
+ * OpenCode 2.x names the tool (and its permission action) `shell`; the
+ * pre-2.0 betas called it `bash`, which the source fallback still serves.
  */
-const SANDBOX_CONFIG = { permission: { bash: "ask" } };
+const SANDBOX_CONFIG = { permission: { shell: "ask", bash: "ask" } };
 
 /**
  * How to start a server process: spawn `command` with
@@ -98,7 +104,11 @@ export interface BetaServerHandle {
   authHeader: string;
   /** Sandbox directory sessions must bind to (`location.directory`). */
   workdir: string;
-  /** Whether zen credentials were found and copied (generation possible). */
+  /**
+   * Whether the zen catalog is usable: credentials were found and copied,
+   * or (OpenCode 2.x) the server's default model is a zen model — 2.x
+   * serves the zen free tier with a public key, no credentials needed.
+   */
   authAvailable: boolean;
   /** Server default model, when the catalog is reachable. */
   defaultModel?: { providerID: string; modelID: string };
@@ -139,10 +149,10 @@ const require = createRequire(import.meta.url);
 export function resolveOpencode2(): string {
   let packageJsonPath: string;
   try {
-    packageJsonPath = require.resolve("@opencode-ai/cli/package.json");
+    packageJsonPath = require.resolve("@opencode/cli/package.json");
   } catch {
     return fail(
-      "resolve @opencode-ai/cli",
+      "resolve @opencode/cli",
       `not installed — run \`npm install\` (devDependency, pinned ${OPENCODE_CLI_PIN})`,
     );
   }
@@ -152,14 +162,14 @@ export function resolveOpencode2(): string {
   };
   if (manifest.version !== OPENCODE_CLI_PIN) {
     fail(
-      "@opencode-ai/cli version check",
+      "@opencode/cli version check",
       `installed ${String(manifest.version)}, expected ${OPENCODE_CLI_PIN} ` +
-        `(the binary must be the same build as the pinned @opencode-ai/client)`,
+        `(the binary must be the same build as the pinned @opencode/client)`,
     );
   }
   const relative = manifest.bin?.opencode2;
   if (relative === undefined) {
-    fail("@opencode-ai/cli bin lookup", "package declares no `opencode2` bin");
+    fail("@opencode/cli bin lookup", "package declares no `opencode2` bin");
   }
   const binary = join(dirname(packageJsonPath), relative);
   if (!existsSync(binary)) {
@@ -332,16 +342,16 @@ async function waitForHealth(
       );
     }
     try {
-      const response = await fetch(`${baseUrl}/api/health`, {
+      const response = await fetch(`${baseUrl}/api/info`, {
         headers: { Authorization: authHeader },
         signal: AbortSignal.timeout(3000),
       });
       if (response.ok) {
-        const body = (await response.json()) as { healthy?: boolean };
-        if (body.healthy === true) {
+        const body = (await response.json()) as { version?: unknown };
+        if (typeof body.version === "string") {
           return;
         }
-        lastError = `healthy=${String(body.healthy)}`;
+        lastError = `version=${String(body.version)}`;
       } else {
         lastError = `HTTP ${response.status}`;
       }
@@ -353,7 +363,27 @@ async function waitForHealth(
   fail("health check", `timed out after ${HEALTH_TIMEOUT_MS}ms (${lastError})`);
 }
 
+/**
+ * The server default model, re-polled for a bounded window: a freshly
+ * started 2.x server loads its catalog asynchronously and answers `null`
+ * until it lands (an absent default is only final once the window closes).
+ */
 async function fetchDefaultModel(
+  baseUrl: string,
+  authHeader: string,
+  settleMs = DEFAULT_MODEL_SETTLE_MS,
+): Promise<{ providerID: string; modelID: string } | undefined> {
+  const deadline = Date.now() + settleMs;
+  for (;;) {
+    const model = await fetchDefaultModelOnce(baseUrl, authHeader);
+    if (model !== undefined || Date.now() >= deadline) {
+      return model;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+}
+
+async function fetchDefaultModelOnce(
   baseUrl: string,
   authHeader: string,
 ): Promise<{ providerID: string; modelID: string } | undefined> {
@@ -398,9 +428,11 @@ function parseAnnouncedPassword(log: string): string | undefined {
  * Start (or attach to) a v2 server and return its endpoint handle.
  */
 export async function startBetaServer(): Promise<BetaServerHandle> {
-  const sandboxRoot =
+  const sandboxParent =
     process.env.OPENCODE_BETA_SANDBOX_DIR ??
     join(tmpdir(), "opencode-beta-sandbox");
+  await mkdir(sandboxParent, { recursive: true });
+  const sandboxRoot = await mkdtemp(join(sandboxParent, "run-"));
   const workdir = join(sandboxRoot, "workdir");
   await mkdir(workdir, { recursive: true });
 
@@ -523,13 +555,14 @@ export async function startBetaServer(): Promise<BetaServerHandle> {
       : error;
   }
 
+  const defaultModel = await fetchDefaultModel(baseUrl, authHeader);
   return {
     mode: "spawned",
     baseUrl,
     authHeader,
     workdir,
-    authAvailable,
-    defaultModel: await fetchDefaultModel(baseUrl, authHeader),
+    authAvailable: authAvailable || defaultModel?.providerID === "opencode",
+    defaultModel,
     serveCommand,
     stop: async () => {
       await writeFile(logFile, logChunks.join(""), "utf8").catch(() => {});

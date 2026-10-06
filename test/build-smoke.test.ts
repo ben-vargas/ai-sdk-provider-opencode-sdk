@@ -28,7 +28,7 @@ describe("built ESM artifact", () => {
         )};
 
         const fakeClient = {
-          health: { get: async () => ({ healthy: true, version: "2.0.0", pid: 1 }) },
+          server: { info: async () => ({ version: "2.0.0", pid: 1, urls: [], paths: { tmp: "/tmp" } }) },
           migration: { v1: { status: async () => ({ status: "completed" }) } },
         };
 

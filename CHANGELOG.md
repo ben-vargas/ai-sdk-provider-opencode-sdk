@@ -5,6 +5,195 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.0] - 2026-10-06
+
+A rewrite for **OpenCode 2.x**: the provider now talks to OpenCode v2 through
+`@opencode/client` (exact pin `2.0.24`). OpenCode v2 is a new backend, not an
+SDK bump — client package, prompt contract, streaming events, questions,
+permissions, structured output, and server lifecycle all changed. This entry
+lists everything that changed since **4.1.0**; the setting-by-setting guide is
+**[docs/migrating-v4-to-v5.md](docs/migrating-v4-to-v5.md)**. The 4.x line
+stays available for OpenCode 1.x servers.
+
+> **Server requirement:** an OpenCode 2.x server — the published
+> **`@opencode/cli`** (binary `opencode`, also `opencode2`):
+>
+> ```bash
+> OPENCODE_PASSWORD=<password> npx @opencode/cli@2.0.24 serve --port 4096
+> ```
+>
+> `opencode-ai` on npm is still the **v1** CLI and will not work. A server
+> without `/api/info` (v1, or the pre-2.0 `0.0.0-beta-*` builds) is reported
+> as incompatible.
+
+### Breaking
+
+- **OpenCode 2.x backend.** `@opencode-ai/sdk@^1.18.11` → `@opencode/client@2.0.24`
+  (`OpenCode.make`). Results are returned directly and errors are thrown as
+  typed tagged errors; fields-style `{ data, error }` handling is gone.
+- **Server lifecycle.** `hostname`, `port`, `autoStartServer` and
+  `serverTimeout` are removed. Backends are a caller `client`, a caller
+  `clientManager`, `baseUrl`, or local-service discovery (`service` options
+  plus opt-in `autoStart`). The provider never owns or kills a shared server,
+  and its process signal handlers are gone. 2.x servers require Basic auth
+  (`clientOptions.headers.Authorization`).
+- **Client settings retyped.** `client` is now an `OpenCode.make(...)` v2
+  client; `clientOptions` is collapsed to `{ headers?, fetch? }`; the
+  `OpencodeClientManager` singleton (`createInstance` / `resetInstance`) is
+  replaced by per-provider managers (`createClientManager`,
+  `createClientManagerFromSettings`, `createClientManagerFromPort`).
+- **Session model.** Model and agent are session state. One model instance =
+  one conversation = one pinned session (`sessionMode: "ephemeral"`, the
+  default, or `"existing"` with `sessionId`). `cwd` is removed and
+  `directory` is a deprecated alias: use `location: { directory }`.
+- **Questions → forms.** `onQuestion` / `questionPolicy` are replaced by
+  `onForm` / `formPolicy` (`"cancel"` default, or `"wait"`): typed, keyed
+  fields answered with a keyed record instead of positional `string[][]`.
+- **`tools` and `permission` settings removed.** `tools` has no v2
+  per-prompt equivalent; tool availability is server/agent configuration,
+  and AI SDK `tools` / non-default `toolChoice` are ignored with a warning.
+  The session-scoped `permission` ruleset is not exposed yet (2.x
+  `session.create` accepts `permissions`, see Known limitations); configure
+  rules on the server or agent.
+- **Structured output is prompt-engineered.** v1's native `json_schema` and
+  the `StructuredOutput` tool do not exist in v2: `responseFormat: json`
+  appends a JSON instruction and warns. `outputFormatRetryCount` is removed;
+  the closest analog is the new opt-in `jsonRepair`.
+- **System prompts move to the session.** v2 has no per-prompt `system`
+  field, so `systemPrompt` and AI SDK `system:` messages are written to the
+  session instruction entry `ai-sdk.system`, which stays in effect for
+  later turns until replaced or cleared (see Added). When both are given
+  they are now joined, setting first; 4.x sent the AI SDK `system:` message
+  and ignored `systemPrompt`.
+- **Conversation history on reused sessions.** OpenCode owns the
+  transcript, so on a reused session only the latest user turn (and any
+  content after it) is sent; earlier messages you pass — including edited
+  ones — are ignored. 4.x sent the whole supplied prompt every call. On a
+  fresh session the supplied history is serialized into a delimited
+  transcript block; use `createNewSession: true` if each call must carry
+  its full history.
+- **Low-level utilities replaced.** The v1-shaped converters are gone:
+  `convertToOpencodeMessages`, `extractTextFromParts`,
+  `convertEventToStreamParts`, `createStreamState`, `createFinishParts`,
+  `isEventForSession`, `isSessionComplete`, `STRUCTURED_OUTPUT_TOOL`,
+  `mapErrorToFinishReasonFromUnknown`, `hasToolCalls` and their v1 event /
+  part types. v2 equivalents: `convertToOpencodePrompt`,
+  `convertV2EventToStreamParts` / `createV2StreamState` /
+  `finalizeV2Stream`, `mapInterruptReasonToFinishReason`,
+  `mapStructuredErrorToFinishReason`. `mapOpencodeFinishReason` now takes a
+  native finish string (and optional raw finish) instead of a v1
+  `MessageInfo`.
+- **Files.** Prompt attachments are sent as URIs; `data:` is the only
+  portable scheme (bytes are converted for you). Assistant messages no
+  longer carry standalone file parts — files surface through tool results.
+- **Errors.** v1 named error classes and the `isAuthenticationError` /
+  `isTimeoutError` / `createAPICallError` / `createEmptyResponseDataError`
+  helpers are removed, replaced by tagged-error guards (`isAbortError`,
+  `isClientError`, `isTaggedError`, …). Retryability is phase-aware: nothing
+  is retryable once a prompt or permission reply has been dispatched.
+- **`providerOptions.opencode.messageID` → `providerOptions.opencode.id`.**
+- **`OpencodeModels` replaced.** The Anthropic / OpenAI / Google shortcuts
+  are gone; the map now holds three OpenCode zen free-tier IDs
+  (`nemotron-3.5-lightning-free`, `nemotron-3-ultra-free`, `big-pickle`),
+  which need no credentials on 2.x.
+- **Examples reworked.** `question-handling`, `generate-object`,
+  `stream-object`, `image-input`, `conversation-history`, `custom-config`,
+  `tool-observation`, `long-running-tasks` and `limitations` are gone; new
+  `form-handling` and `tool-approval`. Examples read `OPENCODE_URL` /
+  `OPENCODE_PASSWORD`.
+
+### Added
+
+- **Delta-native streaming** mapped 1:1 from v2 events (text, reasoning and
+  incremental tool-input deltas), with execution lifecycle events as the
+  completion signal and `session.wait` and silence watchdogs that recover
+  from a lost signal via the session's message store.
+- **Two-phase tool approval.** A blocked tool finishes the call with a
+  `tool-approval-request` part; calling the same model instance with a
+  `tool-approval-response` sends `permission.reply` and resumes the
+  original execution without re-prompting.
+- **Interactive forms** (`onForm` / `formPolicy`) with client-side answer
+  validation, verified live with OpenCode's built-in `question` tool.
+- **Session controls:** `sessionMode`, `location`, `delivery` (`"queue"` by
+  default, always sent explicitly — the server default is `"steer"`),
+  `resume`, and the per-call `providerOptions.opencode.sessionId` escape
+  hatch.
+- **System prompts as session instructions.** The `ai-sdk.system` entry is
+  rendered into the server's instruction baseline on every turn. Writes are
+  reconciled (an unchanged value skips the request), and a turn without
+  system content clears a stale entry. Falls back to a delimited prepend plus a warning when the
+  route is missing, the value exceeds the server's 256 KiB cap, or the
+  write fails.
+- **`jsonRepair`** (opt-in, non-streaming): client-side JSON validation with
+  bounded repair via the server's session-less `generate.text` route.
+- **`resolveFileToUri`** hook; unconvertible files are warned and skipped
+  before the prompt is sent.
+- **Abort handling.** Aborting before delivery cancels the queued inbox item
+  (confirmed against the message store); after delivery it interrupts the
+  execution. The next call on the instance waits for that cleanup to settle,
+  and a turn ignores a previous execution's late events. Every prompt carries
+  an id (`providerOptions.opencode.id`, else a generated `msg_` id) for exact
+  correlation.
+- AI SDK per-call `headers` forwarded to every request in a generation;
+  `includeRawChunks` emits the raw typed v2 events.
+- Expanded `providerMetadata.opencode`: `inboxId`, approval and form IDs,
+  native `finish` / `rawFinish`, `outcome`, `interruptReason` (`user`,
+  `superseded`, `shutdown`, `inactivity`), `cost`, native `tokens` (with
+  cache), structured `error`, `retry`.
+- Gated live integration suite (`npm run test:integration`) that drives
+  `@opencode/cli@2.0.24` in an isolated sandbox, plus a client-contract
+  drift test and a packed-artifact smoke test.
+
+### Changed
+
+- `createNewSession` still forces a fresh session per ordinary call, but
+  tool-approval continuations always reattach to the blocked session.
+- A bare model ID combined with `variant` must resolve its provider from the
+  server catalog; an empty catalog right after server startup is re-polled
+  before failing.
+- OpenCode 2.x names the shell tool and its permission action `shell`
+  (not `bash`), e.g. `permission: { shell: "ask" }`.
+
+### Known limitations (OpenCode 2.0.24)
+
+- No schema-enforced structured output on the prompt path.
+- No inbox → execution correlation key, so another client's activity on a
+  shared session can be misattributed.
+- `session.log` replay is not persisted by `opencode serve`; stream-drop
+  recovery uses the message store.
+- Per-request headers do not reach the shared event subscription (only
+  client-level headers reach `/api/event`).
+- An approval rejected without a `reason`, or a cancelled `question` form,
+  ends the turn as `interrupted` with reason `"shutdown"` (finish `error`),
+  the same label as a real shutdown. Reject with a `reason` to let the model
+  continue.
+- `session.create` accepts a `permissions` ruleset again in 2.x; the
+  provider does not expose it yet.
+
+See `docs/known-upstream-issues/` for details and re-check recipes.
+
+### Upgrading from 5.0.0-beta.1
+
+The beta targeted the pre-release `@opencode-ai/client@0.0.0-beta-18286`.
+Moving to 5.0.0:
+
+- Client package `@opencode-ai/client` → `@opencode/client@2.0.24`; run the
+  server from `@opencode/cli@2.0.24` (beta servers are no longer supported).
+- `location.workspaceID` is removed (2.x dropped workspaces); a stale value
+  produces a settings-validation warning.
+- `OpencodeModels` went from six IDs to three (`hy3-free`, `mimo-v2.5-free`
+  and `muse-spark-1.2-contributor-free` are not served by 2.0.24).
+- The connection preflight uses `server.info` (`/api/info`) instead of the
+  removed `health.get`.
+- The `systemPrompt` instruction cap is 256 KiB (was 8 KiB).
+- Fixed since the beta: aborts that resolved as normal finishes or left a
+  delivered turn running; abort cleanup interrupting the next call; a
+  previous execution's late events finishing the next turn; duplicated text
+  in `doGenerate` on reasoning models; bare model ID + `variant` failing on
+  a fresh server; a spurious "custom tools ignored" warning on every call; a
+  repeated approval warning on later turns; and resumed tools reported as
+  `unknown`.
+
 ## [5.0.0-beta.1] - 2026-08-26
 
 Clean-break rewrite targeting **OpenCode v2** via `@opencode-ai/client`
@@ -96,8 +285,7 @@ for the full setting-by-setting migration.
   `system:` messages are written as a session instruction entry under the
   namespaced key `ai-sdk.system`, which the server renders into the
   instruction baseline and re-renders on every turn — so a system prompt
-  applies to the whole session, not just its first prompt (the v4-era
-  limitation). Writes are reconciled: an unchanged value skips the request,
+  applies to the whole session. Writes are reconciled: an unchanged value skips the request,
   and any turn that does not write its own value — because it carries no
   system content, or because the value is over the cap or the write failed
   — clears the entry first, so a stale system prompt can never outrank the

@@ -136,13 +136,19 @@ export const opencode = createOpencode();
  * Common model shortcuts for convenience.
  *
  * Every ID below is an OpenCode zen free-tier model, cross-checked two ways
- * (snapshot 2026-08-27 UTC):
+ * (snapshot 2026-10-06 UTC):
  *
- * 1. present in a live `model.list` from the beta-source server at commit
- *    `f4a9b930` (the build matching the pinned
- *    `@opencode-ai/client@0.0.0-beta-18286`), stable across repeated polls;
+ * 1. present in a live `model.list` from a credential-less, sandboxed
+ *    `@opencode/cli@2.0.24` server (the release matching the pinned
+ *    `@opencode/client`) — and already present in the 2026-08-27 beta
+ *    snapshot, so they survived the beta → 2.0 transition (three IDs that
+ *    did not — `hy3-free`, `mimo-v2.5-free`,
+ *    `muse-spark-1.2-contributor-free` — were dropped);
  * 2. present in the upstream models.dev catalog under the `opencode`
  *    provider — i.e. they exist independently of this machine.
+ *
+ * The free tier churns; models.dev can keep listing an ID the live server
+ * has already retired, so the live catalog is the deciding check.
  *
  * A live catalog alone is NOT sufficient evidence: it is server-, host- and
  * credential-dependent. Two classes of host-local contamination were found
@@ -154,16 +160,14 @@ export const opencode = createOpencode();
  * their credentials are configured on the server, so the v4-era shortcuts
  * for them stay dropped as unverifiable.
  *
- * These shortcuts need zen credentials on the server and are a convenience,
- * not a limit: any `providerID/modelID` string your catalog lists works.
+ * OpenCode 2.x serves the zen free tier with a public key, so these work
+ * without zen credentials. They are a convenience, not a limit: any
+ * `providerID/modelID` string your catalog lists works.
  */
 export const OpencodeModels = {
-  // OpenCode zen free tier (requires zen credentials on the server)
+  // OpenCode zen free tier (no credentials needed on OpenCode 2.x)
   "nemotron-3.5-lightning-free": "opencode/nemotron-3.5-lightning-free",
-  "muse-spark-1.2-contributor-free": "opencode/muse-spark-1.2-contributor-free",
-  "hy3-free": "opencode/hy3-free",
   "nemotron-3-ultra-free": "opencode/nemotron-3-ultra-free",
-  "mimo-v2.5-free": "opencode/mimo-v2.5-free",
   "big-pickle": "opencode/big-pickle",
 } as const;
 

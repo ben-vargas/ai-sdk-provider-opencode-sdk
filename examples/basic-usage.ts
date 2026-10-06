@@ -1,8 +1,8 @@
 /**
  * Minimal text generation with `generateText`.
  *
- * Requires an OpenCode v2 beta server — see examples/env.ts for the server
- * requirement and the OPENCODE_BETA_URL / OPENCODE_BETA_PASSWORD /
+ * Requires an OpenCode 2.x server — see examples/env.ts for the server
+ * requirement and the OPENCODE_URL / OPENCODE_PASSWORD /
  * OPENCODE_MODEL environment variables.
  *
  * The provider creates a session for the conversation, sends the prompt,

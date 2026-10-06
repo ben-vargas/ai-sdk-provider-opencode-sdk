@@ -35,7 +35,7 @@ describe("validation", () => {
         sessionTitle: "Test Session",
         agent: "build",
         variant: "safe",
-        location: { directory: "/home/user", workspaceID: "ws-1" },
+        location: { directory: "/home/user" },
         delivery: "queue",
         resume: false,
         formPolicy: "cancel",
@@ -45,6 +45,20 @@ describe("validation", () => {
       const result = validateSettings(settings);
       expect(result.value).toEqual(settings);
       expect(result.warnings).toHaveLength(0);
+    });
+
+    it("should warn about a stale location.workspaceID (removed in OpenCode 2.x)", () => {
+      const result = validateSettings({
+        location: {
+          directory: "/home/user",
+          workspaceID: "ws-1",
+        } as unknown as OpencodeSettings["location"],
+      });
+      expect(
+        result.warnings.some(
+          (w) => w.includes("location") && w.includes("workspaceID"),
+        ),
+      ).toBe(true);
     });
 
     it("should warn about invalid session ID format", () => {
@@ -516,7 +530,7 @@ describe("validation", () => {
 
     it("should prefer override location wholesale", () => {
       const defaults: OpencodeSettings = {
-        location: { directory: "/default", workspaceID: "ws-default" },
+        location: { directory: "/default" },
       };
       const overrides: OpencodeSettings = {
         location: { directory: "/override" },
@@ -537,7 +551,7 @@ describe("validation", () => {
 
     it("should let an override directory supersede a default location", () => {
       const defaults: OpencodeSettings = {
-        location: { directory: "/default", workspaceID: "ws-default" },
+        location: { directory: "/default" },
       };
       const result = mergeSettings(defaults, { directory: "/override" });
 

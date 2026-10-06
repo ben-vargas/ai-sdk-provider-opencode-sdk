@@ -1,7 +1,7 @@
 /**
  * Backend selection and client configuration.
  *
- * Requires an OpenCode v2 beta server — see examples/env.ts for the server
+ * Requires an OpenCode 2.x server — see examples/env.ts for the server
  * requirement and environment variables.
  *
  * The provider picks exactly one backend, in precedence order:
@@ -17,7 +17,7 @@
  * so `headers.Authorization` is how you connect to one via `baseUrl`.
  */
 import { generateText } from "ai";
-import { OpenCode } from "@opencode-ai/client";
+import { OpenCode } from "@opencode/client";
 import { createOpencode } from "../dist/index.js";
 import { exampleConfig } from "./env.js";
 
@@ -61,8 +61,8 @@ async function main() {
   const withClient = createOpencode({ client });
   try {
     console.log("\nCaller-supplied client backend:");
-    const health = await client.health.get();
-    console.log("Server health:", health);
+    const info = await client.server.info();
+    console.log("Server info:", { version: info.version, pid: info.pid });
     const result = await generateText({
       model: withClient(modelId, modelSettings),
       prompt: "Reply with the single word: ready",

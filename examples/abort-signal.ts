@@ -1,7 +1,7 @@
 /**
  * Cancellation with AbortSignal.
  *
- * Requires an OpenCode v2 beta server — see examples/env.ts for the server
+ * Requires an OpenCode 2.x server — see examples/env.ts for the server
  * requirement and environment variables.
  *
  * What abort does server-side depends on where the turn is:

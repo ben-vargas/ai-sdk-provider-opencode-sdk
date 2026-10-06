@@ -16,7 +16,7 @@ const { discoverMock, ensureMock, stopMock, headersMock } = vi.hoisted(() => ({
   headersMock: vi.fn(),
 }));
 
-vi.mock("@opencode-ai/client/service", () => ({
+vi.mock("@opencode/client/service", () => ({
   Service: {
     discover: discoverMock,
     ensure: ensureMock,
@@ -36,8 +36,8 @@ function createCapturingFetch(captured: CapturedRequest[]): typeof fetch {
   return (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input instanceof Request ? input.url : input);
     captured.push({ url, headers: new Headers(init?.headers) });
-    const body = url.includes("/health")
-      ? { healthy: true, version: "2.0.0", pid: 4242 }
+    const body = url.includes("/api/info")
+      ? { version: "2.0.0", pid: 4242, urls: [], paths: { tmp: "/tmp" } }
       : { status: "completed" };
     return new Response(JSON.stringify(body), {
       status: 200,
@@ -75,19 +75,19 @@ describe("effective header precedence on generated-client requests", () => {
     const port = await manager.getPort();
 
     // Preflight requests carry defaults only: user > service.
-    const preflight = captured.find((r) => r.url.includes("/health"));
+    const preflight = captured.find((r) => r.url.includes("/api/info"));
     expect(preflight).toBeDefined();
     expect(preflight!.headers.get("authorization")).toBe("Bearer user-token");
     expect(preflight!.headers.get("x-service")).toBe("from-service");
     expect(preflight!.headers.get("x-user")).toBe("from-user");
 
     // A per-call request layers its headers over both default layers.
-    await port.health.get({
+    await port.server.info({
       headers: { authorization: "Bearer per-call", "x-call": "from-call" },
     });
 
     const perCall = captured.at(-1)!;
-    expect(perCall.url).toContain("/health");
+    expect(perCall.url).toContain("/api/info");
     expect(perCall.headers.get("authorization")).toBe("Bearer per-call");
     expect(perCall.headers.get("x-user")).toBe("from-user");
     expect(perCall.headers.get("x-service")).toBe("from-service");

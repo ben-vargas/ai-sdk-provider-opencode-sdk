@@ -9,7 +9,7 @@ import { defineConfig } from "vitest/config";
  * hammer the free zen models).
  *
  * The suite runs against the published `opencode2` binary from the
- * `@opencode-ai/cli` devDependency — see `harness/beta-server.ts`.
+ * `@opencode/cli` devDependency — see `harness/beta-server.ts`.
  */
 export default defineConfig({
   test: {

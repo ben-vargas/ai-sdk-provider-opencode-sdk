@@ -57,7 +57,7 @@ export default async function setup(
       `[integration] opencode2 server ready at ${handle.baseUrl} ` +
         `(test model: ${testModel ? `${testModel.providerID}/${testModel.modelID} [${testModel.source}]` : "NONE — generation tests will skip"}, ` +
         `default model: ${handle.defaultModel ? `${handle.defaultModel.providerID}/${handle.defaultModel.modelID}` : "unknown"}, ` +
-        `zen auth: ${handle.authAvailable ? "yes" : "NO"})`,
+        `zen: ${handle.authAvailable ? "yes" : "NO"})`,
     );
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);

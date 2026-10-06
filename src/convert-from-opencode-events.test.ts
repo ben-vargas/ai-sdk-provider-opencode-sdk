@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LanguageModelV4StreamPart } from "@ai-sdk/provider";
-import type { FormCreated } from "@opencode-ai/client";
+import type { FormCreated } from "@opencode/client";
 import {
   convertV2EventToStreamParts,
   createStreamStartPart,

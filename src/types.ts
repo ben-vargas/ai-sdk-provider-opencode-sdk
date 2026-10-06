@@ -4,15 +4,15 @@ import type {
   FormField,
   FormInfo,
   FormValue,
-  LocationRef,
+  LocationPublicRef,
   OpenCodeClient,
   SessionInboxDelivery,
   SessionMessageAssistant,
   SessionMessageAssistantRetry,
   SessionStructuredError,
   TokenUsageInfo,
-} from "@opencode-ai/client";
-import type { EnsureOptions } from "@opencode-ai/client/service";
+} from "@opencode/client";
+import type { EnsureOptions } from "@opencode/client/service";
 import type { OpencodeClientPort } from "./client-port.js";
 
 /**
@@ -24,7 +24,7 @@ import type { OpencodeClientPort } from "./client-port.js";
 export type OpencodeModelId = string;
 
 /**
- * OpenCode v2 client instance (`OpenCode.make(...)` from `@opencode-ai/client`,
+ * OpenCode v2 client instance (`OpenCode.make(...)` from `@opencode/client`,
  * or the structurally compatible embedded host).
  */
 export type OpencodeClient = OpenCodeClient;
@@ -35,13 +35,13 @@ export type OpencodeClient = OpenCodeClient;
  * by the provider's backend selection, leaving `fetch` and `headers`.
  */
 export type OpencodeClientOptions = Omit<
-  Parameters<typeof import("@opencode-ai/client").OpenCode.make>[0],
+  Parameters<typeof import("@opencode/client").OpenCode.make>[0],
   "baseUrl"
 >;
 
 /**
  * Options for the local-service backend (`Service.discover`/`Service.ensure`
- * from `@opencode-ai/client/service`).
+ * from `@opencode/client/service`).
  */
 export type OpencodeServiceOptions = Pick<
   EnsureOptions,
@@ -59,7 +59,7 @@ export interface OpencodeClientManager {
   /**
    * Resolve the client-port for a generation. The first call performs backend
    * acquisition (client construction / service discovery) plus a preflight
-   * (`health.get` + `migration.v1.status`); the result is cached, and a
+   * (`server.info` + `migration.v1.status`); the result is cached, and a
    * failed acquisition is retried on the next call.
    */
   getPort(): Promise<OpencodeClientPort>;
@@ -106,15 +106,16 @@ export interface Logger {
 }
 
 /**
- * Session location: the directory (and optional workspace) a session binds to
- * at creation. Replaces v1's client-level `directory`.
+ * Session location: the directory a session binds to at creation. Replaces
+ * v1's client-level `directory`. (OpenCode 2.x removed workspaces from the
+ * public API; the pre-release betas also accepted a `workspaceID`.)
  */
-export type OpencodeSessionLocation = LocationRef;
+export type OpencodeSessionLocation = LocationPublicRef;
 
 /**
  * Inbox delivery mode for prompts sent to a busy session:
  * "steer" injects the prompt into the in-flight turn as mid-turn context —
- * verified on the beta-source server to neither interrupt nor supersede the
+ * verified live to neither interrupt nor supersede the
  * running turn, and to produce no dedicated answer of its own (whether the
  * model honors the injected text is model behavior);
  * "queue" waits for the current turn to finish, then runs normally.
@@ -134,9 +135,9 @@ export type OpencodeDelivery = SessionInboxDelivery;
  *   exclusively (default). It survives tool-approval round-trips.
  * - "existing": pin the session given by `sessionId` (shared-session caveat:
  *   other clients on the same session can be misattributed — there is no
- *   inbox-to-execution correlation key in the v2 beta).
+ *   inbox-to-execution correlation key in the v2 API).
  *
- * A third value, `"persistent"`, was removed in 5.0.0-beta.1: it was a
+ * A third value, `"persistent"`, was removed in 5.0.0: it was a
  * documented no-op (identical to "ephemeral"). To reattach to a session you
  * stored yourself, pass its `sessionId` (mode "existing").
  */
@@ -181,20 +182,16 @@ export type OpencodeFormPolicy = "cancel" | "wait";
 
 /**
  * A `data:` URI usable as a `files[].uri` prompt value — the one scheme that
- * works across every known v2 server build. Beta-contract servers also read
- * server-local `file:` URIs and reject `https:`/relative paths at prompt
- * time, while dev-channel builds store any non-`data:` URI raw and fail the
- * turn at the model provider (spike Q1 + stage-6 re-verification). The
- * stored MIME comes from the URI's declared mediatype, so encode the correct
- * media type into the URI itself.
+ * is portable: OpenCode 2.x also reads `file:` URIs, but from the
+ * **server's** filesystem (which need not be the caller's), and rejects
+ * other schemes at prompt time. The stored MIME comes from the URI's
+ * declared mediatype, so encode the correct media type into the URI itself.
  */
 export type OpencodeDataUri = `data:${string}`;
 
 /**
- * A file the provider needs a v2 prompt URI for. Only `data:` URIs work
- * across all builds; other schemes are either rejected at prompt time (beta
- * contract, except readable server-local `file:`) or stored verbatim and
- * failed at the model provider (dev builds).
+ * A file the provider needs a v2 prompt URI for. Only `data:` URIs are
+ * portable; see {@link OpencodeDataUri}.
  */
 export interface OpencodeFileToResolve {
   /** IANA media type of the file content. */
@@ -211,10 +208,9 @@ export interface OpencodeFileToResolve {
  * Hook to turn a file part into a `files[].uri` value for `session.prompt`.
  * Return a `data:` URI to attach the file, or undefined to skip it (the
  * provider emits a warning for skipped files). The provider rejects any
- * other scheme before prompting (warning + skip): non-`data:` URIs fail
- * downstream on dev builds and (except readable server-local `file:`) are
- * rejected at prompt time on the beta contract, so `data:` is the only
- * build-independent scheme.
+ * other scheme before prompting (warning + skip): `file:` would resolve
+ * against the server's filesystem and other schemes are rejected by the
+ * server, so `data:` is the only portable scheme.
  */
 export type OpencodeResolveFileToUri = (
   file: OpencodeFileToResolve,
@@ -270,7 +266,7 @@ export interface OpencodeSettings {
    * joined with this value (settings first) and written to the same entry.
    *
    * Fallback: when the server exposes no instruction-entry route, or the
-   * value exceeds the server's 8192-byte cap, or the write fails, the
+   * value exceeds the server's 256 KiB cap, or the write fails, the
    * provider degrades to prepending a delimited system block to the turn's
    * text and emits an `unsupported` warning naming the reason.
    */
@@ -284,7 +280,7 @@ export interface OpencodeSettings {
   variant?: string;
 
   /**
-   * Session location (directory and optional workspace), bound at
+   * Session location (`{ directory }`), bound at
    * `session.create`. Replaces v1's `directory`/`cwd` settings.
    */
   location?: OpencodeSessionLocation;
@@ -412,9 +408,11 @@ export interface OpencodeProviderSettings {
   service?: OpencodeServiceOptions;
 
   /**
-   * Start the local service via `Service.ensure` when discovery finds none.
-   * Provisional default: false (discovery only) — `opencode serve --service`
-   * does not work on current dev/beta CLIs, so auto-start would fail today.
+   * Start the local service via `Service.ensure` when discovery finds none
+   * (default command `opencode serve --service`; needs an OpenCode 2.x
+   * `opencode` binary on PATH, or `service.command`). Off by default: it
+   * spawns a long-lived background service that outlives this process
+   * unless the provider owns it (see `dispose`).
    * @default false
    */
   autoStart?: boolean;
@@ -532,7 +530,7 @@ export interface OpencodeProviderMetadata {
     /** Execution outcome for the turn. */
     outcome?: "succeeded" | "failed" | "interrupted";
     /** Interrupt reason when the turn was interrupted. */
-    interruptReason?: "user" | "shutdown" | "superseded";
+    interruptReason?: "user" | "shutdown" | "superseded" | "inactivity";
     /** Cost in USD, summed across the turn's steps when available. */
     cost?: number;
     /** Native token usage, summed across the turn's steps. */

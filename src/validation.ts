@@ -28,10 +28,13 @@ const loggerSchema = z.object({
     .optional(),
 });
 
-const locationSchema = z.object({
-  directory: z.string(),
-  workspaceID: z.string().optional(),
-});
+const locationSchema = z
+  .object({
+    directory: z.string(),
+  })
+  // OpenCode 2.x dropped workspaces; reject a stale `workspaceID` loudly
+  // instead of letting it be stripped and silently ignored.
+  .strict();
 
 /**
  * Schema for OpencodeSettings.

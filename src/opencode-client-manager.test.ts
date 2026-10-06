@@ -17,11 +17,12 @@ const { makeMock, discoverMock, ensureMock, stopMock, headersMock } =
     headersMock: vi.fn(),
   }));
 
-vi.mock("@opencode-ai/client", () => ({
+vi.mock("@opencode/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@opencode/client")>()),
   OpenCode: { make: makeMock },
 }));
 
-vi.mock("@opencode-ai/client/service", () => ({
+vi.mock("@opencode/client/service", () => ({
   Service: {
     discover: discoverMock,
     ensure: ensureMock,
@@ -50,15 +51,16 @@ interface FakeClientOverrides {
 
 function createFakeClient(overrides: FakeClientOverrides = {}) {
   return {
-    health: {
-      get: vi.fn(async () => {
+    server: {
+      info: vi.fn(async () => {
         if (overrides.healthError !== undefined) {
           throw overrides.healthError;
         }
         return {
-          healthy: true as const,
           version: overrides.healthVersion ?? "2.0.0",
           pid: 4242,
+          urls: [],
+          paths: { tmp: "/tmp" },
         };
       }),
     },
@@ -229,7 +231,7 @@ describe("backend selection", () => {
       (error: unknown) => error as Error,
     );
     expect(failure?.message).toMatch(
-      /Failed to auto-start the OpenCode service.*\/owned\.json.*Timed out waiting.*opencode serve\s+--service` is broken.*baseUrl/s,
+      /Failed to auto-start the OpenCode service.*\/owned\.json.*Timed out waiting.*opencode serve --service`.*service\.command.*baseUrl/s,
     );
     expect(failure?.cause).toBe(cause);
   });
@@ -354,7 +356,7 @@ describe("preflight", () => {
     await manager.getPort();
     await manager.getPort();
 
-    expect(fake.health.get).toHaveBeenCalledTimes(1);
+    expect(fake.server.info).toHaveBeenCalledTimes(1);
     expect(fake.migration.v1.status).toHaveBeenCalledTimes(1);
     expect(logger.debugMessages.join("\n")).toContain("2.3.4");
   });
@@ -372,6 +374,24 @@ describe("preflight", () => {
     makeMock.mockImplementation(() => createFakeClient());
     await expect(manager.getPort()).resolves.toBeDefined();
     expect(makeMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports a server without /api/info as an incompatible pre-2.0 build", async () => {
+    makeMock.mockImplementation(() =>
+      createFakeClient({
+        healthError: {
+          name: "ClientError",
+          reason: "UnexpectedStatus",
+          cause: { status: 404 },
+          message: "UnexpectedStatus: 404",
+        },
+      }),
+    );
+    const manager = createClientManager({ baseUrl: "http://old" });
+
+    await expect(manager.getPort()).rejects.toThrow(
+      /Incompatible OpenCode server at http:\/\/old: .*predates OpenCode 2\.0/s,
+    );
   });
 
   it("degrades health failure to a warning for caller-supplied clients", async () => {

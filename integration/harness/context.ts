@@ -6,7 +6,7 @@
  * `test-model.ts` for the env-override → pin → server-default order).
  */
 import { inject } from "vitest";
-import { OpenCode, type OpenCodeClient } from "@opencode-ai/client";
+import { OpenCode, type OpenCodeClient } from "@opencode/client";
 import { createOpencode } from "../../src/index.js";
 import type { ServeCommand } from "./beta-server.js";
 import type {

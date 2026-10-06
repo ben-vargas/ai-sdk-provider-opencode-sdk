@@ -25,11 +25,11 @@
  * stops a service `ensure` merely reused; `stopService()` is the explicit
  * user-invoked stop for those.
  */
-import { OpenCode } from "@opencode-ai/client";
-import { Service } from "@opencode-ai/client/service";
-import type { Endpoint } from "@opencode-ai/client/service";
+import { OpenCode } from "@opencode/client";
+import { Service } from "@opencode/client/service";
+import type { Endpoint } from "@opencode/client/service";
 import { asClientPort, type OpencodeClientPort } from "./client-port.js";
-import { extractErrorMessage } from "./errors.js";
+import { extractErrorMessage, isMissingRouteError } from "./errors.js";
 import { getLogger } from "./logger.js";
 import type {
   Logger,
@@ -271,16 +271,16 @@ class DefaultOpencodeClientManager implements OpencodeClientManager {
         });
       } catch (error) {
         // Spawn/exit/timeout failures from Service.ensure need the same
-        // actionable context as a discovery miss: the default command is
-        // broken on published CLI builds, and `baseUrl` is the usable path.
+        // actionable context as a discovery miss. The default command is
+        // `opencode serve --service`, so an `opencode` 2.x binary must be
+        // on PATH (or named via `service.command`).
         throw new Error(
           "Failed to auto-start the OpenCode service" +
             (service?.file ? ` (registration file: ${service.file})` : "") +
-            `: ${extractErrorMessage(error)}. Note: \`opencode serve ` +
-            "--service` is broken on current published CLI builds (see " +
-            "docs/v2-spike-findings.md) — pass `baseUrl` to point at a " +
-            "server you started yourself, or supply a `service.command` " +
-            "that serves the service-registration contract.",
+            `: ${extractErrorMessage(error)}. The default command is ` +
+            "`opencode serve --service`, which needs an OpenCode 2.x " +
+            "`opencode` binary on PATH — set `service.command` to point at " +
+            "one, or pass `baseUrl` to use a server you started yourself.",
           { cause: error },
         );
       }
@@ -297,17 +297,16 @@ class DefaultOpencodeClientManager implements OpencodeClientManager {
             ? ", or a registered service was filtered out by the configured " +
               "`service.version` predicate"
             : "") +
-          ". Start one with `opencode serve --service`, pass `baseUrl` to " +
-          "point at a running server, or set `autoStart: true` to let the " +
-          "provider start it. Note: `opencode serve --service` is broken on " +
-          "current published CLI builds (see docs/v2-spike-findings.md).",
+          ". Start one with `opencode serve --service` (OpenCode 2.x), pass " +
+          "`baseUrl` to point at a running server, or set `autoStart: true` " +
+          "to let the provider start it.",
       );
     }
     return discovered;
   }
 
   /**
-   * First-acquisition preflight: `health.get()` (version logged; gated by the
+   * First-acquisition preflight: `server.info()` (version logged; gated by the
    * service `version` predicate when configured) and `migration.v1.status()`
    * (warn on required/running/error; never block). Both degrade to warnings
    * for caller-supplied clients/ports — the caller owns that client's
@@ -319,20 +318,27 @@ class DefaultOpencodeClientManager implements OpencodeClientManager {
   ): Promise<void> {
     let version: string | undefined;
     try {
-      const health = await port.health.get();
-      version = health.version;
+      const info = await port.server.info();
+      version = info.version;
       this.logger.debug?.(
-        `OpenCode server healthy: version ${health.version}, pid ${health.pid}`,
+        `OpenCode server healthy: version ${info.version}, pid ${info.pid}`,
       );
     } catch (error) {
-      const detail = extractErrorMessage(error);
+      const where = this.getServerUrl() ? ` at ${this.getServerUrl()}` : "";
+      // A server that answers but has no `/api/info` route predates
+      // OpenCode 2.0 (the betas served `/api/health`; 1.x servers neither).
+      const detail = isMissingRouteError(error)
+        ? "the server has no /api/info route — it predates OpenCode 2.0. " +
+          "This provider requires an OpenCode 2.x server; use the 4.x line " +
+          "of ai-sdk-provider-opencode-sdk for OpenCode 1.x"
+        : extractErrorMessage(error);
       if (callerSupplied) {
         this.logger.warn(`OpenCode health preflight failed: ${detail}`);
       } else {
         throw new Error(
-          `Failed to reach OpenCode server${
-            this.getServerUrl() ? ` at ${this.getServerUrl()}` : ""
-          } (health.get): ${detail}`,
+          isMissingRouteError(error)
+            ? `Incompatible OpenCode server${where}: ${detail}`
+            : `Failed to reach OpenCode server${where} (server.info): ${detail}`,
           { cause: error },
         );
       }

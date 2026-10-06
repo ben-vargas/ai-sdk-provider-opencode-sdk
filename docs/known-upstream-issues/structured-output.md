@@ -1,11 +1,11 @@
 # v2 has no schema-enforced structured output on the prompt path
 
 **Status:** Known upstream issue — tracked locally, not filed.
-**Last verified:** 2026-08-27, against `opencode2 0.0.0-beta-18286` (`@opencode-ai/cli`, same build as the pinned `@opencode-ai/client`).
+**Last verified:** 2026-10-06, against `@opencode/cli@2.0.24` (same release as the pinned `@opencode/client`) — still present: the live `/openapi.json` has no hits, the prompt body is `{text, files, agents, skills}`, and `generate.text` is still `{prompt, model?}` → `{text}`. First verified 2026-08-27 on `opencode2 0.0.0-beta-18286`.
 **How to re-check** (against a newer build — no hits means the issue stands):
 
 ```bash
-OPENCODE_PASSWORD=pw npx -y @opencode-ai/cli@beta serve --port 4099 & sleep 10; \
+OPENCODE_PASSWORD=pw npx -y @opencode/cli@latest serve --port 4099 & sleep 10; \
   curl -su opencode:pw http://127.0.0.1:4099/openapi.json | \
   grep -oE 'responseFormat|response_format|json_schema|outputSchema|structuredOutput' | sort -u; \
   kill %1

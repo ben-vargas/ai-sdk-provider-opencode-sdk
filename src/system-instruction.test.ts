@@ -51,8 +51,8 @@ describe("instructionValueBytes", () => {
 });
 
 describe("fitsInstructionValue", () => {
-  // The live boundary: 8190 raw ASCII chars encode to exactly 8192 bytes and
-  // are accepted; 8191 encode to 8193 and are rejected.
+  // The boundary: `cap - 2` raw ASCII chars encode to exactly the cap (two
+  // JSON quotes) and are accepted; one more char is rejected.
   it("accepts a value whose encoding is exactly the cap", () => {
     const value = "y".repeat(INSTRUCTION_VALUE_MAX_BYTES - 2);
     expect(instructionValueBytes(value)).toBe(INSTRUCTION_VALUE_MAX_BYTES);
@@ -66,8 +66,8 @@ describe("fitsInstructionValue", () => {
   });
 
   it("accounts for multi-byte characters at the boundary", () => {
-    // 4095 x 2-byte chars = 8190 bytes + quotes = exactly the cap.
-    const value = "é".repeat(4095);
+    // (cap - 2) / 2 two-byte chars + quotes = exactly the cap.
+    const value = "é".repeat((INSTRUCTION_VALUE_MAX_BYTES - 2) / 2);
     expect(instructionValueBytes(value)).toBe(INSTRUCTION_VALUE_MAX_BYTES);
     expect(fitsInstructionValue(value)).toBe(true);
     expect(fitsInstructionValue(value + "é")).toBe(false);

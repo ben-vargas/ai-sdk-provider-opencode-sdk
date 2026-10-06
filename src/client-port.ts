@@ -1,25 +1,22 @@
 /**
  * Internal client-port facade for the OpenCode v2 client.
  *
- * This is the single seam between the provider and `@opencode-ai/client`:
- * every route/type the provider touches is named here, so beta churn in the
+ * This is the single seam between the provider and `@opencode/client`:
+ * every route/type the provider touches is named here, so churn in the
  * generated client surfaces as compile errors in exactly one module. All
  * signatures are derived (via `Pick`) from the generated client type rather
- * than hand-copied, so this port cannot drift silently from the pinned beta.
- *
- * The dev-channel CLI currently serves a different wire contract than the
- * beta client types (`session.next.*` events, nested prompt body). Any
- * reconciliation between those contracts belongs behind this port, not in
- * the language model (see docs/v2-spike-findings.md, finding 0).
+ * than hand-copied, so this port cannot drift silently from the pinned
+ * client. Any reconciliation between server contracts belongs behind this
+ * port, not in the language model.
  */
-import type { OpenCodeClient } from "@opencode-ai/client";
+import type { OpenCodeClient } from "@opencode/client";
 
 /**
  * Per-request options accepted by every port method.
  * Re-exported from the generated client: `{signal?, headers?}`.
  */
 export type OpencodeRequestOptions = NonNullable<
-  Parameters<OpenCodeClient["health"]["get"]>[0]
+  Parameters<OpenCodeClient["server"]["info"]>[0]
 >;
 
 /**
@@ -30,7 +27,7 @@ export type OpencodeRequestOptions = NonNullable<
  * {@link asClientPort} and covered in client-port.test.ts.
  */
 export interface OpencodeClientPort {
-  readonly health: Pick<OpenCodeClient["health"], "get">;
+  readonly server: Pick<OpenCodeClient["server"], "info">;
   readonly session: Pick<
     OpenCodeClient["session"],
     | "create"
@@ -49,13 +46,19 @@ export interface OpencodeClientPort {
      * pending items (delivery-uncertainty check after a failed prompt).
      */
     readonly inbox: Pick<OpenCodeClient["session"]["inbox"], "cancel" | "list">;
+    /** Session-scoped forms: recovery listing and reply/cancel. */
+    readonly form: Pick<
+      OpenCodeClient["session"]["form"],
+      "list" | "reply" | "cancel"
+    >;
     /**
      * Session instruction entries — the real system-prompt channel.
      *
      * An entry renders as `<context key="...">value</context>` into the
      * session's instruction baseline, ahead of the user turn and after the
      * agent's own system prompt, and is re-rendered on every turn (verified
-     * live against `opencode2@0.0.0-beta-18286`; see
+     * live against `opencode2@0.0.0-beta-18286` and exercised against
+     * `@opencode/cli@2.0.24` by the integration suite; see
      * spike/artifacts/14b-instruction-entries.json).
      *
      * Optional on the port on purpose: an alternative backend (or a client
@@ -84,10 +87,6 @@ export interface OpencodeClientPort {
     OpenCodeClient["permission"],
     "list" | "get" | "reply"
   >;
-  readonly form: Pick<
-    OpenCodeClient["form"],
-    "list" | "state" | "reply" | "cancel"
-  >;
   readonly migration: {
     readonly v1: Pick<OpenCodeClient["migration"]["v1"], "status">;
   };
@@ -97,7 +96,7 @@ export interface OpencodeClientPort {
  * Narrow a full OpenCode client to the port the provider uses.
  *
  * The bare return doubles as a compile-time assertion that the generated
- * client still satisfies the port — if a pinned-beta bump changes any of the
+ * client still satisfies the port — if a pinned-client bump changes any of the
  * routes above, `npm run typecheck` fails here first.
  */
 export function asClientPort(client: OpenCodeClient): OpencodeClientPort {

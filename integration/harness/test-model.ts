@@ -33,8 +33,8 @@
  * not reintroduce `ollama-cloud/*` ids into `OpencodeModels` or any shipped
  * code — the stage-8 decontamination stands.
  */
-import { OpenCode } from "@opencode-ai/client";
-import type { SessionMessageInfo } from "@opencode-ai/client";
+import { OpenCode } from "@opencode/client";
+import type { SessionMessageInfo } from "@opencode/client";
 
 export interface TestModelRef {
   providerID: string;
@@ -73,12 +73,22 @@ export interface ResolverTimeouts {
   probePollMs: number;
   /** Per-attempt bound on the `model.list` catalog request. */
   catalogTimeoutMs: number;
+  /**
+   * How long an EMPTY catalog is re-polled before it is accepted. OpenCode
+   * 2.x answers `model.list` with `[]` for the first seconds after startup
+   * and populates the catalog asynchronously.
+   */
+  catalogSettleMs: number;
+  /** Delay between empty-catalog re-polls. */
+  catalogPollMs: number;
 }
 
 const DEFAULT_TIMEOUTS: ResolverTimeouts = {
   probeTimeoutMs: 90_000,
   probePollMs: 2_000,
   catalogTimeoutMs: 15_000,
+  catalogSettleMs: 30_000,
+  catalogPollMs: 1_000,
 };
 
 /**
@@ -293,7 +303,8 @@ export async function resolveTestModel(options: {
   // fail-closed: when `model.list` is unreachable after a bounded retry, no
   // candidate can be verified and generation tests skip.
   let catalog: Set<string> | undefined;
-  for (let attempt = 1; attempt <= CATALOG_ATTEMPTS; attempt++) {
+  const settleDeadline = Date.now() + timeouts.catalogSettleMs;
+  for (let attempt = 1; attempt <= CATALOG_ATTEMPTS; ) {
     try {
       const listed = await client.model.list(
         {},
@@ -304,11 +315,21 @@ export async function resolveTestModel(options: {
           refString({ providerID: model.providerID, modelID: model.modelID }),
         ),
       );
+      // A freshly started 2.x server lists nothing until its async catalog
+      // load lands: re-poll an empty answer (without spending a failure
+      // attempt) until the settle window closes, then accept it as-is.
+      if (catalog.size === 0 && Date.now() < settleDeadline) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, timeouts.catalogPollMs),
+        );
+        continue;
+      }
       break;
     } catch (error) {
       warn(
         `model.list attempt ${attempt}/${CATALOG_ATTEMPTS} failed: ${error instanceof Error ? error.message : String(error)}`,
       );
+      attempt++;
     }
   }
   if (catalog === undefined) {

@@ -3,7 +3,7 @@
  * OpenCode emits (reasoning, tool lifecycle, sources/files from tool
  * results).
  *
- * Requires an OpenCode v2 beta server — see examples/env.ts for the server
+ * Requires an OpenCode 2.x server — see examples/env.ts for the server
  * requirement and environment variables.
  *
  * OpenCode v2 streams native delta events (`session.text.delta`,
