@@ -314,6 +314,22 @@ function classifyTaggedError(error: {
   return { ...base, transient: false };
 }
 
+/** The first typed client/API error in an error's `cause` chain (bounded). */
+function typedCause(error: unknown): unknown {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5; depth++) {
+    if (!(current instanceof Error)) {
+      return undefined;
+    }
+    const cause: unknown = current.cause;
+    if (isClientError(cause) || isTaggedError(cause)) {
+      return cause;
+    }
+    current = cause;
+  }
+  return undefined;
+}
+
 function classifyUnknown(error: unknown): ErrorClassification {
   return {
     message: `OpenCode request failed: ${extractErrorMessage(error)}`,
@@ -395,11 +411,24 @@ export function wrapError(
     });
   }
 
-  const classification = isClientError(error)
-    ? classifyClientError(error)
-    : isTaggedError(error)
-      ? classifyTaggedError(error)
-      : classifyUnknown(error);
+  // A plain Error that wraps a typed one (e.g. the client manager's
+  // preflight "Failed to reach OpenCode server" with the ClientError as its
+  // cause) is classified by that cause, so transience and auth survive the
+  // wrapping; its own, more specific message is kept.
+  const typed =
+    isClientError(error) || isTaggedError(error) ? error : typedCause(error);
+  const typedClassification =
+    typed === undefined
+      ? undefined
+      : isClientError(typed)
+        ? classifyClientError(typed)
+        : classifyTaggedError(typed as { _tag: string; message: string });
+  const classification =
+    typedClassification === undefined
+      ? classifyUnknown(error)
+      : typed === error
+        ? typedClassification
+        : { ...typedClassification, message: extractErrorMessage(error) };
 
   if (classification.auth) {
     return new LoadAPIKeyError({

@@ -34,7 +34,11 @@ import type {
   SharedV4ProviderMetadata,
   SharedV4Warning,
 } from "@ai-sdk/provider";
-import { isConflictError, isSessionBusyError } from "@opencode/client";
+import {
+  ClientError,
+  isConflictError,
+  isSessionBusyError,
+} from "@opencode/client";
 import type {
   FormCreated,
   FormInfo,
@@ -342,6 +346,33 @@ interface TurnContext {
    * {@link isPreDeliveryStaleEvent}.
    */
   awaitingOwnDelivery: boolean;
+  /**
+   * Mixed continuation (approval replies plus new content in one call): the
+   * replies resume the blocked execution, and this turn's prompt is queued
+   * behind it, so that predecessor's ending can arrive after this prompt's
+   * `inbox.enqueued`. While set, the next execution ending is the
+   * predecessor's and does not end the turn. Cleared by that ending, or by
+   * this turn's own execution starting or prompt being delivered — after
+   * which every ending (including a failure before delivery) is this
+   * turn's.
+   */
+  awaitingPredecessorEnd: boolean;
+  /**
+   * This call replied to approvals and prompted new content (see
+   * {@link awaitingPredecessorEnd}). Stored-message recovery then credits
+   * only messages after this prompt's own user message with concluding it.
+   */
+  mixedContinuation: boolean;
+  /** This turn's own `session.inbox.delivered` was observed. */
+  ownPromptDelivered: boolean;
+  /**
+   * The execution ending skipped as the predecessor's (mixed continuation).
+   * OpenCode can run the queued prompt inside that same execution, so the
+   * skipped ending may really be this prompt's failure before delivery. It
+   * is discarded once this turn's own execution starts or its prompt is
+   * delivered; if the session settles first, it is surfaced.
+   */
+  heldEnding: V2Event | undefined;
   /** Approval requests surfaced to the caller and not yet replied. */
   outstandingApprovals: Set<string>;
   /** Assistant messages whose `step.started` was observed. */
@@ -725,8 +756,9 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
     if (unrepliedApprovals.length > 0 && !approvalOnly) {
       const message =
         "Prompt mixes tool-approval responses with new user content; " +
-        "approvals are replied first, then the new content is prompted " +
-        '(delivery "queue" runs it after the resumed execution).';
+        "approvals are replied first, then the new content is queued " +
+        "behind the resumed execution; the call returns when the new " +
+        "content's turn finishes.";
       this.logger.warn(message);
       warnings.push({ type: "other", message });
     }
@@ -838,6 +870,10 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       turnStartedAt: Date.now(),
       delivered: approvalOnly,
       awaitingOwnDelivery: false,
+      awaitingPredecessorEnd: unrepliedApprovals.length > 0 && !approvalOnly,
+      mixedContinuation: unrepliedApprovals.length > 0 && !approvalOnly,
+      ownPromptDelivered: false,
+      heldEnding: undefined,
       outstandingApprovals: new Set(),
       assistantMessageIds: new Set(),
       stepClosedMessageIds: new Set(),
@@ -1630,8 +1666,12 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
           }
         }
         if (result.done) {
-          push(finalizeV2Stream(turn.state));
-          return;
+          // The event stream ended before this turn's terminal event. The
+          // 2.x client never reconnects, so a server restart or a proxy
+          // closing /api/event ends it cleanly mid-turn. Treat that as a
+          // dropped stream and reconcile through the session, rather than
+          // finishing with whatever was streamed so far.
+          throw streamEndedError();
         }
         if (this.observeEvent(turn, result.value, push)) {
           quiescenceDeadline = undefined;
@@ -1674,6 +1714,24 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       );
       return true;
     }
+    if (sessionMatches && turn.awaitingPredecessorEnd) {
+      if (event.type === "session.execution.started") {
+        // A new execution after this turn's enqueue is this turn's own.
+        turn.awaitingPredecessorEnd = false;
+      } else if (isTurnEndingEvent(event)) {
+        // The approval-resumed execution ended; this turn's queued prompt
+        // runs next. Keep the predecessor's content, but not its ending.
+        if (event.type !== "session.idle") {
+          turn.awaitingPredecessorEnd = false;
+          turn.heldEnding = event;
+        }
+        this.logger.debug?.(
+          `Skipping ${event.type} for session ${turn.sessionId}: it ends ` +
+            "the approval-resumed execution this turn's prompt is queued behind.",
+        );
+        return true;
+      }
+    }
     if (sessionMatches) {
       switch (event.type) {
         case "session.inbox.enqueued":
@@ -1687,10 +1745,15 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
           if (matchOwnInboxEvent(turn, event)) {
             turn.delivered = true;
             turn.awaitingOwnDelivery = false;
+            turn.awaitingPredecessorEnd = false;
+            turn.ownPromptDelivered = true;
+            turn.heldEnding = undefined;
           }
           break;
         case "session.execution.started":
           turn.delivered = true;
+          // This turn's own execution: a held ending was the predecessor's.
+          turn.heldEnding = undefined;
           this.armWaitWatchdog(turn);
           break;
         case "session.step.started":
@@ -1923,11 +1986,22 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       try {
         const outcome = await this.reconcileFromMessages(turn, push);
         throwIfTurnCancelled(turn);
+        // Only proof that the turn concluded (or is blocked on an approval)
+        // makes recovery a success. Partial content from a turn that may
+        // still be running — or that died without concluding — is not.
+        if (outcome.blocked || outcome.concluded) {
+          if (!turn.state.finishEmitted) {
+            push(finalizeV2Stream(turn.state));
+          }
+          return;
+        }
         if (
-          outcome.blocked ||
-          outcome.messages > 0 ||
-          turn.state.stepCount > 0
+          turn.heldEnding !== undefined &&
+          turn.heldEnding.type !== "session.execution.succeeded" &&
+          !turn.ownPromptDelivered
         ) {
+          // A held failure/interruption is the best account of this turn.
+          push(convertV2EventToStreamParts(turn.heldEnding, turn.state));
           if (!turn.state.finishEmitted) {
             push(finalizeV2Stream(turn.state));
           }
@@ -1962,20 +2036,20 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
   private async reconcileFromMessages(
     turn: TurnContext,
     push: (parts: LanguageModelV4StreamPart[]) => void,
-  ): Promise<{ blocked: boolean; messages: number }> {
+  ): Promise<{ blocked: boolean; concluded: boolean }> {
     await this.surfacePendingInteractions(turn, push);
     if (turn.outstandingApprovals.size > 0) {
       // The session is blocked on an approval: finalize as a phase-1 result
       // (the caller's finalize surfaces the approval) — waiting would
       // deadlock, the execution cannot settle until the reply.
-      return { blocked: true, messages: 0 };
+      return { blocked: true, concluded: false };
     }
 
     await this.waitBounded(turn, turn.silenceWatchdogMs);
 
-    const messages = await this.fetchTurnMessages(turn);
-    this.replayStoredMessages(turn, messages, push);
-    return { blocked: false, messages: messages.length };
+    const stored = await this.fetchTurnMessages(turn);
+    this.replayStoredMessages(turn, stored, push);
+    return { blocked: false, concluded: isConcludedMessage(stored.conclusion) };
   }
 
   /**
@@ -2146,8 +2220,8 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         break;
       }
       if (result.done) {
-        push(finalizeV2Stream(turn.state));
-        return true;
+        // Same as the main pump: a clean end is a dropped stream.
+        throw streamEndedError();
       }
       this.observeEvent(turn, result.value, push);
       if (turn.state.finishEmitted) {
@@ -2157,14 +2231,8 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
 
     turn.waitWatchdogState = "disarmed";
     try {
-      const messages = await this.fetchTurnMessages(turn);
-      const last = messages[messages.length - 1];
-      const concluded =
-        last !== undefined &&
-        (last.error !== undefined ||
-          (last.finish !== undefined &&
-            last.finish !== "tool-calls" &&
-            last.finish !== "unknown"));
+      const stored = await this.fetchTurnMessages(turn);
+      const concluded = isConcludedMessage(stored.conclusion);
       if (!concluded) {
         this.logger.warn(
           `session.wait resolved for session ${turn.sessionId} but neither ` +
@@ -2177,7 +2245,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         `session.wait watchdog: session ${turn.sessionId} settled but the ` +
           "event stream showed no terminal; finalizing from the message store.",
       );
-      this.replayStoredMessages(turn, messages, push);
+      this.replayStoredMessages(turn, stored, push);
       if (!turn.state.finishEmitted) {
         push(finalizeV2Stream(turn.state));
       }
@@ -2192,30 +2260,86 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
   }
 
   /** This turn's stored assistant messages, in creation order. */
-  private async fetchTurnMessages(
-    turn: TurnContext,
-  ): Promise<SessionMessageAssistant[]> {
+  private async fetchTurnMessages(turn: TurnContext): Promise<TurnMessages> {
     // Recovery reads carry the call signal: an abort cancels them promptly.
     const response = await turn.port.message.list(
       { sessionID: turn.sessionId, order: "asc" },
       this.requestOptions(turn.headers, turn.pumpSignal),
     );
-    return selectTurnAssistantMessages(response.data, turn);
+    const messages = selectTurnAssistantMessages(response.data, turn);
+    return {
+      messages,
+      conclusion: selectConclusionMessage(response.data, messages, turn),
+    };
   }
 
   /** Replay stored messages through the reducer as synthesized events. */
   private replayStoredMessages(
     turn: TurnContext,
-    messages: SessionMessageAssistant[],
+    stored: TurnMessages,
     push: (parts: LanguageModelV4StreamPart[]) => void,
   ): void {
-    const events = synthesizeReconciliationEvents(messages, turn);
+    const events = synthesizeReconciliationEvents(
+      stored.messages,
+      turn,
+      stored.conclusion,
+    );
     for (const event of events) {
       push(convertV2EventToStreamParts(event, turn.state));
       if (turn.state.finishEmitted) {
         break;
       }
     }
+  }
+
+  /**
+   * A mixed continuation whose session settled while its own prompt was
+   * neither delivered nor answered must not finish with the predecessor's
+   * result. Surface a held failure/interruption (the queued prompt may have
+   * failed inside the resumed execution before delivery), else fail the
+   * call. Returns true when it finalized the turn.
+   */
+  private endUndeliveredContinuation(
+    turn: TurnContext,
+    stored: TurnMessages,
+    push: (parts: LanguageModelV4StreamPart[]) => void,
+  ): boolean {
+    if (
+      !turn.mixedContinuation ||
+      turn.ownPromptDelivered ||
+      stored.conclusion !== undefined ||
+      turn.state.finishEmitted
+    ) {
+      return false;
+    }
+    const held = turn.heldEnding;
+    if (held !== undefined && held.type !== "session.execution.succeeded") {
+      push(convertV2EventToStreamParts(held, turn.state));
+    }
+    if (!turn.state.finishEmitted) {
+      push([
+        {
+          type: "error",
+          error: new APICallError({
+            message:
+              "The session settled before this call's queued prompt was " +
+              "delivered; it produced no answer.",
+            url: "opencode://session.prompt",
+            requestBodyValues: {},
+            isRetryable: false,
+            data: {
+              phase: "post-dispatch",
+              reconcile: false,
+              operation: "session.prompt",
+              sessionId: turn.sessionId,
+              modelId: this.modelId,
+            } satisfies OpencodeErrorData,
+          }),
+        },
+      ]);
+      push(finalizeV2Stream(turn.state, { unified: "error", raw: undefined }));
+    }
+    return true;
   }
 
   /**
@@ -2245,13 +2369,16 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       if (outcome === "timeout") {
         return false;
       }
-      const messages = await this.fetchTurnMessages(turn);
+      const stored = await this.fetchTurnMessages(turn);
       if (outcome === "settled") {
+        if (this.endUndeliveredContinuation(turn, stored, push)) {
+          return true;
+        }
         this.logger.warn(
           `Session ${turn.sessionId} settled but the event stream stayed ` +
             "silent; finalizing from the message store.",
         );
-        this.replayStoredMessages(turn, messages, push);
+        this.replayStoredMessages(turn, stored, push);
         if (!turn.state.finishEmitted) {
           push(finalizeV2Stream(turn.state));
         }
@@ -2259,13 +2386,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       }
       // session.wait unavailable: finalize only on stored proof the turn
       // concluded — a terminal finish or error on the last stored message.
-      const last = messages[messages.length - 1];
-      const concluded =
-        last !== undefined &&
-        (last.error !== undefined ||
-          (last.finish !== undefined &&
-            last.finish !== "tool-calls" &&
-            last.finish !== "unknown"));
+      const concluded = isConcludedMessage(stored.conclusion);
       if (!concluded) {
         return false;
       }
@@ -2273,7 +2394,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         `Session ${turn.sessionId} has a stored terminal state but the ` +
           "event stream stayed silent; finalizing from the message store.",
       );
-      this.replayStoredMessages(turn, messages, push);
+      this.replayStoredMessages(turn, stored, push);
       if (!turn.state.finishEmitted) {
         push(finalizeV2Stream(turn.state));
       }
@@ -2552,6 +2673,13 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       return;
     }
     signal.addEventListener("abort", onAbort, { once: true });
+    // Every turn aborts its subscription when it ends: detach then, so a
+    // long-lived signal shared across calls does not retain finished turns.
+    turn.subscription.signal.addEventListener(
+      "abort",
+      () => signal.removeEventListener("abort", onAbort),
+      { once: true },
+    );
   }
 
   /**
@@ -3018,6 +3146,45 @@ function createPromptMessageId(): string {
  * `session.inbox.enqueued`/`.delivered` is stale. `session.execution.started` is NOT
  * stale: a fresh execution starts before the delivery event is published.
  */
+/**
+ * The event stream ended before this turn's terminal event. The 2.x client
+ * never reconnects `/api/event`, so a server restart or a proxy closing the
+ * connection ends it cleanly mid-turn; recover it like any dropped stream.
+ */
+function streamEndedError(): ClientError {
+  return new ClientError("Transport", {
+    cause: new Error("event stream ended before the turn finished"),
+  });
+}
+
+/**
+ * True when a stored assistant message shows its turn concluded: it failed,
+ * or it finished with a final (non-intermediate) finish value. The server
+ * creates the message at `step.started` and sets `finish` only when the
+ * step ends, so a message existing proves nothing on its own.
+ */
+function isConcludedMessage(
+  message: SessionMessageAssistant | undefined,
+): boolean {
+  return (
+    message !== undefined &&
+    (message.error !== undefined ||
+      (message.finish !== undefined &&
+        message.finish !== "tool-calls" &&
+        message.finish !== "unknown"))
+  );
+}
+
+/** Events that end a turn: execution terminals and the idle backstop. */
+function isTurnEndingEvent(event: V2Event): boolean {
+  return (
+    event.type === "session.execution.succeeded" ||
+    event.type === "session.execution.failed" ||
+    event.type === "session.execution.interrupted" ||
+    event.type === "session.idle"
+  );
+}
+
 function isPreDeliveryStaleEvent(event: V2Event): boolean {
   switch (event.type) {
     case "session.execution.succeeded":
@@ -3436,6 +3603,47 @@ function replaceTextContent(
 }
 
 /** Assistant messages belonging to this turn, in creation order. */
+/** A turn's stored assistant messages plus the one allowed to conclude it. */
+interface TurnMessages {
+  messages: SessionMessageAssistant[];
+  /**
+   * The message whose finish/error may stand for this turn's conclusion:
+   * the last selected one, or — for a mixed continuation, whose predecessor
+   * shares the session — the last one after this prompt's own user message
+   * (undefined while that message is not stored).
+   */
+  conclusion: SessionMessageAssistant | undefined;
+}
+
+function selectConclusionMessage(
+  all: SessionMessageInfo[],
+  selected: SessionMessageAssistant[],
+  turn: TurnContext,
+): SessionMessageAssistant | undefined {
+  if (!turn.mixedContinuation) {
+    return selected[selected.length - 1];
+  }
+  const body = turn.requestBody as SessionPromptInput | undefined;
+  const ownId = turn.receipt?.id ?? body?.id;
+  // `all` is in server order (`order: "asc"`, by sequence): only assistant
+  // messages after this prompt's own user message answer it.
+  const ownIndex =
+    ownId === undefined || ownId === null
+      ? -1
+      : all.findIndex((message) => message.id === ownId);
+  if (ownIndex < 0) {
+    return undefined;
+  }
+  const answering = new Set(
+    all
+      .slice(ownIndex + 1)
+      .filter((message) => message.type === "assistant")
+      .map((message) => message.id),
+  );
+  const own = selected.filter((message) => answering.has(message.id));
+  return own[own.length - 1];
+}
+
 function selectTurnAssistantMessages(
   messages: SessionMessageInfo[],
   turn: TurnContext,
@@ -3479,6 +3687,9 @@ function storedBlockOrdinals(): (kind: "text" | "reasoning") => number {
 function synthesizeReconciliationEvents(
   messages: SessionMessageAssistant[],
   turn: TurnContext,
+  // Required, not defaulted: `undefined` means "nothing may conclude this
+  // turn", which a default parameter would silently replace.
+  conclusion: SessionMessageAssistant | undefined,
 ): OpencodeReducerInput[] {
   const sessionId = turn.sessionId;
   let counter = 0;
@@ -3648,7 +3859,10 @@ function synthesizeReconciliationEvents(
     }
   }
 
-  const last = messages[messages.length - 1];
+  // The synthesized terminal comes only from the message allowed to conclude
+  // this turn (see selectConclusionMessage); earlier content is replayed but
+  // never ends the turn.
+  const last = conclusion;
   if (last) {
     if (last.error) {
       events.push({

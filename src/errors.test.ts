@@ -483,3 +483,39 @@ describe("isMissingRouteError", () => {
     expect(isMissingRouteError(undefined)).toBe(false);
   });
 });
+
+describe("wrapError classifies a wrapped typed cause", () => {
+  // The client manager's preflight re-throws server.info() failures as a
+  // plain Error with the typed client error as its cause.
+  const preflight = (cause: unknown) =>
+    new Error(
+      "Failed to reach OpenCode server at http://127.0.0.1:4096 (server.info): boom",
+      { cause },
+    );
+
+  it("keeps a transient transport failure retryable pre-dispatch", () => {
+    const wrapped = wrapError(preflight(new ClientError("Transport")), {
+      phase: "pre-dispatch",
+      operation: "getPort",
+    });
+    expect(APICallError.isInstance(wrapped)).toBe(true);
+    expect((wrapped as APICallError).isRetryable).toBe(true);
+    expect(wrapped.message).toContain("Failed to reach OpenCode server");
+  });
+
+  it("maps a wrapped auth failure to LoadAPIKeyError", () => {
+    const wrapped = wrapError(
+      preflight({ _tag: "UnauthorizedError", message: "bad password" }),
+      { phase: "pre-dispatch", operation: "getPort" },
+    );
+    expect(LoadAPIKeyError.isInstance(wrapped)).toBe(true);
+  });
+
+  it("still treats a plain error without a typed cause as non-retryable", () => {
+    const wrapped = wrapError(new Error("nope", { cause: new Error("x") }), {
+      phase: "pre-dispatch",
+      operation: "getPort",
+    });
+    expect((wrapped as APICallError).isRetryable).toBe(false);
+  });
+});
