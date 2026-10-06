@@ -673,7 +673,7 @@ describe("doStream", () => {
     expect(parts.some((part) => part.type === "raw")).toBe(true);
   });
 
-  it("finalizes with a backstop finish when the event stream ends without a terminal event", async () => {
+  it("reports an error, keeping the streamed text, when the event stream ends and nothing shows the turn concluded", async () => {
     const fake = createFakePort();
     fake.hooks.onPrompt = () => {
       const ev = eventFactory(SESSION_ID);
@@ -692,7 +692,16 @@ describe("doStream", () => {
       { type: "finish" }
     >;
     expect(finish.type).toBe("finish");
-    expect(finish.finishReason.unified).toBe("other");
+    // A clean end of the stream is a dropped stream: with no stored proof
+    // the turn concluded, partial text is not reported as a success.
+    expect(finish.finishReason.unified).toBe("error");
+    expect(parts.some((part) => part.type === "error")).toBe(true);
+    expect(
+      parts
+        .filter((part) => part.type === "text-delta")
+        .map((part) => (part as { delta: string }).delta)
+        .join(""),
+    ).toBe("partial");
     // The open text block was closed before the finish.
     expect(parts.some((part) => part.type === "text-end")).toBe(true);
   });
@@ -1079,7 +1088,11 @@ describe("approvals: two-phase round-trip", () => {
   it("routes mixed-prompt approval replies to the approval's session, not the turn's", async () => {
     const fake = createFakePort();
     scriptBlockedTurn(fake);
-    const model = createModel(fake, {}, { approvalIdleTimeoutMs: 25 });
+    const model = createModel(
+      fake,
+      {},
+      { approvalIdleTimeoutMs: 25, silenceWatchdogMs: 50 },
+    );
     await model.doGenerate(callOptions()); // phase 1 blocks SESSION_ID
 
     // Mixed continuation (approval + new user content) targeting a
@@ -1108,12 +1121,17 @@ describe("approvals: two-phase round-trip", () => {
       },
       ...userPrompt("Also do this"),
     ];
-    await model.doGenerate(
+    const result = await model.doGenerate(
       callOptions({
         prompt: mixedPrompt,
         providerOptions: { opencode: { sessionId: "ses_other" } },
       }),
     );
+
+    // No predecessor runs on the prompt's session: its own terminal (with
+    // no execution.started observed) ends the call with its own answer.
+    expect(result.content).toEqual([{ type: "text", text: "ok" }]);
+    expect(result.finishReason).toEqual({ unified: "stop", raw: "stop" });
 
     // The reply lands on the blocked session; the prompt on the turn's.
     expect(fake.callsFor("permission.reply")[0]!.input).toMatchObject({
@@ -3864,4 +3882,684 @@ describe("JSON validate/repair loop", () => {
       ),
     ).toBe(true);
   });
+});
+
+describe("5.0.1 review fixes", () => {
+  function storedAnswer(text: string) {
+    return {
+      id: "msg_a",
+      type: "assistant",
+      time: { created: Date.now() + 10_000 },
+      agent: "default",
+      model: { id: "test-model", providerID: "test-provider" },
+      content: [{ type: "text", text }],
+      finish: "stop",
+      cost: 0,
+      tokens: tokens(10, 5, 0, 0, 0),
+    };
+  }
+
+  it("reconciles instead of finishing when the event stream ends cleanly mid-turn (doStream)", async () => {
+    // 2.x never reconnects /api/event: a server restart or proxy timeout
+    // ends the stream cleanly. The rest of the answer is in the store.
+    const fake = createFakePort({
+      waitHangs: true,
+      messages: [storedAnswer("Hello world")],
+    });
+    fake.hooks.onPrompt = () => {
+      const ev = eventFactory(SESSION_ID);
+      fake.emit(
+        ev.executionStarted(),
+        ev.stepStarted("msg_a"),
+        ev.textStarted("msg_a", 0),
+        ev.textDelta("msg_a", 0, "Hello"),
+      );
+      fake.closeStream();
+    };
+    const model = createModel(fake, {}, { silenceWatchdogMs: 200 });
+
+    const parts = await collectStream(await model.doStream(callOptions()));
+    const text = parts
+      .filter((part) => part.type === "text-delta")
+      .map((part) => (part as { delta: string }).delta)
+      .join("");
+    const finish = parts[parts.length - 1] as Extract<
+      LanguageModelV4StreamPart,
+      { type: "finish" }
+    >;
+    expect(text).toBe("Hello world");
+    expect(finish.finishReason).toEqual({ unified: "stop", raw: "stop" });
+    expect(fake.callsFor("message.list").length).toBeGreaterThan(0);
+  });
+
+  it("surfaces an error, not an empty success, when the stream ends before anything happened", async () => {
+    const fake = createFakePort({ waitHangs: true, messages: [] });
+    fake.hooks.onPrompt = () => {
+      fake.closeStream();
+    };
+    const model = createModel(fake, {}, { silenceWatchdogMs: 200 });
+
+    const parts = await collectStream(await model.doStream(callOptions()));
+    expect(parts.some((part) => part.type === "error")).toBe(true);
+    const finish = parts[parts.length - 1] as Extract<
+      LanguageModelV4StreamPart,
+      { type: "finish" }
+    >;
+    expect(finish.finishReason.unified).toBe("error");
+  });
+
+  it("reconciles a clean stream end that arrives after session.wait settled", async () => {
+    // The wait watchdog path reads the stream too; its EOF must recover the
+    // same way (the fake's wait resolves immediately).
+    const fake = createFakePort({ messages: [storedAnswer("Hello world")] });
+    fake.hooks.onPrompt = () => {
+      const ev = eventFactory(SESSION_ID);
+      fake.emit(
+        ev.executionStarted(),
+        ev.stepStarted("msg_a"),
+        ev.textStarted("msg_a", 0),
+        ev.textDelta("msg_a", 0, "Hello"),
+      );
+      fake.closeStream();
+    };
+    const parts = await collectStream(
+      await createModel(fake).doStream(callOptions()),
+    );
+    const text = parts
+      .filter((part) => part.type === "text-delta")
+      .map((part) => (part as { delta: string }).delta)
+      .join("");
+    expect(text).toBe("Hello world");
+    const finish = parts[parts.length - 1] as Extract<
+      LanguageModelV4StreamPart,
+      { type: "finish" }
+    >;
+    expect(finish.finishReason).toEqual({ unified: "stop", raw: "stop" });
+  });
+
+  it("does not report a partial, unfinished stored message as success", async () => {
+    // The server creates the assistant message at step.started and sets
+    // `finish` only when the step ends: its existence proves nothing.
+    const unfinished = { ...storedAnswer("Hello"), finish: undefined };
+    const fake = createFakePort({ waitHangs: true, messages: [unfinished] });
+    fake.hooks.onPrompt = () => {
+      const ev = eventFactory(SESSION_ID);
+      fake.emit(
+        ev.executionStarted(),
+        ev.stepStarted("msg_a"),
+        ev.textStarted("msg_a", 0),
+        ev.textDelta("msg_a", 0, "Hello"),
+      );
+      fake.closeStream();
+    };
+    const parts = await collectStream(
+      await createModel(fake, {}, { silenceWatchdogMs: 10 }).doStream(
+        callOptions(),
+      ),
+    );
+    expect(parts.some((part) => part.type === "error")).toBe(true);
+    const finish = parts[parts.length - 1] as Extract<
+      LanguageModelV4StreamPart,
+      { type: "finish" }
+    >;
+    expect(finish.finishReason.unified).toBe("error");
+  });
+
+  it("surfaces the queued execution's own failure before delivery in a mixed continuation", async () => {
+    // Upstream fails an execution in prepareContext before promoting the
+    // inbox item (e.g. AgentNotFoundError): execution.started, then
+    // execution.failed, with no inbox.delivered.
+    const fake = createFakePort({ manualDelivery: true });
+    fake.hooks.onPrompt = (_input, receipt) => {
+      const ev = eventFactory(SESSION_ID);
+      fake.emit(
+        {
+          id: "evt_enqueued",
+          created: 1,
+          type: "session.inbox.enqueued",
+          durable: { aggregateID: SESSION_ID, seq: 90, version: 1 },
+          data: {
+            sessionID: SESSION_ID,
+            inboxID: receipt.id,
+            item: { type: "user", payload: { text: "new" }, delivery: "queue" },
+          },
+        } as V2Event,
+        ev.executionStarted(),
+        ev.executionFailed({ type: "unknown", message: "Agent not found" }),
+      );
+    };
+    const model = createModel(
+      fake,
+      {},
+      { silenceWatchdogMs: 10, waitWatchdogGraceMs: 5 },
+    );
+    const parts = await collectStream(
+      await model.doStream(
+        callOptions({
+          prompt: [
+            ...userPrompt("Hi"),
+            {
+              role: "tool",
+              content: [
+                {
+                  type: "tool-approval-response",
+                  approvalId: "perm_1",
+                  approved: true,
+                },
+              ],
+            },
+            ...userPrompt("Also do this"),
+          ],
+        }),
+      ),
+    );
+    const finish = parts[parts.length - 1] as Extract<
+      LanguageModelV4StreamPart,
+      { type: "finish" }
+    >;
+    expect(finish.finishReason.unified).toBe("error");
+  });
+
+  describe("mixed continuation + stream end", () => {
+    const mixedOptions = () =>
+      callOptions({
+        prompt: [
+          ...userPrompt("Hi"),
+          {
+            role: "tool",
+            content: [
+              {
+                type: "tool-approval-response",
+                approvalId: "perm_1",
+                approved: true,
+              },
+            ],
+          },
+          ...userPrompt("Also do this"),
+        ],
+      });
+    const inbox = (type: string, id: string): V2Event =>
+      ({
+        id: `evt_${type}_${id}`,
+        created: 1,
+        type,
+        durable: {
+          aggregateID: SESSION_ID,
+          seq: type.endsWith("enqueued") ? 90 : 91,
+          version: 1,
+        },
+        data: {
+          sessionID: SESSION_ID,
+          inboxID: id,
+          ...(type.endsWith("enqueued")
+            ? {
+                item: {
+                  type: "user",
+                  payload: { text: "new" },
+                  delivery: "queue",
+                },
+              }
+            : {}),
+        },
+      }) as V2Event;
+    const ownUserMessage = (id: string) => ({
+      id,
+      type: "user",
+      text: "Also do this",
+      time: { created: Date.now() },
+    });
+
+    for (const delivered of [false, true]) {
+      it(`does not count the predecessor's answer as this prompt's (delivered=${String(delivered)})`, async () => {
+        const fake = createFakePort({ manualDelivery: true, waitHangs: true });
+        fake.hooks.onPrompt = (_input, receipt) => {
+          const ev = eventFactory(SESSION_ID);
+          const previous = {
+            ...storedAnswer("Previous answer."),
+            time: { created: Date.now() },
+          };
+          fake.hooks.messages = [previous];
+          fake.emit(
+            inbox("session.inbox.enqueued", receipt.id),
+            ev.stepStarted("msg_a"),
+            ev.textStarted("msg_a", 0),
+            ev.textEnded("msg_a", 0, "Previous answer."),
+            ev.stepEnded("msg_a", "stop", tokens(1, 1), 0),
+          );
+          if (delivered) {
+            // Queued prompts can run within the same execution: delivered,
+            // but no answer stored yet.
+            fake.hooks.messages.push(ownUserMessage(receipt.id));
+            fake.emit(inbox("session.inbox.delivered", receipt.id));
+          }
+          fake.closeStream();
+        };
+        const parts = await collectStream(
+          await createModel(fake, {}, { silenceWatchdogMs: 10 }).doStream(
+            mixedOptions(),
+          ),
+        );
+        expect(parts.some((part) => part.type === "error")).toBe(true);
+        const finish = parts[parts.length - 1] as Extract<
+          LanguageModelV4StreamPart,
+          { type: "finish" }
+        >;
+        expect(finish.finishReason.unified).toBe("error");
+      });
+    }
+
+    for (const delivered of [false, true]) {
+      it(`surfaces a failure of this prompt inside the resumed execution (delivered=${String(delivered)})`, async () => {
+        // OpenCode can drain the queued prompt within the resumed execution
+        // (no new execution.started); preparing its context can fail before
+        // the prompt is delivered.
+        const fake = createFakePort({ manualDelivery: true });
+        fake.hooks.onPrompt = (_input, receipt) => {
+          const ev = eventFactory(SESSION_ID);
+          fake.hooks.messages = [
+            {
+              ...storedAnswer("Previous answer."),
+              time: { created: Date.now() },
+            },
+          ];
+          fake.emit(
+            inbox("session.inbox.enqueued", receipt.id),
+            ev.stepStarted("msg_a"),
+            ev.textStarted("msg_a", 0),
+            ev.textEnded("msg_a", 0, "Previous answer."),
+            ev.stepEnded("msg_a", "stop", tokens(1, 1), 0),
+          );
+          if (delivered) {
+            fake.hooks.messages.push(ownUserMessage(receipt.id));
+            fake.emit(inbox("session.inbox.delivered", receipt.id));
+          }
+          fake.emit(
+            ev.executionFailed({ type: "unknown", message: "Agent not found" }),
+          );
+        };
+        const parts = await collectStream(
+          await createModel(fake, {}, { silenceWatchdogMs: 10 }).doStream(
+            mixedOptions(),
+          ),
+        );
+        const finish = parts[parts.length - 1] as Extract<
+          LanguageModelV4StreamPart,
+          { type: "finish" }
+        >;
+        expect(finish.finishReason.unified).toBe("error");
+        expect(
+          (finish.providerMetadata?.["opencode"] as Record<string, unknown>)[
+            "outcome"
+          ],
+        ).toBe("failed");
+      });
+    }
+
+    it("fails instead of finishing with the predecessor's result when the session settles undelivered", async () => {
+      const fake = createFakePort({ manualDelivery: true });
+      fake.hooks.onPrompt = (_input, receipt) => {
+        const ev = eventFactory(SESSION_ID);
+        fake.hooks.messages = [
+          {
+            ...storedAnswer("Previous answer."),
+            time: { created: Date.now() },
+          },
+        ];
+        fake.emit(
+          inbox("session.inbox.enqueued", receipt.id),
+          ev.stepStarted("msg_a"),
+          ev.textStarted("msg_a", 0),
+          ev.textEnded("msg_a", 0, "Previous answer."),
+          ev.stepEnded("msg_a", "stop", tokens(1, 1), 0),
+          ev.executionSucceeded(),
+        );
+      };
+      const parts = await collectStream(
+        await createModel(fake, {}, { silenceWatchdogMs: 10 }).doStream(
+          mixedOptions(),
+        ),
+      );
+      expect(parts.some((part) => part.type === "error")).toBe(true);
+      const finish = parts[parts.length - 1] as Extract<
+        LanguageModelV4StreamPart,
+        { type: "finish" }
+      >;
+      expect(finish.finishReason.unified).toBe("error");
+    });
+
+    it("does not await a predecessor when the approval belongs to another session", async () => {
+      // Phase 1 blocks SESSION_ID on perm_1.
+      const fake = createFakePort({ manualDelivery: true });
+      fake.hooks.onPrompt = (_input, receipt) => {
+        const ev = eventFactory(SESSION_ID);
+        fake.emit(
+          inbox("session.inbox.enqueued", receipt.id),
+          ev.executionStarted(),
+          inbox("session.inbox.delivered", receipt.id),
+          ev.stepStarted("msg_a"),
+          ev.toolInputStarted("msg_a", "tool_1", "bash"),
+          ev.toolInputEnded("msg_a", "tool_1", '{"cmd":"rm x"}'),
+          ev.permissionAsked("perm_1", {
+            source: { type: "tool", messageID: "msg_a", id: "tool_1" },
+          }),
+        );
+      };
+      const model = createModel(
+        fake,
+        {},
+        { approvalIdleTimeoutMs: 25, silenceWatchdogMs: 50 },
+      );
+      await model.doGenerate(callOptions());
+
+      // Mixed call whose new content goes to another session: nothing is
+      // queued behind a resumed execution there, so its own terminal (with
+      // no execution.started or inbox.delivered observed) ends the call.
+      fake.hooks.onPermissionReply = () => {};
+      fake.hooks.onPrompt = (_input, receipt) => {
+        const other = eventFactory("ses_other");
+        fake.emit(
+          {
+            ...inbox("session.inbox.enqueued", receipt.id),
+            data: {
+              sessionID: "ses_other",
+              inboxID: receipt.id,
+              item: { type: "user", payload: { text: "x" }, delivery: "queue" },
+            },
+          } as V2Event,
+          other.stepStarted("msg_z"),
+          other.textStarted("msg_z", 0),
+          other.textEnded("msg_z", 0, "ok"),
+          other.stepEnded("msg_z", "stop", tokens(1, 1), 0),
+          other.executionSucceeded(),
+        );
+      };
+      const result = await model.doGenerate({
+        ...mixedOptions(),
+        providerOptions: { opencode: { sessionId: "ses_other" } },
+      });
+      expect(fake.callsFor("permission.reply")[0]!.input).toMatchObject({
+        sessionID: SESSION_ID,
+      });
+      expect(result.content).toEqual([{ type: "text", text: "ok" }]);
+      expect(result.finishReason).toEqual({ unified: "stop", raw: "stop" });
+    });
+
+    it("uses the pinned-session fallback when deciding whether the prompt has a predecessor", async () => {
+      // An existing-session model can reply to an approval this instance
+      // never surfaced: the reply falls back to the pinned session, while
+      // the new content targets another session.
+      const fake = createFakePort({ manualDelivery: true });
+      const model = createModel(
+        fake,
+        { sessionId: SESSION_ID },
+        { silenceWatchdogMs: 10 },
+      );
+      fake.hooks.onPrompt = (_input, receipt) => {
+        const other = eventFactory("ses_other");
+        fake.emit(
+          {
+            ...inbox("session.inbox.enqueued", receipt.id),
+            durable: { aggregateID: "ses_other", seq: 90, version: 1 },
+            data: {
+              sessionID: "ses_other",
+              inboxID: receipt.id,
+              item: {
+                type: "user",
+                payload: { text: "new" },
+                delivery: "queue",
+              },
+            },
+          } as V2Event,
+          other.stepStarted("msg_z"),
+          other.textEnded("msg_z", 0, "ok"),
+          other.stepEnded("msg_z", "stop", tokens(1, 1), 0),
+          other.executionSucceeded(),
+        );
+      };
+      const parts = await collectStream(
+        await model.doStream({
+          ...mixedOptions(),
+          providerOptions: { opencode: { sessionId: "ses_other" } },
+        }),
+      );
+      expect(fake.callsFor("permission.reply")[0]!.input).toMatchObject({
+        sessionID: SESSION_ID,
+      });
+      expect(fake.callsFor("session.prompt")[0]!.input).toMatchObject({
+        sessionID: "ses_other",
+      });
+      expect(
+        parts
+          .filter((part) => part.type === "text-delta")
+          .map((part) => (part as { delta: string }).delta)
+          .join(""),
+      ).toBe("ok");
+      const finish = parts[parts.length - 1] as Extract<
+        LanguageModelV4StreamPart,
+        { type: "finish" }
+      >;
+      expect(finish.finishReason).toEqual({ unified: "stop", raw: "stop" });
+      expect(parts.some((part) => part.type === "error")).toBe(false);
+    });
+
+    it("treats a predecessor ending before this prompt's enqueue as the predecessor's", async () => {
+      // Phase 1 blocks SESSION_ID on perm_1.
+      const fake = createFakePort({ manualDelivery: true });
+      fake.hooks.onPrompt = (_input, receipt) => {
+        const ev = eventFactory(SESSION_ID);
+        fake.emit(
+          inbox("session.inbox.enqueued", receipt.id),
+          ev.executionStarted(),
+          inbox("session.inbox.delivered", receipt.id),
+          ev.stepStarted("msg_a"),
+          ev.toolInputStarted("msg_a", "tool_1", "bash"),
+          ev.toolInputEnded("msg_a", "tool_1", '{"cmd":"rm x"}'),
+          ev.permissionAsked("perm_1", {
+            source: { type: "tool", messageID: "msg_a", id: "tool_1" },
+          }),
+        );
+      };
+      const model = createModel(
+        fake,
+        {},
+        { approvalIdleTimeoutMs: 25, silenceWatchdogMs: 50 },
+      );
+      await model.doGenerate(callOptions());
+
+      // The resumed execution ends BEFORE the new prompt's enqueue; the new
+      // prompt's own execution then runs without an observed
+      // execution.started or inbox.delivered.
+      fake.hooks.onPermissionReply = () => {};
+      fake.hooks.onPrompt = (_input, receipt) => {
+        const ev = eventFactory(SESSION_ID);
+        fake.emit(
+          ev.executionSucceeded(),
+          inbox("session.inbox.enqueued", receipt.id),
+          ev.stepStarted("msg_c"),
+          ev.textStarted("msg_c", 0),
+          ev.textEnded("msg_c", 0, "New answer."),
+          ev.stepEnded("msg_c", "stop", tokens(1, 1), 0),
+          ev.executionSucceeded(),
+        );
+      };
+      const result = await model.doGenerate(mixedOptions());
+      expect(result.content).toEqual([{ type: "text", text: "New answer." }]);
+      expect(result.finishReason).toEqual({ unified: "stop", raw: "stop" });
+    });
+
+    it("recovers this prompt's stored answer once it concluded", async () => {
+      const fake = createFakePort({ manualDelivery: true, waitHangs: true });
+      fake.hooks.onPrompt = (_input, receipt) => {
+        const ev = eventFactory(SESSION_ID);
+        const previous = {
+          ...storedAnswer("Previous answer."),
+          time: { created: Date.now() },
+        };
+        const current = { ...storedAnswer("New answer."), id: "msg_b" };
+        fake.hooks.messages = [previous, ownUserMessage(receipt.id), current];
+        fake.emit(
+          inbox("session.inbox.enqueued", receipt.id),
+          ev.stepStarted("msg_a"),
+          ev.textEnded("msg_a", 0, "Previous answer."),
+          ev.stepEnded("msg_a", "stop", tokens(1, 1), 0),
+          inbox("session.inbox.delivered", receipt.id),
+        );
+        fake.closeStream();
+      };
+      const parts = await collectStream(
+        await createModel(fake, {}, { silenceWatchdogMs: 10 }).doStream(
+          mixedOptions(),
+        ),
+      );
+      expect(parts.some((part) => part.type === "error")).toBe(false);
+      const finish = parts[parts.length - 1] as Extract<
+        LanguageModelV4StreamPart,
+        { type: "finish" }
+      >;
+      expect(finish.finishReason.unified).toBe("stop");
+      expect(
+        parts
+          .filter((part) => part.type === "text-delta")
+          .map((part) => (part as { delta: string }).delta)
+          .join(""),
+      ).toContain("New answer.");
+    });
+  });
+
+  it("detaches its abort listener from the caller's signal when the turn ends", async () => {
+    const fake = createFakePort();
+    scriptTextTurn(fake);
+    const model = createModel(fake);
+    const controller = new AbortController();
+    const added: unknown[] = [];
+    const removed: unknown[] = [];
+    const signal = controller.signal;
+    const add = signal.addEventListener.bind(signal);
+    const remove = signal.removeEventListener.bind(signal);
+    signal.addEventListener = ((
+      type: string,
+      listener: unknown,
+      opts?: unknown,
+    ) => {
+      if (type === "abort") added.push(listener);
+      return add(
+        type,
+        listener as EventListener,
+        opts as AddEventListenerOptions,
+      );
+    }) as typeof signal.addEventListener;
+    signal.removeEventListener = ((
+      type: string,
+      listener: unknown,
+      opts?: unknown,
+    ) => {
+      if (type === "abort") removed.push(listener);
+      return remove(
+        type,
+        listener as EventListener,
+        opts as EventListenerOptions,
+      );
+    }) as typeof signal.removeEventListener;
+
+    for (let i = 0; i < 3; i++) {
+      scriptTextTurn(fake);
+      await model.doGenerate(callOptions({ abortSignal: signal }));
+    }
+    // Every listener the provider attached to the caller's signal is gone.
+    const leaked = added.filter((listener) => !removed.includes(listener));
+    expect(leaked).toEqual([]);
+  });
+
+  it("keeps waiting for the queued prompt after a mixed approval continuation", async () => {
+    // Phase 1: a tool blocks on approval.
+    const fake = createFakePort({ manualDelivery: true });
+    const inbox = (type: string, inboxID: string): V2Event =>
+      ({
+        id: `evt_${type}_${inboxID}`,
+        created: 1,
+        type,
+        durable: { aggregateID: SESSION_ID, seq: 0, version: 1 },
+        data: {
+          sessionID: SESSION_ID,
+          inboxID,
+          ...(type === "session.inbox.enqueued"
+            ? {
+                item: {
+                  type: "user",
+                  payload: { text: "x" },
+                  delivery: "queue",
+                },
+              }
+            : {}),
+        },
+      }) as V2Event;
+    fake.hooks.onPrompt = (_input, receipt) => {
+      const ev = eventFactory(SESSION_ID);
+      fake.emit(
+        inbox("session.inbox.enqueued", receipt.id),
+        ev.executionStarted(),
+        inbox("session.inbox.delivered", receipt.id),
+        ev.stepStarted("msg_a"),
+        ev.toolInputStarted("msg_a", "tool_1", "bash"),
+        ev.toolInputEnded("msg_a", "tool_1", '{"cmd":"rm x"}'),
+        ev.permissionAsked("perm_1", {
+          source: { type: "tool", messageID: "msg_a", id: "tool_1" },
+        }),
+      );
+    };
+    const model = createModel(fake, {}, { approvalIdleTimeoutMs: 25 });
+    const phase1 = await model.doGenerate(callOptions());
+    expect(
+      phase1.content.some((part) => part.type === "tool-approval-request"),
+    ).toBe(true);
+
+    // Phase 2 (mixed): the approval resumes the blocked execution, which
+    // ends AFTER the new prompt was enqueued behind it; then the queued
+    // prompt is delivered and answered.
+    fake.hooks.onPermissionReply = () => {};
+    fake.hooks.onPrompt = (_input, receipt) => {
+      const ev = eventFactory(SESSION_ID);
+      fake.emit(
+        inbox("session.inbox.enqueued", receipt.id),
+        ev.toolCalled("msg_a", "tool_1", { cmd: "rm x" }),
+        ev.toolSuccess("msg_a", "tool_1", [{ type: "text", text: "gone" }]),
+        ev.stepEnded("msg_a", "tool-calls", tokens(1, 1), 0),
+        ev.stepStarted("msg_b"),
+        ev.textStarted("msg_b", 0),
+        ev.textEnded("msg_b", 0, "Removed."),
+        ev.stepEnded("msg_b", "stop", tokens(1, 1), 0),
+        ev.executionSucceeded(),
+        ev.executionStarted(),
+        inbox("session.inbox.delivered", receipt.id),
+        ev.stepStarted("msg_c"),
+        ev.textStarted("msg_c", 0),
+        ev.textEnded("msg_c", 0, "New answer."),
+        ev.stepEnded("msg_c", "stop", tokens(1, 1), 0),
+        ev.executionSucceeded(),
+      );
+    };
+    const result = await model.doGenerate(
+      callOptions({
+        prompt: [
+          ...userPrompt("Hi"),
+          {
+            role: "tool",
+            content: [
+              {
+                type: "tool-approval-response",
+                approvalId: "perm_1",
+                approved: true,
+              },
+            ],
+          },
+          ...userPrompt("Also do this"),
+        ],
+      }),
+    );
+    const text = result.content
+      .filter((part) => part.type === "text")
+      .map((part) => (part as { text: string }).text);
+    expect(text).toContain("New answer.");
+    expect(result.finishReason).toEqual({ unified: "stop", raw: "stop" });
+  }, 10_000);
 });

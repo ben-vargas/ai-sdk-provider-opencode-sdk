@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.1] - 2026-10-06
+
+### Fixed
+
+- **A clean end of the event stream no longer finishes a turn early.** The
+  2.x client never reconnects `/api/event`, so a server restart or a proxy
+  closing the connection ends the stream cleanly mid-turn. The provider
+  finished the turn with whatever had streamed so far — a truncated (or
+  empty) answer that looked successful, with no chance to recover in
+  `streamText`/`doStream`. It is now treated as a dropped stream and
+  reconciled from the session's stored messages.
+- **Recovering a dropped event stream now needs proof the turn concluded.**
+  Recovery used to count any stored assistant message or observed step as
+  success, but the server stores the message when a step starts, so a turn
+  still running (or one that died mid-step) came back as a normal answer.
+  Recovery now succeeds only if the last stored message finished or failed,
+  or the session is waiting on an approval; otherwise the call ends with an
+  error (the partial text that streamed is still delivered).
+- **Mixed approval continuations return the new prompt's answer.** A call
+  that both replies to an approval and adds new user content resumes the
+  blocked execution and queues the new content behind it. The resumed
+  execution's end could arrive after the new prompt was enqueued and ended
+  the call there, losing the new prompt's answer. That ending is now held
+  back until the new prompt's own execution starts or the prompt is
+  delivered. If the session settles first, the call reports the held
+  failure (OpenCode can run the queued prompt inside the resumed execution
+  and fail it before delivery) or an error, never the earlier answer; stream
+  recovery likewise only accepts an answer stored after the new prompt.
+- **Transient connection failures at startup are retryable again.** The
+  connection preflight re-threw `server.info()` failures as a plain
+  `Error`, which was classified as permanent: a momentary "connection
+  refused" surfaced as a non-retryable error, and an auth failure lost its
+  `LoadAPIKeyError` type. Errors are now classified by the typed error they
+  wrap.
+- **No more abort-listener leak on reused signals.** Each call left its
+  abort listener attached to the caller's `AbortSignal` after the call
+  finished, so a long-lived signal shared across calls retained finished
+  turns and eventually triggered Node's listener-leak warning. The listener
+  is now removed when the call ends.
+
 ## [5.0.0] - 2026-10-06
 
 A rewrite for **OpenCode 2.x**: the provider now talks to OpenCode v2 through

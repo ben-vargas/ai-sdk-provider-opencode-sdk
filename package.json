@@ -1,6 +1,6 @@
 {
   "name": "ai-sdk-provider-opencode-sdk",
-  "version": "5.0.0",
+  "version": "5.0.1",
   "description": "AI SDK v7 provider for OpenCode 2.x via @opencode/client: sessions, streaming, tool approvals, and interactive forms",
   "keywords": [
     "ai-sdk",
