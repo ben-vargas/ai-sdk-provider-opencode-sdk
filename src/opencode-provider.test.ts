@@ -1,323 +1,229 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+/**
+ * Provider factory tests: callable/alias surface, NoSuchModelError for
+ * unsupported model types, settings merging, model-instance semantics
+ * (no caching — one instance per conversation), manager wiring, and
+ * ownership on dispose (owned vs injected manager).
+ */
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { NoSuchModelError } from "@ai-sdk/provider";
+import type { OpencodeClientPort } from "./client-port.js";
+import { clearClientManagerRegistry } from "./opencode-client-manager.js";
+import { OpencodeLanguageModel } from "./opencode-language-model.js";
 import {
   createOpencode,
   opencode,
   OpencodeModels,
 } from "./opencode-provider.js";
-import { OpencodeClientManager } from "./opencode-client-manager.js";
+import type { OpencodeClient, OpencodeClientManager } from "./types.js";
 
-// Mock the client manager
-vi.mock("./opencode-client-manager.js", async (importOriginal) => {
-  const original =
-    await importOriginal<typeof import("./opencode-client-manager.js")>();
+function createFakeClient(): OpencodeClient {
   return {
-    ...original,
-    OpencodeClientManager: {
-      getInstance: vi.fn().mockReturnValue({
-        getClient: vi.fn().mockResolvedValue({
-          session: {
-            create: vi.fn(),
-            prompt: vi.fn(),
-            abort: vi.fn(),
-          },
-          event: {
-            subscribe: vi.fn(),
-          },
-        }),
-        dispose: vi.fn().mockResolvedValue(undefined),
-        getServerUrl: vi.fn().mockReturnValue("http://127.0.0.1:4096"),
-        registerEventSubscription: vi.fn().mockReturnValue(() => {}),
-      }),
-      resetInstance: vi.fn(),
+    server: {
+      info: vi.fn(async () => ({
+        version: "2.0.0",
+        pid: 1,
+        urls: [],
+        paths: { tmp: "/tmp" },
+      })),
     },
-    createClientManagerFromSettings: vi.fn().mockReturnValue({
-      getClient: vi.fn().mockResolvedValue({
-        session: {
-          create: vi.fn(),
-          prompt: vi.fn(),
-          abort: vi.fn(),
-        },
-        event: {
-          subscribe: vi.fn(),
-        },
-      }),
-      dispose: vi.fn().mockResolvedValue(undefined),
-      getServerUrl: vi.fn().mockReturnValue("http://127.0.0.1:4096"),
-      registerEventSubscription: vi.fn().mockReturnValue(() => {}),
-    }),
+    migration: {
+      v1: { status: vi.fn(async () => ({ status: "completed" as const })) },
+    },
+  } as unknown as OpencodeClient;
+}
+
+function createInjectedManager(): OpencodeClientManager & {
+  dispose: ReturnType<typeof vi.fn>;
+} {
+  return {
+    getPort: vi.fn(async () => ({}) as OpencodeClientPort),
+    getServerUrl: vi.fn(() => "http://injected"),
+    isServerManaged: vi.fn(() => false),
+    stopService: vi.fn(async () => {}),
+    dispose: vi.fn(async () => {}),
   };
+}
+
+beforeEach(() => {
+  clearClientManagerRegistry();
 });
 
-describe("opencode-provider", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
+describe("createOpencode", () => {
+  it("creates language models via call, languageModel, and chat", () => {
+    const provider = createOpencode({ client: createFakeClient() });
 
-  afterEach(() => {
-    OpencodeClientManager.resetInstance();
-  });
-
-  describe("createOpencode", () => {
-    it("should create provider without options", () => {
-      const provider = createOpencode();
-
-      expect(provider).toBeDefined();
-      expect(typeof provider).toBe("function");
-    });
-
-    it("should create provider with options", () => {
-      const provider = createOpencode({
-        hostname: "localhost",
-        port: 5000,
-        autoStartServer: false,
-      });
-
-      expect(provider).toBeDefined();
-    });
-
-    it("should create language model when called as function", () => {
-      const provider = createOpencode();
-      const model = provider("anthropic/claude-opus-4-5-20251101");
-
-      expect(model).toBeDefined();
-      expect(model.modelId).toBe("anthropic/claude-opus-4-5-20251101");
+    for (const model of [
+      provider("anthropic/claude-opus-4-5-20251101"),
+      provider.languageModel("anthropic/claude-opus-4-5-20251101"),
+      provider.chat("anthropic/claude-opus-4-5-20251101"),
+    ]) {
+      expect(model).toBeInstanceOf(OpencodeLanguageModel);
       expect(model.provider).toBe("opencode");
-    });
-
-    it("should merge default settings with model settings", () => {
-      const provider = createOpencode({
-        defaultSettings: {
-          agent: "build",
-          verbose: true,
-        },
-      });
-
-      const model = provider("anthropic/claude-opus-4-5-20251101", {
-        agent: "plan",
-      });
-
-      expect(model).toBeDefined();
-    });
-
-    it("should pass client settings to client manager", async () => {
-      const preconfiguredClient = {
-        session: {
-          create: vi.fn(),
-          prompt: vi.fn(),
-          abort: vi.fn(),
-        },
-        event: {
-          subscribe: vi.fn(),
-        },
-      };
-
-      createOpencode({
-        baseUrl: "http://custom:8080",
-        defaultSettings: {
-          logger: false,
-        },
-        clientOptions: {
-          headers: {
-            "x-provider": "test",
-          },
-          throwOnError: true,
-        },
-        client: preconfiguredClient as Awaited<
-          ReturnType<typeof import("@opencode-ai/sdk/v2").createOpencodeClient>
-        >,
-      });
-
-      const { createClientManagerFromSettings } =
-        await import("./opencode-client-manager.js");
-      expect(createClientManagerFromSettings).toHaveBeenCalledWith(
-        expect.objectContaining({
-          baseUrl: "http://custom:8080",
-          clientOptions: {
-            headers: {
-              "x-provider": "test",
-            },
-            throwOnError: true,
-          },
-          client: preconfiguredClient,
-        }),
-        expect.anything(),
-      );
-    });
-  });
-
-  describe("provider methods", () => {
-    it("should have languageModel method", () => {
-      const provider = createOpencode();
-
-      expect(provider.languageModel).toBeDefined();
-      expect(typeof provider.languageModel).toBe("function");
-    });
-
-    it("should have chat method (alias)", () => {
-      const provider = createOpencode();
-
-      expect(provider.chat).toBeDefined();
-      expect(typeof provider.chat).toBe("function");
-    });
-
-    it("should have provider property", () => {
-      const provider = createOpencode();
-
-      expect(provider.provider).toBe("opencode");
-    });
-
-    it("should have getClientManager method", () => {
-      const provider = createOpencode();
-
-      const clientManager = provider.getClientManager();
-      expect(clientManager).toBeDefined();
-    });
-
-    it("should have dispose method", async () => {
-      const provider = createOpencode();
-
-      expect(provider.dispose).toBeDefined();
-      await expect(provider.dispose()).resolves.toBeUndefined();
-    });
-
-    it("languageModel should create same model as direct call", () => {
-      const provider = createOpencode();
-
-      const model1 = provider("anthropic/claude-opus-4-5-20251101");
-      const model2 = provider.languageModel(
-        "anthropic/claude-opus-4-5-20251101",
-      );
-
-      expect(model1.modelId).toBe(model2.modelId);
-    });
-
-    it("chat should create same model as languageModel", () => {
-      const provider = createOpencode();
-
-      const model1 = provider.languageModel(
-        "anthropic/claude-opus-4-5-20251101",
-      );
-      const model2 = provider.chat("anthropic/claude-opus-4-5-20251101");
-
-      expect(model1.modelId).toBe(model2.modelId);
-    });
-  });
-
-  describe("model creation", () => {
-    it("should pass settings to model", () => {
-      const provider = createOpencode();
-      const model = provider("anthropic/claude-opus-4-5-20251101", {
-        sessionId: "test-session",
-        agent: "build",
-      });
-
-      expect(model).toBeDefined();
-    });
-
-    it("should handle model-only ID format", () => {
-      const provider = createOpencode();
-      const model = provider("claude-opus-4-5-20251101");
-
-      expect(model.modelId).toBe("claude-opus-4-5-20251101");
-    });
-
-    it("should handle provider/model ID format", () => {
-      const provider = createOpencode();
-      const model = provider("openai/gpt-4o");
-
-      expect(model.modelId).toBe("openai/gpt-4o");
-    });
-  });
-
-  describe("default provider instance", () => {
-    it("should export default opencode instance", () => {
-      expect(opencode).toBeDefined();
-      expect(typeof opencode).toBe("function");
-    });
-
-    it("should create model from default instance", () => {
-      const model = opencode("anthropic/claude-opus-4-5-20251101");
-
-      expect(model).toBeDefined();
       expect(model.modelId).toBe("anthropic/claude-opus-4-5-20251101");
-    });
+      expect(model.specificationVersion).toBe("v4");
+    }
   });
 
-  describe("OpencodeModels", () => {
-    it("should have Anthropic model shortcuts", () => {
-      expect(OpencodeModels["claude-sonnet-4-5"]).toBe(
-        "anthropic/claude-sonnet-4-5-20250929",
-      );
-      expect(OpencodeModels["claude-haiku-4-5"]).toBe(
-        "anthropic/claude-haiku-4-5-20251001",
-      );
-      expect(OpencodeModels["claude-opus-4-5"]).toBe(
-        "anthropic/claude-opus-4-5-20251101",
-      );
-    });
-
-    it("should have OpenAI model shortcuts", () => {
-      expect(OpencodeModels["gpt-4o"]).toBe("openai/gpt-4o");
-      expect(OpencodeModels["gpt-4o-mini"]).toBe("openai/gpt-4o-mini");
-    });
-
-    it("should have Google model shortcuts", () => {
-      expect(OpencodeModels["gemini-3-pro"]).toBe(
-        "google/gemini-3-pro-preview",
-      );
-      expect(OpencodeModels["gemini-2.5-flash"]).toBe(
-        "google/gemini-2.5-flash",
-      );
-      expect(OpencodeModels["gemini-2.5-pro"]).toBe("google/gemini-2.5-pro");
-      expect(OpencodeModels["gemini-2.0-flash"]).toBe(
-        "google/gemini-2.0-flash",
-      );
-    });
-
-    it("should use shortcuts with provider", () => {
-      const provider = createOpencode();
-      const model = provider(OpencodeModels["claude-sonnet-4-5"]);
-
-      expect(model.modelId).toBe("anthropic/claude-sonnet-4-5-20250929");
-    });
+  it("reports provider identity", () => {
+    const provider = createOpencode({ client: createFakeClient() });
+    expect(provider.specificationVersion).toBe("v4");
   });
 
-  describe("validation warnings", () => {
-    it("should log validation warnings for invalid settings", () => {
-      const consoleWarnSpy = vi
-        .spyOn(console, "warn")
-        .mockImplementation(() => {});
+  it("returns a fresh model instance per call (no caching)", () => {
+    // One instance = one conversation = one pinned session; callers reuse an
+    // instance across a conversation's calls, not across conversations.
+    const provider = createOpencode({ client: createFakeClient() });
+    const first = provider("anthropic/claude-opus-4-5-20251101");
+    const second = provider("anthropic/claude-opus-4-5-20251101");
+    expect(second).not.toBe(first);
+  });
 
-      createOpencode({
-        port: 70000, // Invalid port
-        defaultSettings: {
-          sessionId: "invalid session id!",
-        },
-      });
+  it("throws NoSuchModelError for embedding and image models", () => {
+    const provider = createOpencode({ client: createFakeClient() });
+    expect(() => provider.embeddingModel("text-embedding")).toThrow(
+      NoSuchModelError,
+    );
+    expect(() => provider.imageModel("image-model")).toThrow(NoSuchModelError);
+  });
 
-      // Should have logged warnings
-      expect(consoleWarnSpy).toHaveBeenCalled();
-
-      consoleWarnSpy.mockRestore();
+  it("merges defaultSettings under per-model settings", () => {
+    const provider = createOpencode({
+      client: createFakeClient(),
+      defaultSettings: {
+        sessionMode: "existing",
+        sessionId: "ses_default",
+        logger: false,
+      },
     });
 
-    it("should not duplicate provider validation warnings", () => {
-      const warn = vi.fn();
+    const fromDefaults = provider("anthropic/claude-opus-4-5-20251101");
+    expect((fromDefaults as OpencodeLanguageModel).getSessionId()).toBe(
+      "ses_default",
+    );
 
-      createOpencode({
-        port: 70000, // Invalid port
-        defaultSettings: {
-          logger: {
-            warn,
-            error: vi.fn(),
-          },
-        },
-      });
-
-      expect(warn).toHaveBeenCalledTimes(1);
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining("outside valid range"),
-      );
+    const overridden = provider("anthropic/claude-opus-4-5-20251101", {
+      sessionId: "ses_override",
     });
+    expect((overridden as OpencodeLanguageModel).getSessionId()).toBe(
+      "ses_override",
+    );
+  });
+
+  it("wires models to the provider's client manager port", async () => {
+    const injected = createInjectedManager();
+    const fakePort = { marker: true } as unknown as OpencodeClientPort;
+    injected.getPort = vi.fn(async () => fakePort);
+    const provider = createOpencode({ clientManager: injected });
+
+    provider("anthropic/claude-opus-4-5-20251101");
+    // The model resolves the port lazily per call; the manager is the seam.
+    await expect(provider.getClientManager().getPort()).resolves.toBe(fakePort);
+  });
+
+  it("exposes the injected client manager via getClientManager", () => {
+    const injected = createInjectedManager();
+    const provider = createOpencode({ clientManager: injected });
+    expect(provider.getClientManager()).toBe(injected);
+  });
+
+  it("does not dispose an injected client manager", async () => {
+    const injected = createInjectedManager();
+    const provider = createOpencode({ clientManager: injected });
+
+    await provider.dispose();
+
+    expect(injected.dispose).not.toHaveBeenCalled();
+  });
+
+  it("disposes its owned manager (without closing a supplied client)", async () => {
+    const client = createFakeClient();
+    const provider = createOpencode({ client });
+
+    await provider.dispose();
+
+    await expect(provider.getClientManager().getPort()).rejects.toThrow(
+      /disposed/,
+    );
+  });
+
+  it("dispose is idempotent per provider and cannot release a shared manager twice", async () => {
+    // Two providers with identical settings share one registry manager; a
+    // duplicate dispose of provider A (plausible in cleanup/finally paths)
+    // must not drop provider B's reference.
+    const fetchImpl = (async (input: string | URL | Request) => {
+      const url = String(input instanceof Request ? input.url : input);
+      const body = url.includes("/api/info")
+        ? { healthy: true, version: "2.0.0", pid: 1 }
+        : { status: "completed" };
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+    const settings = {
+      baseUrl: "http://shared",
+      clientOptions: { fetch: fetchImpl },
+    };
+    const first = createOpencode(settings);
+    const second = createOpencode(settings);
+
+    await first.dispose();
+    await first.dispose(); // duplicate
+    await expect(first.getClientManager().getPort()).rejects.toThrow(
+      /disposed/,
+    );
+    await expect(second.getClientManager().getPort()).resolves.toBeDefined();
+
+    await second.dispose();
+    await expect(second.getClientManager().getPort()).rejects.toThrow(
+      /disposed/,
+    );
+  });
+
+  it("prefers a supplied client over an injected manager and warns", () => {
+    const injected = createInjectedManager();
+    const warnings: string[] = [];
+    const provider = createOpencode({
+      client: createFakeClient(),
+      clientManager: injected,
+      defaultSettings: {
+        logger: { warn: (m) => warnings.push(m), error: () => {} },
+      },
+    });
+
+    expect(provider.getClientManager()).not.toBe(injected);
+    expect(warnings.join("\n")).toContain(
+      "client takes precedence and clientManager will be ignored",
+    );
+  });
+});
+
+describe("default provider instance", () => {
+  it("is callable and produces models without touching the network", () => {
+    const model = opencode("anthropic/claude-opus-4-5-20251101");
+    expect(model).toBeInstanceOf(OpencodeLanguageModel);
+  });
+});
+
+describe("OpencodeModels", () => {
+  it("maps shortcuts to providerID/modelID ids", () => {
+    expect(OpencodeModels["nemotron-3.5-lightning-free"]).toBe(
+      "opencode/nemotron-3.5-lightning-free",
+    );
+    expect(OpencodeModels["big-pickle"]).toBe("opencode/big-pickle");
+    for (const id of Object.values(OpencodeModels)) {
+      expect(id).toMatch(/^[^/]+\/[^/]+$/);
+    }
+  });
+
+  // Regression guard for the stage-8 catalog-contamination finding: a live
+  // `model.list` also carries host-local providers (the `ollama` plugin
+  // discovers a local daemon on 127.0.0.1:11434; `ollama-cloud` unlocks from
+  // an ambient OLLAMA_API_KEY). Those IDs do not exist for users, so every
+  // shipped shortcut must come from the `opencode` provider.
+  it("ships only IDs verifiable independently of the capture host", () => {
+    for (const id of Object.values(OpencodeModels)) {
+      expect(id.split("/")[0]).toBe("opencode");
+    }
   });
 });

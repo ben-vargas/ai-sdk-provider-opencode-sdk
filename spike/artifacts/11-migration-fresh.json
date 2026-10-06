@@ -1,0 +1,22 @@
+{
+  "xdgHomes": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/fresh-migration",
+  "preexistingEntries": [
+    "cache",
+    "config",
+    "state",
+    "data"
+  ],
+  "migration": {
+    "label": "migration.v1.status",
+    "ok": true,
+    "ms": 3,
+    "value": {
+      "status": "completed"
+    }
+  },
+  "dataDirAfter": [
+    "opencode",
+    "opencode/repos",
+    "opencode/log"
+  ]
+}

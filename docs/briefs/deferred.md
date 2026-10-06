@@ -1,0 +1,214 @@
+# Deferred-item ledger
+
+Items intentionally deferred by earlier stages. Stage 7 (hardening) and
+stage 8 (ship prep) picked these up explicitly, informed by the stage-6
+beta-source findings; anything deferred further must stay on this list with
+a reason. Stage-9 status: items 1, 3, 4, 7, 8, 10 remain resolved; items 2,
+5, 6, 11 remain open; item 9 was re-examined against the published
+`opencode2` binary and **stays deferred for a different, narrower reason**
+(below). Stage 9 also closed a limitation that was never on this list —
+system prompts — because the mechanism that fixes it (`session.instructions.
+entry`) had been recorded as unimplemented everywhere, and turned out to
+work on the published binary. See the stage-9 section of
+`docs/v2-spike-findings.md`.
+
+## Deferred from stage 4 (language model)
+
+1. **`session.wait` watchdog.** ~~Not wired in.~~ **Resolved (stage 7).**
+   The pump now arms a `session.wait` watchdog once `session.execution.
+started` is observed (the one case whose wait semantics stage 6 pinned)
+   and races it against event-driven completion. Wait resolving while
+   events show no terminal drains a short grace window
+   (`waitWatchdogGraceMs`, default 2000 ms), then reconciles from the
+   message store — finalizing only on stored proof the turn concluded,
+   never completion-by-wait (events stay primary; wait's behavior under
+   steer/queue/interrupt stays unpinned upstream). Wait failures disarm the
+   watchdog silently per the phase rule (never surfaced retryable); the
+   silence watchdog remains the backstop. Covered by unit tests and a gated
+   integration test (`integration/wait-watchdog.test.ts`) confirming the
+   watchdog is a no-op on a healthy turn.
+   _Stage-6 evidence (corrected on review):_ `wait` is implemented on
+   the beta-source server and, with execution confirmed started before the
+   call, **resolved within event-stream latency of
+   `session.execution.succeeded`** on long busy turns (8317 ms vs 8320 ms,
+   21229 ms vs 21229 ms) — it tracks turn completion on this build. An
+   earlier mid-turn-resolution reading (~2.8 s) lacked terminal-event
+   correlation and was a measurement artifact
+   (`spike/artifacts/12-beta-src-verification.json` → `waitBusy`).
+2. **`session.log` catch-up.** SSE-drop recovery via the durable log
+   (`session.log({after, follow})`, sequence numbers) is not implemented; the
+   reducer's input layer already normalizes `SessionLogItem` vs live
+   `V2Event` (stage 2), so this is wiring work in the model's recovery path.
+   _Stage-6 evidence:_ on the beta-source server the route yields **only**
+   the `log.synced` sentinel even with `after: 0` on a session holding 16
+   durable events — historical replay is unimplemented upstream, so recovery
+   must keep using the message store until that lands.
+   _Re-examined stage 7, still deferred:_ upstream-blocked — with no
+   historical replay to wire against, the message-store recovery path
+   (which stage 7 extended further) remains the only working option.
+3. **`inbox.list` delivery-uncertainty reconciliation.** **Resolved
+   (stage 7).** A reconcile-marked `session.prompt` failure now triggers a
+   single bounded (3 s) `session.inbox.list` check before the message-store
+   fallback: a pending user item matching the dispatched prompt (by
+   caller-supplied id when one was sent, else exact text) is adopted as the
+   turn's receipt and the pump keeps observing the running turn. Because
+   the beta inbox table is **pending-only** (`projectDelivered` deletes the
+   row in the same transaction that promotes it), an inbox miss is _not_
+   proof of non-delivery: the miss — or the check itself failing — next
+   drains the live subscription for same-session activity events
+   (inbox/execution/step/content/permission/form; `session.idle` excluded
+   as ambiguous) for a bounded window (`deliveryEvidenceWindowMs`, default
+   3 s) and keeps observing when activity is found. Only with no pending
+   row _and_ no live activity does it fall through to the prior behavior
+   (reconcile, else surface the non-retryable error) — reached only when
+   the subscription itself is dead, where the message store is the sole
+   remaining source. Unit-tested for the enqueued, delivered-before-check,
+   absent, foreign-item, and check-fails branches.
+4. **JSON validate/repair loop.** **Resolved (stage 7), opt-in.** New
+   `jsonRepair?: { maxAttempts?: number }` setting (default off; 1 attempt
+   when enabled bare). On doGenerate with `responseFormat: json`, the final
+   text is validated client-side: `JSON.parse` plus a dependency-free
+   recursive structural validator against the AI SDK-supplied schema,
+   covering the subset the AI SDK's zod conversion emits (`type` incl.
+   unions/`integer`, `properties`, `required`, `items`, `enum`, `const`,
+   `additionalProperties: false`); unsupported keywords (`$ref`,
+   combinators, string/number constraints) are deliberately permissive so
+   a keyword gap can never trigger a spurious repair — the AI SDK caller
+   re-validates the final object regardless. Failures are repaired via the
+   port's `generate.text` (documented upstream as session-less/tool-less/
+   history-less — the original turn is never replayed, keeping the design
+   doc §2.1 side-effect gate closed), bounded by `maxAttempts`, and a
+   repair that itself fails validation is not accepted; a warning records
+   attempts used. The unsupported-format warning stays regardless.
+   doStream is excluded (streamed output cannot be recalled).
+
+## Deferred from stage 5 (provider + backends)
+
+5. **Embedded backend / `./embedded` entrypoint.** Per the brief, only the
+   seam ships: `createClientManagerFromPort(port)` wraps an injected port in
+   a manager the factory accepts via the `clientManager` setting. The actual
+   in-process host construction (`OpenCode.create()`, optional peer on
+   `@opencode-ai/sdk`, plugin hooks for true system prompts / tool filtering /
+   permission policy) is future work.
+   _Re-examined stage 7, still deferred:_ upstream-blocked and no
+   demonstrated need — the embedded host remains half-broken at the pinned
+   beta (stage-0 finding 0.2) and every stage-6/7 scenario runs through the
+   network backends; the `createClientManagerFromPort` seam stays the
+   supported injection point.
+6. **Version-predicate gating outside the service backend.** The health
+   preflight gates on `service.version` only for the service backend (where
+   the option lives; discovery/ensure gate on it too — the health re-check
+   catches stale registrations). `baseUrl` and caller-supplied clients log
+   the version but have no gating knob; add one if a real need appears.
+   _Re-examined stage 7, still deferred:_ no demonstrated need — no skew
+   incident has surfaced on `baseUrl`/caller-client backends, and the
+   preflight already logs the server version for diagnosis.
+7. **Model shortcut refresh.** **Resolved (stage 8; corrected in the
+   stage-8 fix phase).** `OpencodeModels` ships the **six** zen free-tier
+   `opencode/*` IDs verified two ways (snapshot 2026-08-27 UTC): present
+   in a live beta-source `model.list` (commit `f4a9b930`), stable across
+   repeated polls, **and** present in the upstream models.dev catalog
+   under the `opencode` provider. The first refresh also shipped
+   `ollama/glm-5.2:cloud` and `ollama/kimi-k3:cloud` as "built-in ollama
+   cloud entries" — that was wrong: both were host-local contamination of
+   the capture (the built-in `ollama` plugin discovers models from a local
+   daemon on `http://127.0.0.1:11434`, which XDG/HOME isolation cannot
+   block). They were removed; a control run with the ollama origin
+   redirected to a dead port produced a catalog with zero ollama entries.
+   See the stage-8 addendum in `docs/v2-spike-findings.md`. The v4-era
+   Anthropic/OpenAI/Google IDs stay dropped — no reachable v2 catalog can
+   verify them (they only appear once those providers' credentials are
+   configured on a server).
+8. **Examples + README rewrite.** **Resolved (stage 8).** README rewritten
+   around the v5 surface (status banner with the no-published-binary
+   caveat, backends, sessions/exclusivity, approvals, forms,
+   structured-output honesty, `data:`-URI files, settings reference,
+   limitations with verified steer semantics); every v1-era claim removed.
+   `examples/` replaced with six examples runnable against the harness via
+   `OPENCODE_BETA_URL`/`OPENCODE_BETA_PASSWORD` (basic-usage, streaming,
+   form-handling, tool-approval, client-options, abort-signal — all
+   executed green against a live beta-source server); v1/v4-only examples
+   deleted. Migration guide added (`docs/migrating-v4-to-v5.md`) and a real
+   5.0.0-beta.1 CHANGELOG entry written.
+
+## Deferred from stage 6 (integration harness)
+
+9. **`file:` URI passthrough in `resolveFileToUri`.** The beta-source server
+   now reads and normalizes readable `file:` URIs server-side (and rejects
+   unreadable ones at prompt time), so a `file:` return from the resolver
+   hook would work against beta servers. The hook's type and the provider's
+   preflight still allow `data:` only — loosening it is a deliberate surface
+   change (server-filesystem coupling, older servers store the raw URI and
+   fail the turn late) deferred until the beta contract is the only one we
+   target (`spike/artifacts/12b-beta-src-file-uris.json`).
+   _Re-examined stage 7, still deferred:_ nothing changed upstream — the
+   build-dependence (dev builds still store non-`data:` URIs raw and fail
+   late) is exactly the failure mode the `data:`-only preflight exists to
+   prevent, so the gate stands until beta is the sole target.
+   _Re-examined stage 9, still deferred — narrower reason._ The original
+   deferral was partly framed on "wait until the beta contract is the only
+   one we target", and stage 9 weakened that: a **published** binary now
+   serves the contract (`@opencode-ai/cli`, `opencode2`), so targeting it is
+   no longer exotic. The deferral survives on the remaining, unchanged
+   ground: the provider cannot tell which build a caller's `baseUrl` points
+   at, and on the v1-lineage CLIs a non-`data:` URI is stored raw and kills
+   the turn _after_ dispatch with a provider-internal error that never
+   mentions the file. A `data:`-only preflight converts that into a
+   caller-visible error before dispatch. Loosening it needs a server
+   capability signal, not just a compatible server existing.
+10. **Steer multi-step supersession re-test.** **Resolved (stage 7) —
+    stage-0 refuted for the beta source.** A dedicated live experiment
+    (`integration/steer-supersede.test.ts`; evidence
+    `spike/artifacts/13-steer-supersede.json`, two independent runs)
+    steered a sleep-widened multi-step bash turn after its first tool call
+    was observed in-flight: the remainder of the turn is **not** dropped
+    (all steps plus the final text ran; one execution, terminal
+    `session.execution.succeeded`), no `session.execution.interrupted`
+    fired with any reason, and the steered prompt was delivered _into_ the
+    in-flight turn as context (`session.inbox.delivered` mid-turn, pending
+    inbox empty after) with **no separate execution and no dedicated
+    answer** — whether the model honors it is model behavior (this model
+    ignored it, both runs). No shipped change (the provider never steers
+    into a busy session); any future steer-dependent feature must treat
+    steer as mid-turn context injection, not turn replacement. See the
+    stage-7 addendum in `docs/v2-spike-findings.md`.
+11. **`input`-excludes-`cache.read` disjointness on beta.** All beta-source
+    runs returned `cache: {read: 0, write: 0}`, so the dev-CLI evidence for
+    the usage summing assumption could not be re-confirmed; re-check when a
+    cache-hitting model is available on the zen catalog.
+    _Re-examined stage 7, still deferred:_ upstream-blocked — the free zen
+    catalog still reports no cache activity, so there is no run that could
+    confirm or refute the disjointness assumption.
+
+## Release re-check (5.0.0 against OpenCode 2.0.24, 2026-10-06)
+
+The provider was moved from the `@opencode-ai/*@0.0.0-beta-18286` betas to
+the released `@opencode/client@2.0.24` / `@opencode/cli@2.0.24` (1,946
+upstream commits of drift). Open items, re-examined:
+
+- **2 (`session.log` catch-up): still deferred.** Historical replay exists
+  in core, but events are only persisted when the server is built with
+  `events.persist`, which `opencode serve` does not set (2.0.24 source), so
+  the log still yields only `log.synced` there. The route also moved to
+  `/api/experimental/...`. Message-store recovery stays.
+- **5 (embedded backend): still deferred**, no demonstrated need.
+- **6 (version gating outside the service backend): still deferred**, but
+  the preflight now distinguishes a pre-2.0 server (no `/api/info` → an
+  "incompatible server" error) from an unreachable one, and `server.info`
+  reports the release semver, so a predicate is cheap to add if needed.
+- **9 (`file:` URIs): still deferred.** 2.x reads `file:` URIs and rejects
+  other schemes at prompt time, and the pre-2.0 detection above is now a
+  usable capability signal — but `file:` resolves against the _server's_
+  filesystem, which a remote `baseUrl` does not share with the caller.
+  Allowing it is a surface decision, not a compatibility fix.
+- **11 (cache-read disjointness): still deferred** (free zen catalog).
+
+New, found during the 2.0.24 port and deliberately not adopted for 5.0.0:
+
+- `session.create` accepts `permissions` (per-session ruleset) and
+  `metadata` again — candidates for new settings.
+- `RequestOptions.onActivity` (fires on SSE keepalives) could feed the
+  silence watchdog; the durable `idle` message / `session.get` outcome could
+  serve as stored proof of turn completion for the wait watchdog.
+- The 2.x client shares one SSE connection per client and drops per-request
+  headers on `event.subscribe`; documented as a limitation.

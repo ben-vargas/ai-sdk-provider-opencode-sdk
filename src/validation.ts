@@ -1,8 +1,13 @@
 import { z } from "zod";
 import type {
-  OpencodeSettings,
-  OpencodeProviderSettings,
   Logger,
+  OpencodeDataUri,
+  OpencodeFormAnswer,
+  OpencodeFormRequest,
+  OpencodeProviderSettings,
+  OpencodeSessionLocation,
+  OpencodeSessionMode,
+  OpencodeSettings,
 } from "./types.js";
 
 /**
@@ -23,45 +28,62 @@ const loggerSchema = z.object({
     .optional(),
 });
 
-const permissionRuleSchema = z.object({
-  permission: z.string(),
-  pattern: z.string(),
-  action: z.enum(["allow", "deny", "ask"]),
-});
+const locationSchema = z
+  .object({
+    directory: z.string(),
+  })
+  // OpenCode 2.x dropped workspaces; reject a stale `workspaceID` loudly
+  // instead of letting it be stripped and silently ignored.
+  .strict();
 
 /**
  * Schema for OpencodeSettings.
  */
 export const opcodeSettingsSchema = z.object({
   sessionId: z.string().optional(),
+  sessionMode: z.enum(["ephemeral", "existing"]).optional(),
   createNewSession: z.boolean().optional(),
   sessionTitle: z.string().optional(),
   agent: z.string().optional(),
   systemPrompt: z.string().optional(),
-  tools: z.record(z.string(), z.boolean()).optional(),
-  permission: z.array(permissionRuleSchema).optional(),
   variant: z.string().optional(),
-  cwd: z.string().optional(),
+  location: locationSchema.optional(),
   directory: z.string().optional(),
-  outputFormatRetryCount: z.number().int().nonnegative().optional(),
-  onQuestion: z.function().optional(),
-  questionPolicy: z.enum(["reject", "wait"]).optional(),
+  delivery: z.enum(["steer", "queue"]).optional(),
+  resume: z.boolean().optional(),
+  onForm: z.function().optional(),
+  formPolicy: z.enum(["cancel", "wait"]).optional(),
+  resolveFileToUri: z.function().optional(),
+  jsonRepair: z
+    .object({ maxAttempts: z.number().int().positive().optional() })
+    .optional(),
   logger: z.union([loggerSchema, z.literal(false)]).optional(),
   verbose: z.boolean().optional(),
+});
+
+const serviceOptionsSchema = z.object({
+  file: z.string().optional(),
+  version: z.union([z.string(), z.function()]).optional(),
+  command: z.array(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  onStart: z.function().optional(),
 });
 
 /**
  * Schema for OpencodeProviderSettings.
  */
 export const opcodeProviderSettingsSchema = z.object({
-  hostname: z.string().optional(),
-  port: z.number().int().positive().optional(),
-  baseUrl: z.string().url().optional(),
-  autoStartServer: z.boolean().optional(),
-  serverTimeout: z.number().int().positive().optional(),
-  clientOptions: z.record(z.string(), z.unknown()).optional(),
   client: z.object({}).passthrough().optional(),
   clientManager: z.object({}).passthrough().optional(),
+  baseUrl: z.string().url().optional(),
+  service: serviceOptionsSchema.optional(),
+  autoStart: z.boolean().optional(),
+  clientOptions: z
+    .object({
+      fetch: z.function().optional(),
+      headers: z.unknown().optional(),
+    })
+    .optional(),
   defaultSettings: opcodeSettingsSchema.optional(),
 });
 
@@ -101,12 +123,23 @@ export function validateSettings(
     warnings.push(`Invalid session ID format: ${settings.sessionId}`);
   }
 
-  if (
-    settings.outputFormatRetryCount !== undefined &&
-    settings.outputFormatRetryCount > 10
-  ) {
+  if (settings.sessionId && settings.sessionMode === "ephemeral") {
     warnings.push(
-      `outputFormatRetryCount ${settings.outputFormatRetryCount} is high; consider a value between 0 and 5`,
+      'sessionId is ignored in "ephemeral" session mode; use sessionMode "existing" to pin a session',
+    );
+  }
+
+  if (settings.sessionMode === "existing" && !settings.sessionId) {
+    warnings.push(
+      'sessionMode "existing" requires a sessionId; falling back to "ephemeral"',
+    );
+  }
+
+  if (settings.directory !== undefined) {
+    warnings.push(
+      settings.location !== undefined
+        ? "Both directory and location were provided; location takes precedence and directory will be ignored"
+        : 'directory is deprecated; use location: { directory: "..." } instead',
     );
   }
 
@@ -121,7 +154,9 @@ export function validateSettings(
 }
 
 /**
- * Validate OpencodeProviderSettings.
+ * Validate OpencodeProviderSettings, enforcing backend exclusivity:
+ * exactly one of `client`, `clientManager`, `baseUrl`, or service discovery
+ * is used, with precedence client > clientManager > baseUrl > service.
  */
 export function validateProviderSettings(
   settings: OpencodeProviderSettings | undefined,
@@ -145,24 +180,46 @@ export function validateProviderSettings(
     );
   }
 
-  // Validate port range
-  if (
-    settings.port !== undefined &&
-    (settings.port < 1 || settings.port > 65535)
-  ) {
-    warnings.push(`Port ${settings.port} is outside valid range (1-65535)`);
-  }
-
-  // Validate timeout
-  if (settings.serverTimeout !== undefined && settings.serverTimeout < 1000) {
+  // Backend exclusivity
+  if (settings.client && settings.clientManager) {
     warnings.push(
-      `Server timeout ${settings.serverTimeout}ms is very short, consider at least 5000ms`,
+      "Both client and clientManager were provided; client takes precedence and clientManager will be ignored",
     );
   }
 
-  if (settings.clientManager && settings.client) {
+  if (settings.clientManager && !settings.client && settings.baseUrl) {
     warnings.push(
-      "Both clientManager and client were provided; clientManager will be used and client will be ignored.",
+      "Both clientManager and baseUrl were provided; clientManager takes precedence and baseUrl will be ignored",
+    );
+  }
+
+  if (settings.clientManager && !settings.client && settings.service) {
+    warnings.push(
+      "Both clientManager and service were provided; clientManager takes precedence and service discovery will be skipped",
+    );
+  }
+
+  if (settings.clientManager && settings.clientOptions) {
+    warnings.push(
+      "Both clientManager and clientOptions were provided; clientOptions will be ignored because a manager backend supplies its own client",
+    );
+  }
+
+  if (settings.client && settings.baseUrl) {
+    warnings.push(
+      "Both client and baseUrl were provided; client takes precedence and baseUrl will be ignored",
+    );
+  }
+
+  if (settings.client && settings.service) {
+    warnings.push(
+      "Both client and service were provided; client takes precedence and service discovery will be skipped",
+    );
+  }
+
+  if (settings.baseUrl && settings.service) {
+    warnings.push(
+      "Both baseUrl and service were provided; baseUrl takes precedence and service discovery will be skipped",
     );
   }
 
@@ -172,18 +229,13 @@ export function validateProviderSettings(
     );
   }
 
-  if (settings.clientOptions) {
-    const options = settings.clientOptions as Record<string, unknown>;
-    if (options.baseUrl !== undefined) {
-      warnings.push(
-        "clientOptions.baseUrl is ignored; use provider baseUrl or hostname/port instead",
-      );
-    }
-    if (options.directory !== undefined) {
-      warnings.push(
-        "clientOptions.directory is ignored; use defaultSettings.directory or per-model directory instead",
-      );
-    }
+  if (
+    settings.autoStart &&
+    (settings.client || settings.clientManager || settings.baseUrl)
+  ) {
+    warnings.push(
+      "autoStart only applies to the service-discovery backend and will be ignored",
+    );
   }
 
   // Log warnings if logger is provided
@@ -261,6 +313,79 @@ export function isValidSessionId(sessionId: string): boolean {
 }
 
 /**
+ * Validate a keyed form answer against the form's field definitions.
+ * Checks that every answered key exists on the form, that value shapes match
+ * the field type, and that required unconditional fields are answered.
+ * Conditional (`when`) requirements are not evaluated client-side.
+ */
+export function validateFormAnswer(
+  form: OpencodeFormRequest,
+  answer: OpencodeFormAnswer,
+): ValidationResult<OpencodeFormAnswer> {
+  const warnings: string[] = [];
+  const fieldsByKey = new Map(form.fields.map((field) => [field.key, field]));
+
+  for (const [key, value] of Object.entries(answer)) {
+    const field = fieldsByKey.get(key);
+    if (!field) {
+      warnings.push(`Answer key "${key}" does not match any form field`);
+      continue;
+    }
+
+    switch (field.type) {
+      case "string":
+      case "external":
+        if (typeof value !== "string") {
+          warnings.push(`Field "${key}" (${field.type}) requires a string`);
+        }
+        break;
+      case "number":
+        if (typeof value !== "number") {
+          warnings.push(`Field "${key}" (number) requires a number`);
+        }
+        break;
+      case "integer":
+        if (typeof value !== "number" || !Number.isInteger(value)) {
+          warnings.push(`Field "${key}" (integer) requires an integer`);
+        }
+        break;
+      case "boolean":
+        if (typeof value !== "boolean") {
+          warnings.push(`Field "${key}" (boolean) requires a boolean`);
+        }
+        break;
+      case "multiselect":
+        if (
+          !Array.isArray(value) ||
+          value.some((item) => typeof item !== "string")
+        ) {
+          warnings.push(
+            `Field "${key}" (multiselect) requires an array of strings`,
+          );
+        }
+        break;
+    }
+  }
+
+  for (const field of form.fields) {
+    // "external" fields carry no required/when/default metadata
+    if (field.type === "external") {
+      continue;
+    }
+    if (
+      field.required &&
+      !field.when?.length &&
+      !(field.key in answer) &&
+      field.default === undefined
+    ) {
+      warnings.push(`Required field "${field.key}" is missing an answer`);
+    }
+  }
+
+  return { value: answer, warnings };
+}
+
+/**
  * Merge settings with defaults.
  */
 export function mergeSettings(
@@ -279,14 +404,88 @@ export function mergeSettings(
     return { ...defaults };
   }
 
+  // location and the deprecated directory alias are one logical field:
+  // an override of either supersedes both defaults.
+  const overridesLocation =
+    overrides.location !== undefined || overrides.directory !== undefined;
+
   return {
     ...defaults,
     ...overrides,
-    // Merge tools object if both exist
-    tools:
-      defaults.tools || overrides.tools
-        ? { ...defaults.tools, ...overrides.tools }
-        : undefined,
-    permission: overrides.permission ?? defaults.permission,
+    location: overridesLocation ? overrides.location : defaults.location,
+    directory: overridesLocation ? overrides.directory : defaults.directory,
   };
+}
+
+/**
+ * Resolve the effective session mode from `sessionMode` and `sessionId`.
+ *
+ * Explicit rule for the sessionId+sessionMode ambiguity:
+ * - An explicit `sessionMode` always wins. Conflicting combinations warn
+ *   (in {@link validateSettings}) and the losing field is ignored:
+ *   `sessionId` with mode "ephemeral" is ignored; mode
+ *   "existing" without a `sessionId` falls back to "ephemeral".
+ * - With no explicit mode, providing a `sessionId` pins that session and
+ *   implies mode "existing".
+ * - Otherwise the default is "ephemeral".
+ */
+export function resolveSessionMode(
+  settings: OpencodeSettings,
+): OpencodeSessionMode {
+  if (settings.sessionMode === "existing") {
+    return settings.sessionId ? "existing" : "ephemeral";
+  }
+  if (settings.sessionMode) {
+    return settings.sessionMode;
+  }
+  return settings.sessionId ? "existing" : "ephemeral";
+}
+
+/**
+ * Resolve the effective session location from `location` and the deprecated
+ * v4 `directory` alias. `location` takes precedence when both are set.
+ */
+export function resolveSessionLocation(
+  settings: OpencodeSettings,
+): OpencodeSessionLocation | undefined {
+  if (settings.location !== undefined) {
+    return settings.location;
+  }
+  if (settings.directory !== undefined) {
+    return { directory: settings.directory };
+  }
+  return undefined;
+}
+
+/**
+ * Check whether a resolved file URI is a `data:` URI — the only scheme
+ * verified to reach the model end-to-end on current OpenCode v2 builds.
+ * The prompt path must reject (warn + skip) anything else before prompting,
+ * since a bad attachment fails the whole turn late at the model provider.
+ */
+export function isDataUri(uri: string): uri is OpencodeDataUri {
+  return uri.startsWith("data:");
+}
+
+/**
+ * Strict well-formedness check for a `data:` URI destined for prompt
+ * `files[]`. {@link isDataUri} only detects the scheme; the server admits
+ * any URI verbatim and a bad attachment fails the whole turn late at the
+ * model provider, so the prompt path must additionally reject malformed
+ * `data:` URIs before prompting: no comma/payload, or a mediatype that is
+ * not a concrete `type/subtype` (the server trusts the URI mediatype;
+ * wildcards and bare top-level types are rejected).
+ */
+export function isAttachableDataUri(uri: string): uri is OpencodeDataUri {
+  if (!isDataUri(uri)) {
+    return false;
+  }
+  const comma = uri.indexOf(",");
+  if (comma === -1 || comma === uri.length - 1) {
+    return false;
+  }
+  const header = uri.slice("data:".length, comma);
+  const mediatype = header.split(";", 1)[0]!;
+  const slash = mediatype.indexOf("/");
+  return slash > 0 && slash < mediatype.length - 1 && !mediatype.includes("*");
 }

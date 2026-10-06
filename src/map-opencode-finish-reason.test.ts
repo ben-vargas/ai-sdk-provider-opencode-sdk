@@ -1,267 +1,91 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
+  mapInterruptReasonToFinishReason,
   mapOpencodeFinishReason,
-  mapErrorToFinishReasonFromUnknown,
-  hasToolCalls,
-  resolveStructuredOutputFinishReason,
+  mapStructuredErrorToFinishReason,
+  type OpencodeV2Finish,
 } from "./map-opencode-finish-reason.js";
 
-const unified = (message: Parameters<typeof mapOpencodeFinishReason>[0]) =>
-  mapOpencodeFinishReason(message).unified;
-const unifiedFromError = (error: unknown) =>
-  mapErrorToFinishReasonFromUnknown(error).unified;
+describe("mapOpencodeFinishReason", () => {
+  const table: Array<[OpencodeV2Finish, string]> = [
+    ["stop", "stop"],
+    ["length", "length"],
+    ["tool-calls", "tool-calls"],
+    ["content-filter", "content-filter"],
+    ["error", "error"],
+    ["unknown", "other"],
+  ];
 
-describe("map-opencode-finish-reason", () => {
-  describe("mapOpencodeFinishReason", () => {
-    it('should return "unknown" for undefined message', () => {
-      const result = mapOpencodeFinishReason(undefined);
-      expect(result.unified).toBe("other");
-      expect(result.raw).toBeUndefined();
-    });
-
-    it('should return "stop" for end_turn finish', () => {
-      expect(unified({ finish: "end_turn" })).toBe("stop");
-    });
-
-    it('should return "stop" for stop finish', () => {
-      expect(unified({ finish: "stop" })).toBe("stop");
-    });
-
-    it('should return "stop" for end finish', () => {
-      expect(unified({ finish: "end" })).toBe("stop");
-    });
-
-    it('should return "length" for max_tokens finish', () => {
-      expect(unified({ finish: "max_tokens" })).toBe("length");
-    });
-
-    it('should return "length" for length finish', () => {
-      expect(unified({ finish: "length" })).toBe("length");
-    });
-
-    it('should return "tool-calls" for tool_use finish', () => {
-      expect(unified({ finish: "tool_use" })).toBe("tool-calls");
-    });
-
-    it('should return "tool-calls" for tool_calls finish', () => {
-      expect(unified({ finish: "tool_calls" })).toBe("tool-calls");
-    });
-
-    it('should return "tool-calls" for hyphenated tool-calls finish', () => {
-      expect(unified({ finish: "tool-calls" })).toBe("tool-calls");
-    });
-
-    it('should return "content-filter" for content_filter finish', () => {
-      expect(unified({ finish: "content_filter" })).toBe("content-filter");
-    });
-
-    it('should return "content-filter" for hyphenated content-filter finish', () => {
-      expect(unified({ finish: "content-filter" })).toBe("content-filter");
-    });
-
-    it('should return "content-filter" for safety finish', () => {
-      expect(unified({ finish: "safety" })).toBe("content-filter");
-    });
-
-    it('should return "error" for error finish', () => {
-      expect(unified({ finish: "error" })).toBe("error");
-    });
-
-    it('should return "stop" for unknown finish values', () => {
-      expect(unified({ finish: "unknown_value" })).toBe("other");
-    });
-
-    it("should be case insensitive for finish values", () => {
-      expect(unified({ finish: "END_TURN" })).toBe("stop");
-      expect(unified({ finish: "MAX_TOKENS" })).toBe("length");
-      expect(unified({ finish: "Tool_Use" })).toBe("tool-calls");
-    });
-
-    // Error handling
-    it('should return "stop" for MessageAbortedError', () => {
-      expect(
-        unified({
-          error: { name: "MessageAbortedError" },
-        }),
-      ).toBe("stop");
-    });
-
-    it('should return "length" for MessageOutputLengthError', () => {
-      expect(
-        unified({
-          error: { name: "MessageOutputLengthError" },
-        }),
-      ).toBe("length");
-    });
-
-    it('should return "length" for ContextOverflowError', () => {
-      expect(
-        unified({
-          error: { name: "ContextOverflowError" },
-        }),
-      ).toBe("length");
-    });
-
-    it('should return "error" for StructuredOutputError', () => {
-      expect(
-        unified({
-          error: { name: "StructuredOutputError" },
-        }),
-      ).toBe("error");
-    });
-
-    it('should return "error" for ProviderAuthError', () => {
-      expect(
-        unified({
-          error: { name: "ProviderAuthError" },
-        }),
-      ).toBe("error");
-    });
-
-    it('should return "error" for APIError', () => {
-      expect(
-        unified({
-          error: { name: "APIError" },
-        }),
-      ).toBe("error");
-    });
-
-    it('should return "error" for UnknownError', () => {
-      expect(
-        unified({
-          error: { name: "UnknownError" },
-        }),
-      ).toBe("error");
-    });
-
-    it('should return "error" for unknown error types', () => {
-      expect(
-        unified({
-          error: { name: "SomeOtherError" },
-        }),
-      ).toBe("error");
-    });
-
-    it("should prioritize error over finish", () => {
-      expect(
-        unified({
-          error: { name: "APIError" },
-          finish: "end_turn",
-        }),
-      ).toBe("error");
-    });
-
-    it('should return "stop" for message without error or finish', () => {
-      expect(unified({})).toBe("stop");
+  it.each(table)("maps %s → %s", (finish, unified) => {
+    expect(mapOpencodeFinishReason(finish)).toEqual({
+      unified,
+      raw: finish,
     });
   });
 
-  describe("mapErrorToFinishReasonFromUnknown", () => {
-    it('should return "stop" for abort errors', () => {
-      const error = { name: "AbortError" };
-      expect(unifiedFromError(error)).toBe("stop");
-    });
-
-    it('should return "stop" for MessageAbortedError', () => {
-      const error = { name: "MessageAbortedError" };
-      expect(unifiedFromError(error)).toBe("stop");
-    });
-
-    it('should return "length" for output length errors', () => {
-      const error = { name: "MessageOutputLengthError" };
-      expect(unifiedFromError(error)).toBe("length");
-    });
-
-    it('should return "length" for max tokens error message', () => {
-      const error = { message: "Max tokens exceeded" };
-      expect(unifiedFromError(error)).toBe("length");
-    });
-
-    it('should return "error" for other errors', () => {
-      const error = { name: "NetworkError", message: "Connection failed" };
-      expect(unifiedFromError(error)).toBe("error");
-    });
-
-    it('should return "error" for null', () => {
-      expect(unifiedFromError(null)).toBe("error");
+  it("prefers rawFinish for the raw value", () => {
+    expect(mapOpencodeFinishReason("stop", "end_turn")).toEqual({
+      unified: "stop",
+      raw: "end_turn",
     });
   });
 
-  describe("hasToolCalls", () => {
-    it("should return true when parts contain tool type", () => {
-      const parts = [{ type: "text" }, { type: "tool" }, { type: "text" }];
-      expect(hasToolCalls(parts)).toBe(true);
-    });
-
-    it("should return false when parts have no tool type", () => {
-      const parts = [
-        { type: "text" },
-        { type: "reasoning" },
-        { type: "step-finish" },
-      ];
-      expect(hasToolCalls(parts)).toBe(false);
-    });
-
-    it("should return false for empty array", () => {
-      expect(hasToolCalls([])).toBe(false);
-    });
-
-    it("should handle multiple tool parts", () => {
-      const parts = [{ type: "tool" }, { type: "tool" }];
-      expect(hasToolCalls(parts)).toBe(true);
+  it("maps values outside the closed union to other", () => {
+    expect(mapOpencodeFinishReason("something-new")).toEqual({
+      unified: "other",
+      raw: "something-new",
     });
   });
 
-  describe("resolveStructuredOutputFinishReason", () => {
-    it('should resolve "tool-calls" to "stop" when structured output completed', () => {
-      const result = resolveStructuredOutputFinishReason(
-        { unified: "tool-calls", raw: "tool-calls" },
-        true,
-      );
-      expect(result).toEqual({ unified: "stop", raw: "tool-calls" });
+  it("maps undefined to other with undefined raw", () => {
+    expect(mapOpencodeFinishReason(undefined)).toEqual({
+      unified: "other",
+      raw: undefined,
     });
+  });
 
-    it('should resolve "other" to "stop" when structured output completed', () => {
-      const result = resolveStructuredOutputFinishReason(
-        { unified: "other", raw: "tool-calls" },
-        true,
-      );
-      expect(result).toEqual({ unified: "stop", raw: "tool-calls" });
-    });
-
-    it('should keep "tool-calls" when structured output did not complete', () => {
-      const result = resolveStructuredOutputFinishReason(
-        { unified: "tool-calls", raw: "tool_use" },
-        false,
-      );
-      expect(result).toEqual({ unified: "tool-calls", raw: "tool_use" });
-    });
-
-    it('should keep "error" even when structured output completed', () => {
-      const result = resolveStructuredOutputFinishReason(
-        { unified: "error", raw: "StructuredOutputError" },
-        true,
-      );
-      expect(result).toEqual({
-        unified: "error",
-        raw: "StructuredOutputError",
+  it.each(["toString", "constructor", "__proto__", "hasOwnProperty"])(
+    "maps inherited Object.prototype name %s to other",
+    (name) => {
+      expect(mapOpencodeFinishReason(name)).toEqual({
+        unified: "other",
+        raw: name,
       });
-    });
+    },
+  );
+});
 
-    it('should keep "length" even when structured output completed', () => {
-      const result = resolveStructuredOutputFinishReason(
-        { unified: "length", raw: "max_tokens" },
-        true,
-      );
-      expect(result).toEqual({ unified: "length", raw: "max_tokens" });
-    });
+describe("mapStructuredErrorToFinishReason", () => {
+  it("normalizes a structured error to error with the native type as raw", () => {
+    expect(
+      mapStructuredErrorToFinishReason({
+        type: "provider_auth",
+        message: "bad key",
+        status: 401,
+      }),
+    ).toEqual({ unified: "error", raw: "provider_auth" });
+  });
+});
 
-    it('should keep "stop" unchanged', () => {
-      const result = resolveStructuredOutputFinishReason(
-        { unified: "stop", raw: "end_turn" },
-        true,
-      );
-      expect(result).toEqual({ unified: "stop", raw: "end_turn" });
+describe("mapInterruptReasonToFinishReason", () => {
+  it("maps user → stop", () => {
+    expect(mapInterruptReasonToFinishReason("user")).toEqual({
+      unified: "stop",
+      raw: "interrupted:user",
+    });
+  });
+
+  it("maps superseded → other", () => {
+    expect(mapInterruptReasonToFinishReason("superseded")).toEqual({
+      unified: "other",
+      raw: "interrupted:superseded",
+    });
+  });
+
+  it("maps shutdown → error", () => {
+    expect(mapInterruptReasonToFinishReason("shutdown")).toEqual({
+      unified: "error",
+      raw: "interrupted:shutdown",
     });
   });
 });

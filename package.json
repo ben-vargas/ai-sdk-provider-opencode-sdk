@@ -1,10 +1,13 @@
 {
   "name": "ai-sdk-provider-opencode-sdk",
-  "version": "4.1.0",
-  "description": "AI SDK v7 provider for OpenCode via @opencode-ai/sdk",
+  "version": "5.0.0",
+  "description": "AI SDK v7 provider for OpenCode 2.x via @opencode/client: sessions, streaming, tool approvals, and interactive forms",
   "keywords": [
     "ai-sdk",
+    "ai-sdk-provider",
+    "vercel-ai-sdk",
     "opencode",
+    "opencode-v2",
     "opencode-sdk",
     "language-model",
     "llm"
@@ -33,6 +36,7 @@
   "files": [
     "dist/**/*",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
@@ -46,21 +50,25 @@
     "prepare": "npm run build",
     "prepublishOnly": "npm run clean && npm run build",
     "test": "vitest run",
+    "test:integration": "vitest run --config integration/vitest.config.ts",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "example:basic": "npm run build && npx tsx examples/basic-usage.ts",
     "example:streaming": "npm run build && npx tsx examples/streaming.ts",
+    "example:form-handling": "npm run build && npx tsx examples/form-handling.ts",
+    "example:tool-approval": "npm run build && npx tsx examples/tool-approval.ts",
     "example:client-options": "npm run build && npx tsx examples/client-options.ts",
-    "example:question-handling": "npm run build && npx tsx examples/question-handling.ts"
+    "example:abort": "npm run build && npx tsx examples/abort-signal.ts"
   },
   "dependencies": {
     "@ai-sdk/provider": "^4.0.4",
     "@ai-sdk/provider-utils": "^5.0.18",
-    "@opencode-ai/sdk": "^1.18.11"
+    "@opencode/client": "2.0.24"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@opencode/cli": "2.0.24",
     "@types/node": "^22.10.0",
     "@typescript-eslint/eslint-plugin": "8.34.0",
     "@typescript-eslint/parser": "8.34.0",

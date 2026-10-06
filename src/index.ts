@@ -1,4 +1,4 @@
-// Provider exports
+// Provider factory exports
 export {
   createOpencode,
   opencode,
@@ -6,37 +6,61 @@ export {
 } from "./opencode-provider.js";
 export type { OpencodeModelShortcut } from "./opencode-provider.js";
 
-// Language model export
-export { OpencodeLanguageModel } from "./opencode-language-model.js";
-
-// Client manager exports
+// Client-manager exports
 export {
-  OpencodeClientManager,
   createClientManager,
   createClientManagerFromSettings,
+  createClientManagerFromPort,
+  mergeDefaultHeaders,
 } from "./opencode-client-manager.js";
-export type { ClientManagerOptions } from "./opencode-client-manager.js";
+
+// Client-port facade exports
+export { asClientPort } from "./client-port.js";
+export type {
+  OpencodeClientPort,
+  OpencodeRequestOptions,
+} from "./client-port.js";
+
+// Beta-client passthrough types: the permission surface and the v2 event
+// union callers need to type `providerMetadata` payloads and any client
+// event handling of their own (design doc §2.2: index re-exports
+// form/permission/v2 event types).
+export type {
+  PermissionRequest,
+  PermissionReply,
+  PermissionAsked,
+  PermissionReplied,
+  V2Event,
+  OpenCodeEvent,
+} from "@opencode/client";
 
 // Type exports
 export type {
   OpencodeModelId,
   OpencodeClient,
-  OpencodeCreateClientOptions,
+  OpencodeClientManager,
   OpencodeClientOptions,
+  OpencodeServiceOptions,
+  OpencodeSessionLocation,
+  OpencodeSessionMode,
+  OpencodeDelivery,
+  OpencodeFormRequest,
+  OpencodeFormField,
+  OpencodeFormValue,
+  OpencodeFormAnswer,
+  OpencodeFormResponse,
+  OpencodeFormPolicy,
+  OpencodeDataUri,
+  OpencodeFileToResolve,
+  OpencodeResolveFileToUri,
   OpencodeProviderOptions,
   OpencodeSettings,
   OpencodeProviderSettings,
   OpencodeProvider,
   ParsedModelId,
+  OpencodeFinish,
   OpencodeProviderMetadata,
   Logger,
-  OpencodePermissionAction,
-  OpencodePermissionRule,
-  OpencodePermissionRuleset,
-  OpencodeQuestionRequest,
-  OpencodeQuestionResponse,
-  ToolStreamState,
-  StreamingUsage,
 } from "./types.js";
 
 // Validation exports
@@ -44,22 +68,87 @@ export {
   validateSettings,
   validateProviderSettings,
   validateModelId,
+  validateFormAnswer,
   isValidSessionId,
+  isDataUri,
+  isAttachableDataUri,
   mergeSettings,
+  resolveSessionLocation,
+  resolveSessionMode,
 } from "./validation.js";
+export type { ValidationResult } from "./validation.js";
+
+// Prompt converter exports
+export {
+  convertToOpencodePrompt,
+  createJsonModeInstruction,
+  prependSystemBlock,
+} from "./convert-to-opencode-messages.js";
+export type {
+  ConvertToOpencodePromptOptions,
+  OpencodePromptConversion,
+  OpencodePromptFile,
+} from "./convert-to-opencode-messages.js";
+
+// System-prompt (session instruction entry) exports
+export {
+  fitsInstructionValue,
+  instructionValueBytes,
+  INSTRUCTION_KEY_PATTERN,
+  INSTRUCTION_VALUE_MAX_BYTES,
+  SYSTEM_INSTRUCTION_KEY,
+} from "./system-instruction.js";
+
+// Event reducer exports
+export {
+  convertV2EventToStreamParts,
+  createV2StreamState,
+  createStreamStartPart,
+  extractV2EventSessionId,
+  finalizeV2Stream,
+  normalizeReducerInput,
+  PERMISSION_TOOL_NAME,
+  UNKNOWN_TOOL_NAME,
+} from "./convert-from-opencode-events.js";
+export type {
+  NormalizedV2Event,
+  NormalizedV2Input,
+  OpencodeReducerInput,
+  PendingV2Approval,
+  V2StreamState,
+  V2StreamUsage,
+} from "./convert-from-opencode-events.js";
+
+// Language-model exports
+export { OpencodeLanguageModel } from "./opencode-language-model.js";
+export type { OpencodeLanguageModelConfig } from "./opencode-language-model.js";
+
+// Finish-reason exports
+export {
+  mapInterruptReasonToFinishReason,
+  mapOpencodeFinishReason,
+  mapStructuredErrorToFinishReason,
+} from "./map-opencode-finish-reason.js";
+export type {
+  OpencodeInterruptReason,
+  OpencodeV2Finish,
+} from "./map-opencode-finish-reason.js";
 
 // Error exports
 export {
-  isAuthenticationError,
-  isTimeoutError,
   isAbortError,
-  isOutputLengthError,
-  createAuthenticationError,
-  createAPICallError,
-  createEmptyResponseDataError,
-  createTimeoutError,
+  isClientError,
+  isTaggedError,
+  needsSessionReconciliation,
+  getClientErrorStatus,
   extractErrorMessage,
+  normalizeStructuredError,
   wrapError,
+} from "./errors.js";
+export type {
+  OpencodeErrorData,
+  OpencodeErrorPhase,
+  OpencodeWrapErrorOptions,
 } from "./errors.js";
 
 // Logger exports
@@ -72,56 +161,3 @@ export {
   logUnsupportedParameter,
   logUnsupportedCallOptions,
 } from "./logger.js";
-
-// Message conversion exports
-export {
-  convertToOpencodeMessages,
-  extractTextFromParts,
-} from "./convert-to-opencode-messages.js";
-export type {
-  TextPartInput,
-  FilePartInput,
-  OpencodePartInput,
-  ConversionResult,
-} from "./convert-to-opencode-messages.js";
-
-// Event conversion exports
-export {
-  convertEventToStreamParts,
-  createStreamState,
-  createFinishParts,
-  createStreamStartPart,
-  isEventForSession,
-  isSessionComplete,
-  STRUCTURED_OUTPUT_TOOL,
-} from "./convert-from-opencode-events.js";
-export type {
-  OpencodeEvent,
-  EventMessagePartUpdated,
-  EventMessageUpdated,
-  EventSessionStatus,
-  EventSessionIdle,
-  EventPermissionAsked,
-  EventQuestionAsked,
-  TextPart,
-  ReasoningPart,
-  ToolPart,
-  ToolState,
-  ToolStatePending,
-  ToolStateRunning,
-  ToolStateCompleted,
-  ToolStateError,
-  StepFinishPart,
-  FilePart,
-  Part,
-  Message,
-  StreamState,
-} from "./convert-from-opencode-events.js";
-
-// Finish reason mapping exports
-export {
-  mapOpencodeFinishReason,
-  mapErrorToFinishReasonFromUnknown,
-  hasToolCalls,
-} from "./map-opencode-finish-reason.js";
-export type { MessageInfo } from "./map-opencode-finish-reason.js";

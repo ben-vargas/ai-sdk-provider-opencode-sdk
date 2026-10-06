@@ -1,0 +1,134 @@
+{
+  "providerList": {
+    "label": "provider.list",
+    "ok": false,
+    "ms": 4,
+    "error": {
+      "__error": true,
+      "name": "ClientError",
+      "message": "UnexpectedStatus",
+      "reason": "UnexpectedStatus",
+      "cause": {
+        "status": 500,
+        "body": ""
+      }
+    }
+  },
+  "logAfterProviderList": 2,
+  "modelList": {
+    "label": "model.list",
+    "ok": false,
+    "ms": 0,
+    "error": {
+      "__error": true,
+      "name": "ClientError",
+      "message": "UnexpectedStatus",
+      "reason": "UnexpectedStatus",
+      "cause": {
+        "status": 500,
+        "body": ""
+      }
+    }
+  },
+  "session": {
+    "label": "session.create",
+    "ok": true,
+    "ms": 62,
+    "value": {
+      "id": "ses_fc014b54dffeVcTVvjsFqiKlfh",
+      "projectID": "0d3425c598e03c4a14956072904534f96eaa159d",
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "time": {
+        "created": 1787778779883,
+        "updated": 1787778779883
+      },
+      "title": "spike-10-gaps",
+      "location": {
+        "directory": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5/spike/sandbox/workdir"
+      },
+      "subpath": "spike/sandbox/workdir"
+    }
+  },
+  "prompt": {
+    "label": "session.prompt",
+    "ok": false,
+    "ms": 1,
+    "error": {
+      "__error": true,
+      "name": "ClientError",
+      "message": "UnexpectedStatus",
+      "reason": "UnexpectedStatus",
+      "cause": {
+        "status": 500,
+        "body": ""
+      }
+    }
+  },
+  "logEntryCount": 5,
+  "logEntries": [
+    {
+      "level": "info",
+      "message": "database schema bootstrap started",
+      "attributes": {
+        "migrations": 46
+      }
+    },
+    {
+      "level": "info",
+      "message": "database schema bootstrap completed",
+      "attributes": {
+        "migrations": 46,
+        "durationMs": 10
+      }
+    },
+    {
+      "level": "info",
+      "message": "spawning process",
+      "attributes": {
+        "command": "git",
+        "args": [
+          "rev-parse",
+          "--git-dir",
+          "--git-common-dir",
+          "--show-toplevel"
+        ],
+        "cwd": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5"
+      }
+    },
+    {
+      "level": "info",
+      "message": "spawning process",
+      "attributes": {
+        "command": "git",
+        "args": [
+          "remote",
+          "get-url",
+          "origin"
+        ],
+        "cwd": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5"
+      }
+    },
+    {
+      "level": "info",
+      "message": "spawning process",
+      "attributes": {
+        "command": "git",
+        "args": [
+          "worktree",
+          "list",
+          "--porcelain"
+        ],
+        "cwd": "/Users/ben/projects/ben-vargas/ai-sdk-provider-opencode-sdk-v5"
+      }
+    }
+  ]
+}

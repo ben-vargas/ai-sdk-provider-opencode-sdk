@@ -1,2423 +1,376 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import type { LanguageModelV4StreamPart } from "@ai-sdk/provider";
+import type { FormCreated } from "@opencode/client";
 import {
-  createStreamState,
-  isEventForSession,
-  isSessionComplete,
-  convertEventToStreamParts,
-  createFinishParts,
+  convertV2EventToStreamParts,
   createStreamStartPart,
-  type EventMessagePartUpdated,
-  type EventSessionStatus,
-  type EventSessionIdle,
-  type EventPermissionAsked,
-  type EventQuestionAsked,
-  type TextPart,
-  type ReasoningPart,
-  type FilePart,
-  type ToolPart,
-  type ToolState,
-  type StepFinishPart,
-  type EventMessagePartDelta,
+  createV2StreamState,
+  extractV2EventSessionId,
+  finalizeV2Stream,
+  normalizeReducerInput,
+  UNKNOWN_TOOL_NAME,
+  type V2StreamState,
 } from "./convert-from-opencode-events.js";
-import type { Logger } from "./types.js";
+import {
+  eventFactory,
+  fixtures,
+  tokens,
+  OTHER_SESSION_ID,
+  SESSION_ID,
+  type V2EventFixture,
+} from "../test/fixtures/v2-events/index.js";
 
-describe("convert-from-opencode-events", () => {
-  describe("createStreamState", () => {
-    it("should create initial stream state", () => {
-      const state = createStreamState();
-
-      expect(state).toEqual({
-        textPartId: undefined,
-        textStarted: false,
-        reasoningPartId: undefined,
-        reasoningStarted: false,
-        toolStates: expect.any(Map),
-        usage: {
-          inputTokens: 0,
-          outputTokens: 0,
-          reasoningTokens: 0,
-          cachedInputTokens: 0,
-          cachedWriteTokens: 0,
-          totalCost: 0,
-        },
-        lastTextContent: "",
-        lastReasoningContent: "",
-        messageRoles: expect.any(Map),
-        permissionRequests: expect.any(Set),
-        questionRequests: expect.any(Set),
-        pendingApprovals: expect.any(Map),
-        structuredOutputCompleted: false,
-      });
-    });
+function runFixture(fixture: V2EventFixture): {
+  parts: LanguageModelV4StreamPart[];
+  state: V2StreamState;
+  forms: string[];
+} {
+  const forms: string[] = [];
+  const state = createV2StreamState({
+    sessionId: fixture.sessionId,
+    includeRawChunks: fixture.includeRawChunks ?? false,
+    onForm: (form: FormCreated["data"]["form"]) => forms.push(form.id),
+    logger: false,
   });
-
-  describe("isEventForSession", () => {
-    it("should return true when part sessionID matches", () => {
-      const event: EventMessagePartUpdated = {
-        type: "message.part.updated",
-        properties: {
-          part: {
-            id: "part-1",
-            sessionID: "session-123",
-            messageID: "msg-1",
-            type: "text",
-            text: "Hello",
-          },
-        },
-      };
-
-      expect(isEventForSession(event, "session-123")).toBe(true);
-    });
-
-    it("should return false when part sessionID does not match", () => {
-      const event: EventMessagePartUpdated = {
-        type: "message.part.updated",
-        properties: {
-          part: {
-            id: "part-1",
-            sessionID: "session-other",
-            messageID: "msg-1",
-            type: "text",
-            text: "Hello",
-          },
-        },
-      };
-
-      expect(isEventForSession(event, "session-123")).toBe(false);
-    });
-
-    it("should check message info sessionID", () => {
-      const event = {
-        type: "message.updated",
-        properties: {
-          info: {
-            id: "msg-1",
-            sessionID: "session-123",
-            role: "assistant",
-          },
-        },
-      };
-
-      expect(isEventForSession(event, "session-123")).toBe(true);
-    });
-
-    it("should check direct sessionID property", () => {
-      const event: EventSessionIdle = {
-        type: "session.idle",
-        properties: {
-          sessionID: "session-123",
-        },
-      };
-
-      expect(isEventForSession(event, "session-123")).toBe(true);
-    });
-
-    it("should return false for events without sessionID", () => {
-      const event = {
-        type: "unknown.event",
-        properties: {},
-      };
-
-      expect(isEventForSession(event, "session-123")).toBe(false);
-    });
-  });
-
-  describe("isSessionComplete", () => {
-    it("should return true for session.status with idle status", () => {
-      const event: EventSessionStatus = {
-        type: "session.status",
-        properties: {
-          sessionID: "session-123",
-          status: { type: "idle" },
-        },
-      };
-
-      expect(isSessionComplete(event, "session-123")).toBe(true);
-    });
-
-    it("should return false for session.status with busy status", () => {
-      const event: EventSessionStatus = {
-        type: "session.status",
-        properties: {
-          sessionID: "session-123",
-          status: { type: "busy" },
-        },
-      };
-
-      expect(isSessionComplete(event, "session-123")).toBe(false);
-    });
-
-    it("should return false for different session", () => {
-      const event: EventSessionStatus = {
-        type: "session.status",
-        properties: {
-          sessionID: "session-other",
-          status: { type: "idle" },
-        },
-      };
-
-      expect(isSessionComplete(event, "session-123")).toBe(false);
-    });
-
-    it("should return true for session.idle event", () => {
-      const event: EventSessionIdle = {
-        type: "session.idle",
-        properties: {
-          sessionID: "session-123",
-        },
-      };
-
-      expect(isSessionComplete(event, "session-123")).toBe(true);
-    });
-
-    it("should return false for other event types", () => {
-      const event: EventMessagePartUpdated = {
-        type: "message.part.updated",
-        properties: {
-          part: {
-            id: "part-1",
-            sessionID: "session-123",
-            messageID: "msg-1",
-            type: "text",
-            text: "Hello",
-          },
-        },
-      };
-
-      expect(isSessionComplete(event, "session-123")).toBe(false);
-    });
-  });
-
-  describe("data envelope tolerance", () => {
-    it("should match sessions from data-envelope part events", () => {
-      const event: EventMessagePartUpdated = {
-        type: "message.part.updated",
-        data: {
-          sessionID: "session-123",
-          part: {
-            id: "part-1",
-            sessionID: "session-123",
-            messageID: "msg-1",
-            type: "text",
-            text: "Hello",
-          } as TextPart,
-        },
-      };
-
-      expect(isEventForSession(event, "session-123")).toBe(true);
-      expect(isEventForSession(event, "session-other")).toBe(false);
-    });
-
-    it("should match sessions from data-envelope session.status events", () => {
-      const event = {
-        type: "session.status",
-        data: {
-          sessionID: "session-123",
-          status: { type: "idle" },
-        },
-      };
-
-      expect(
-        isSessionComplete(event as EventSessionStatus, "session-123"),
-      ).toBe(true);
-    });
-
-    it("should complete sessions from data-envelope session.idle events", () => {
-      const event: EventSessionIdle = {
-        type: "session.idle",
-        data: {
-          sessionID: "session-123",
-        },
-      };
-
-      expect(isSessionComplete(event, "session-123")).toBe(true);
-    });
-
-    it("should emit text parts from data-envelope message.part.updated events", () => {
-      const state = createStreamState();
-      const event: EventMessagePartUpdated = {
-        type: "message.part.updated",
-        data: {
-          sessionID: "session-123",
-          part: {
-            id: "part-1",
-            sessionID: "session-123",
-            messageID: "msg-1",
-            type: "text",
-            text: "Hello",
-          } as TextPart,
-          time: 1234,
-        },
-      };
-
-      const parts = convertEventToStreamParts(event, state);
-      expect(parts).toEqual([
-        { type: "text-start", id: "part-1" },
-        { type: "text-delta", id: "part-1", delta: "Hello" },
-      ]);
-    });
-
-    it("should emit text deltas from data-envelope message.part.delta events", () => {
-      const state = createStreamState();
-      state.reasoningPartId = undefined;
-      state.textPartId = undefined;
-      state.messageRoles.set("msg-1", "assistant");
-      const event: EventMessagePartDelta = {
-        type: "message.part.delta",
-        data: {
-          sessionID: "session-123",
-          messageID: "msg-1",
-          partID: "part-1",
-          field: "text",
-          delta: " world",
-        },
-      };
-
-      const parts = convertEventToStreamParts(event, state);
-      expect(parts).toContainEqual({
-        type: "text-delta",
-        id: "part-1",
-        delta: " world",
-      });
-    });
-
-    it("should track message roles from data-envelope message.updated events", () => {
-      const state = createStreamState();
-      const event: EventMessageUpdated = {
-        type: "message.updated",
-        data: {
-          sessionID: "session-123",
-          info: {
-            id: "msg-1",
-            sessionID: "session-123",
-            role: "assistant",
-          },
-        },
-      };
-
-      convertEventToStreamParts(event, state);
-
-      expect(state.messageRoles.get("msg-1")).toBe("assistant");
-    });
-
-    it("should emit approval requests from data-envelope permission.asked events", () => {
-      const state = createStreamState();
-      const event: EventPermissionAsked = {
-        type: "permission.asked",
-        data: {
-          id: "approval-1",
-          sessionID: "session-123",
-          permission: "bash",
-          patterns: ["npm test"],
-        },
-      };
-
-      const parts = convertEventToStreamParts(event, state);
-      expect(parts).toEqual([
-        {
-          type: "tool-approval-request",
-          approvalId: "approval-1",
-          toolCallId: "approval-1",
-          providerMetadata: {
-            opencode: {
-              sessionId: "session-123",
-              permission: "bash",
-              patterns: ["npm test"],
-            },
-          },
-        },
-      ]);
-    });
-  });
-
-  describe("convertEventToStreamParts", () => {
-    describe("text parts", () => {
-      it("should emit text-start and text-delta for new text", () => {
-        const state = createStreamState();
-        const event: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "part-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "text",
-              text: "Hello",
-            } as TextPart,
-            delta: "Hello",
-          },
-        };
-
-        const parts = convertEventToStreamParts(event, state);
-
-        expect(parts).toHaveLength(2);
-        expect(parts[0]).toEqual({ type: "text-start", id: "part-1" });
-        expect(parts[1]).toEqual({
-          type: "text-delta",
-          id: "part-1",
-          delta: "Hello",
-        });
-      });
-
-      it("should only emit text-delta for subsequent updates", () => {
-        const state = createStreamState();
-        state.textStarted = true;
-        state.textPartId = "part-1";
-        state.lastTextContent = "Hello";
-
-        const event: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "part-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "text",
-              text: "Hello World",
-            } as TextPart,
-            delta: " World",
-          },
-        };
-
-        const parts = convertEventToStreamParts(event, state);
-
-        expect(parts).toHaveLength(1);
-        expect(parts[0]).toEqual({
-          type: "text-delta",
-          id: "part-1",
-          delta: " World",
-        });
-      });
-
-      it("should skip synthetic text parts", () => {
-        const state = createStreamState();
-        const event: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "part-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "text",
-              text: "Context",
-              synthetic: true,
-            } as TextPart,
-          },
-        };
-
-        const parts = convertEventToStreamParts(event, state);
-
-        expect(parts).toHaveLength(0);
-      });
-
-      it("should skip ignored text parts", () => {
-        const state = createStreamState();
-        const event: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "part-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "text",
-              text: "Ignored",
-              ignored: true,
-            } as TextPart,
-          },
-        };
-
-        const parts = convertEventToStreamParts(event, state);
-
-        expect(parts).toHaveLength(0);
-      });
-
-      it("should calculate delta from full text when delta not provided", () => {
-        const state = createStreamState();
-        state.textStarted = true;
-        state.textPartId = "part-1";
-        state.lastTextContent = "Hello";
-
-        const event: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "part-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "text",
-              text: "Hello World",
-            } as TextPart,
-          },
-        };
-
-        const parts = convertEventToStreamParts(event, state);
-
-        expect(parts).toHaveLength(1);
-        expect(parts[0]).toEqual({
-          type: "text-delta",
-          id: "part-1",
-          delta: " World",
-        });
-      });
-    });
-
-    describe("reasoning parts", () => {
-      it("should emit reasoning-start and reasoning-delta", () => {
-        const state = createStreamState();
-        const event: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "part-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "reasoning",
-              text: "Thinking...",
-            } as ReasoningPart,
-            delta: "Thinking...",
-          },
-        };
-
-        const parts = convertEventToStreamParts(event, state);
-
-        expect(parts).toHaveLength(2);
-        expect(parts[0]).toEqual({ type: "reasoning-start", id: "part-1" });
-        expect(parts[1]).toEqual({
-          type: "reasoning-delta",
-          id: "part-1",
-          delta: "Thinking...",
-        });
-      });
-    });
-
-    describe("message.part.delta events", () => {
-      const makeDelta = (
-        partID: string,
-        field: string,
-        delta: string,
-      ): EventMessagePartDelta => ({
-        type: "message.part.delta",
-        properties: {
-          sessionID: "session-123",
-          messageID: "msg-1",
-          partID,
-          field,
-          delta,
-        },
-      });
-
-      it("should emit text-start and text-delta for a new text delta", () => {
-        const state = createStreamState();
-        const parts = convertEventToStreamParts(
-          makeDelta("part-1", "text", "Hello"),
-          state,
-        );
-
-        expect(parts).toHaveLength(2);
-        expect(parts[0]).toEqual({ type: "text-start", id: "part-1" });
-        expect(parts[1]).toEqual({
-          type: "text-delta",
-          id: "part-1",
-          delta: "Hello",
-        });
-        expect(state.textStarted).toBe(true);
-        expect(state.textPartId).toBe("part-1");
-        expect(state.lastTextContent).toBe("Hello");
-      });
-
-      it("should emit reasoning-start and reasoning-delta for field=reasoning", () => {
-        const state = createStreamState();
-        const parts = convertEventToStreamParts(
-          makeDelta("part-1", "reasoning", "Let me think"),
-          state,
-        );
-
-        expect(parts).toHaveLength(2);
-        expect(parts[0]).toEqual({ type: "reasoning-start", id: "part-1" });
-        expect(parts[1]).toEqual({
-          type: "reasoning-delta",
-          id: "part-1",
-          delta: "Let me think",
-        });
-        expect(state.reasoningStarted).toBe(true);
-        expect(state.reasoningPartId).toBe("part-1");
-        expect(state.lastReasoningContent).toBe("Let me think");
-      });
-
-      it("should treat field=text as reasoning when part ID matches reasoningPartId", () => {
-        const state = createStreamState();
-        // Simulate a prior message.part.updated that set reasoningPartId
-        state.reasoningStarted = true;
-        state.reasoningPartId = "reason-1";
-        state.lastReasoningContent = "prior";
-
-        const parts = convertEventToStreamParts(
-          makeDelta("reason-1", "text", " more reasoning"),
-          state,
-        );
-
-        expect(parts).toHaveLength(1);
-        expect(parts[0]).toEqual({
-          type: "reasoning-delta",
-          id: "reason-1",
-          delta: " more reasoning",
-        });
-        expect(state.lastReasoningContent).toBe("prior more reasoning");
-      });
-
-      it("should not emit duplicate text-start for same part ID", () => {
-        const state = createStreamState();
-
-        const parts1 = convertEventToStreamParts(
-          makeDelta("part-1", "text", "Hello"),
-          state,
-        );
-        expect(parts1).toHaveLength(2);
-        expect(parts1[0]).toEqual({ type: "text-start", id: "part-1" });
-
-        const parts2 = convertEventToStreamParts(
-          makeDelta("part-1", "text", " World"),
-          state,
-        );
-        expect(parts2).toHaveLength(1);
-        expect(parts2[0]).toEqual({
-          type: "text-delta",
-          id: "part-1",
-          delta: " World",
-        });
-        expect(state.lastTextContent).toBe("Hello World");
-      });
-
-      it("should emit text-end then text-start when text part ID changes", () => {
-        const state = createStreamState();
-
-        convertEventToStreamParts(makeDelta("part-1", "text", "First"), state);
-
-        const parts = convertEventToStreamParts(
-          makeDelta("part-2", "text", "Second"),
-          state,
-        );
-
-        expect(parts).toHaveLength(3);
-        expect(parts[0]).toEqual({ type: "text-end", id: "part-1" });
-        expect(parts[1]).toEqual({ type: "text-start", id: "part-2" });
-        expect(parts[2]).toEqual({
-          type: "text-delta",
-          id: "part-2",
-          delta: "Second",
-        });
-        expect(state.textPartId).toBe("part-2");
-        expect(state.lastTextContent).toBe("Second");
-      });
-
-      it("should return empty array for empty delta", () => {
-        const state = createStreamState();
-        const parts = convertEventToStreamParts(
-          makeDelta("part-1", "text", ""),
-          state,
-        );
-
-        expect(parts).toHaveLength(0);
-        expect(state.textStarted).toBe(false);
-      });
-
-      it("should filter out deltas from user messages", () => {
-        const state = createStreamState();
-        state.messageRoles.set("user-msg-1", "user");
-
-        const event: EventMessagePartDelta = {
-          type: "message.part.delta",
-          properties: {
-            sessionID: "session-123",
-            messageID: "user-msg-1",
-            partID: "part-1",
-            field: "text",
-            delta: "User prompt that should be filtered",
-          },
-        };
-
-        const parts = convertEventToStreamParts(event, state);
-
-        expect(parts).toHaveLength(0);
-        expect(state.textStarted).toBe(false);
-      });
-
-      it("should handle reasoning-end then reasoning-start when reasoning part ID changes", () => {
-        const state = createStreamState();
-
-        convertEventToStreamParts(
-          makeDelta("reason-1", "reasoning", "thinking A"),
-          state,
-        );
-
-        const parts = convertEventToStreamParts(
-          makeDelta("reason-2", "reasoning", "thinking B"),
-          state,
-        );
-
-        expect(parts).toHaveLength(3);
-        expect(parts[0]).toEqual({ type: "reasoning-end", id: "reason-1" });
-        expect(parts[1]).toEqual({ type: "reasoning-start", id: "reason-2" });
-        expect(parts[2]).toEqual({
-          type: "reasoning-delta",
-          id: "reason-2",
-          delta: "thinking B",
-        });
-        expect(state.reasoningPartId).toBe("reason-2");
-        expect(state.lastReasoningContent).toBe("thinking B");
-      });
-
-      it("should correctly disambiguate reasoning from text in a real event sequence", () => {
-        const state = createStreamState();
-
-        // 1. message.part.updated sets reasoningPartId via a reasoning part
-        const reasoningUpdated: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "reason-part",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "reasoning",
-              text: "",
-            } as ReasoningPart,
-            delta: "",
-          },
-        };
-        convertEventToStreamParts(reasoningUpdated, state);
-        expect(state.reasoningPartId).toBe("reason-part");
-
-        // 2. Delta arrives with field="text" for the reasoning part ID
-        const reasoningDelta = makeDelta("reason-part", "text", "deep thought");
-        const reasoningParts = convertEventToStreamParts(reasoningDelta, state);
-
-        // Should be reasoning-delta, not text-delta
-        const deltaTypes = reasoningParts.map((p) => p.type);
-        expect(deltaTypes).toContain("reasoning-delta");
-        expect(deltaTypes).not.toContain("text-delta");
-
-        // 3. Delta arrives with field="text" for a different (text) part ID
-        const textDelta = makeDelta("text-part", "text", "actual text");
-        const textParts = convertEventToStreamParts(textDelta, state);
-
-        const textDeltaTypes = textParts.map((p) => p.type);
-        expect(textDeltaTypes).toContain("text-start");
-        expect(textDeltaTypes).toContain("text-delta");
-        expect(textDeltaTypes).not.toContain("reasoning-delta");
-      });
-    });
-
-    describe("tool parts", () => {
-      it("should emit tool-input-start for pending tool", () => {
-        const state = createStreamState();
-        const event: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "part-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "tool",
-              callID: "call-1",
-              tool: "Bash",
-              state: {
-                status: "pending",
-                input: { command: "ls" },
-                raw: '{"command":"ls"}',
-              },
-            } as ToolPart,
-          },
-        };
-
-        const parts = convertEventToStreamParts(event, state);
-
-        expect(parts).toHaveLength(1);
-        expect(parts[0]).toMatchObject({
-          type: "tool-input-start",
-          id: "call-1",
-          toolName: "Bash",
-          providerExecuted: true,
-        });
-      });
-
-      it("should emit tool-call and tool-result for completed tool", () => {
-        const state = createStreamState();
-        const event: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "part-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "tool",
-              callID: "call-1",
-              tool: "Bash",
-              state: {
-                status: "completed",
-                input: { command: "ls" },
-                output: "file1.txt\nfile2.txt",
-                title: "List files",
-                time: { start: 1000, end: 2000 },
-              },
-            } as ToolPart,
-          },
-        };
-
-        const parts = convertEventToStreamParts(event, state);
-
-        // Should emit: tool-input-start, tool-input-end, tool-call, tool-result
-        expect(parts.some((p) => p.type === "tool-input-start")).toBe(true);
-        expect(parts.some((p) => p.type === "tool-input-end")).toBe(true);
-        expect(parts.some((p) => p.type === "tool-call")).toBe(true);
-        expect(parts.some((p) => p.type === "tool-result")).toBe(true);
-
-        const toolCall = parts.find((p) => p.type === "tool-call");
-        expect(toolCall).toMatchObject({
-          toolCallId: "call-1",
-          toolName: "Bash",
-          providerExecuted: true,
-        });
-
-        const toolResult = parts.find((p) => p.type === "tool-result");
-        expect(toolResult).toMatchObject({
-          toolCallId: "call-1",
-          toolName: "Bash",
-          result: "file1.txt\nfile2.txt",
-          isError: false,
-        });
-      });
-
-      it("should emit error result for failed tool", () => {
-        const state = createStreamState();
-        const logger: Logger = { warn: vi.fn(), error: vi.fn() };
-
-        const event: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "part-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "tool",
-              callID: "call-1",
-              tool: "Bash",
-              state: {
-                status: "error",
-                input: { command: "invalid" },
-                error: "Command not found",
-                time: { start: 1000, end: 2000 },
-              },
-            } as ToolPart,
-          },
-        };
-
-        const parts = convertEventToStreamParts(event, state, logger);
-
-        const toolResult = parts.find((p) => p.type === "tool-result");
-        expect(toolResult).toMatchObject({
-          result: "Command not found",
-          isError: true,
-        });
-
-        expect(logger.warn).toHaveBeenCalled();
-      });
-
-      it("should not duplicate emissions for same tool", () => {
-        const state = createStreamState();
-
-        // First event - pending
-        const event1: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "part-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "tool",
-              callID: "call-1",
-              tool: "Bash",
-              state: {
-                status: "pending",
-                input: { command: "ls" },
-                raw: "{}",
-              },
-            } as ToolPart,
-          },
-        };
-
-        convertEventToStreamParts(event1, state);
-
-        // Second event - completed
-        const event2: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "part-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "tool",
-              callID: "call-1",
-              tool: "Bash",
-              state: {
-                status: "completed",
-                input: { command: "ls" },
-                output: "result",
-                title: "List",
-                time: { start: 1000, end: 2000 },
-              },
-            } as ToolPart,
-          },
-        };
-
-        const parts2 = convertEventToStreamParts(event2, state);
-
-        // Should not emit tool-input-start again
-        expect(
-          parts2.filter((p) => p.type === "tool-input-start"),
-        ).toHaveLength(0);
-      });
-
-      it("should emit running input delta only when input changes", () => {
-        const state = createStreamState();
-
-        const runningEvent = (input: Record<string, unknown>) =>
-          ({
-            type: "message.part.updated",
-            properties: {
-              part: {
-                id: "part-1",
-                sessionID: "session-123",
-                messageID: "msg-1",
-                type: "tool",
-                callID: "call-1",
-                tool: "Bash",
-                state: {
-                  status: "running",
-                  input,
-                  time: { start: 1000 },
-                },
-              } as ToolPart,
-            },
-          }) satisfies EventMessagePartUpdated;
-
-        const parts1 = convertEventToStreamParts(
-          runningEvent({ command: "ls" }),
-          state,
-        );
-        const deltas1 = parts1.filter((p) => p.type === "tool-input-delta");
-        expect(deltas1).toHaveLength(1);
-        expect((deltas1[0] as any).delta).toBe(
-          JSON.stringify({ command: "ls" }),
-        );
-
-        const parts2 = convertEventToStreamParts(
-          runningEvent({ command: "ls" }),
-          state,
-        );
-        const deltas2 = parts2.filter((p) => p.type === "tool-input-delta");
-        expect(deltas2).toHaveLength(0);
-
-        const parts3 = convertEventToStreamParts(
-          runningEvent({ command: "ls -la" }),
-          state,
-        );
-        const deltas3 = parts3.filter((p) => p.type === "tool-input-delta");
-        expect(deltas3).toHaveLength(1);
-      });
-
-      it("should dedupe attachment file parts across repeated completed events", () => {
-        const state = createStreamState();
-
-        const makeCompletedEvent = (
-          attachmentIds: string[],
-        ): EventMessagePartUpdated => ({
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "part-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "tool",
-              callID: "call-1",
-              tool: "Read",
-              state: {
-                status: "completed",
-                input: { file: "README.md" },
-                output: "ok",
-                title: "Read file",
-                time: { start: 1000, end: 2000 },
-                attachments: attachmentIds.map((id) => ({
-                  id,
-                  sessionID: "session-123",
-                  messageID: "msg-1",
-                  type: "file" as const,
-                  mime: "text/plain",
-                  url: "data:text/plain;base64,SGVsbG8=",
-                  filename: `${id}.txt`,
-                })),
-              },
-            } as ToolPart,
-          },
-        });
-
-        const parts1 = convertEventToStreamParts(
-          makeCompletedEvent(["file-1"]),
-          state,
-        );
-        const files1 = parts1.filter((p) => p.type === "file");
-        expect(files1).toHaveLength(1);
-
-        const parts2 = convertEventToStreamParts(
-          makeCompletedEvent(["file-1"]),
-          state,
-        );
-        const files2 = parts2.filter((p) => p.type === "file");
-        expect(files2).toHaveLength(0);
-
-        const parts3 = convertEventToStreamParts(
-          makeCompletedEvent(["file-1", "file-2"]),
-          state,
-        );
-        const files3 = parts3.filter((p) => p.type === "file");
-        expect(files3).toHaveLength(1);
-      });
-
-      it("should safely handle non-serializable tool input", () => {
-        const state = createStreamState();
-        const logger: Logger = {
-          warn: vi.fn(),
-          error: vi.fn(),
-          debug: vi.fn(),
-        };
-
-        const circular: Record<string, unknown> = {};
-        circular.self = circular;
-
-        const event: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "part-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "tool",
-              callID: "call-1",
-              tool: "Bash",
-              state: {
-                status: "running",
-                input: circular,
-                time: { start: 1000 },
-              },
-            } as ToolPart,
-          },
-        };
-
-        const parts = convertEventToStreamParts(event, state, logger);
-        const delta = parts.find((p) => p.type === "tool-input-delta") as
-          | { delta?: string }
-          | undefined;
-        expect(delta?.delta).toBe("{}");
-        expect(logger.warn).toHaveBeenCalled();
-      });
-    });
-
-    describe("StructuredOutput tool parts", () => {
-      it("should skip empty input during pending StructuredOutput", () => {
-        const state = createStreamState();
-        const event: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "part-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "tool",
-              callID: "call-so-1",
-              tool: "StructuredOutput",
-              state: {
-                status: "pending",
-                input: {},
-                raw: "{}",
-              },
-            } as ToolPart,
-          },
-        };
-
-        const parts = convertEventToStreamParts(event, state);
-
-        expect(parts).toHaveLength(0);
-        expect(state.textStarted).toBe(false);
-      });
-
-      it("should emit text-start and text-delta for pending StructuredOutput with data", () => {
-        const state = createStreamState();
-        const event: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "part-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "tool",
-              callID: "call-so-1",
-              tool: "StructuredOutput",
-              state: {
-                status: "pending",
-                input: { output: "partial", outputType: "markdown" },
-                raw: '{"output":"partial","outputType":"markdown"}',
-              },
-            } as ToolPart,
-          },
-        };
-
-        const parts = convertEventToStreamParts(event, state);
-
-        expect(parts[0]).toMatchObject({
-          type: "text-start",
-          id: "structured-output-call-so-1",
-        });
-        expect(parts[1]).toMatchObject({
-          type: "text-delta",
-          id: "structured-output-call-so-1",
-          delta: JSON.stringify({ output: "partial", outputType: "markdown" }),
-        });
-        expect(parts.some((p) => p.type === "tool-input-start")).toBe(false);
-      });
-
-      it("should emit incremental text-delta for running StructuredOutput", () => {
-        const state = createStreamState();
-
-        const makeEvent = (
-          input: Record<string, unknown>,
-        ): EventMessagePartUpdated => ({
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "part-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "tool",
-              callID: "call-so-1",
-              tool: "StructuredOutput",
-              state: {
-                status: "running",
-                input,
-                time: { start: 1000 },
-              },
-            } as ToolPart,
-          },
-        });
-
-        // First running event
-        const parts1 = convertEventToStreamParts(
-          makeEvent({ output: "hel" }),
-          state,
-        );
-        const deltas1 = parts1.filter((p) => p.type === "text-delta");
-        expect(deltas1).toHaveLength(1);
-        expect((deltas1[0] as any).delta).toBe(
-          JSON.stringify({ output: "hel" }),
-        );
-
-        // Same input — no delta
-        const parts2 = convertEventToStreamParts(
-          makeEvent({ output: "hel" }),
-          state,
-        );
-        const deltas2 = parts2.filter((p) => p.type === "text-delta");
-        expect(deltas2).toHaveLength(0);
-
-        // Extended input — only the diff
-        const parts3 = convertEventToStreamParts(
-          makeEvent({ output: "hello world" }),
-          state,
-        );
-        const deltas3 = parts3.filter((p) => p.type === "text-delta");
-        expect(deltas3).toHaveLength(1);
-      });
-
-      it("should emit text-end on completed StructuredOutput", () => {
-        const state = createStreamState();
-        const structuredInput = { output: "# Result", outputType: "markdown" };
-
-        const event: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "part-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "tool",
-              callID: "call-so-1",
-              tool: "StructuredOutput",
-              state: {
-                status: "completed",
-                input: structuredInput,
-                output: "Structured output captured successfully.",
-                title: "Structured Output",
-                time: { start: 1000, end: 2000 },
-              },
-            } as ToolPart,
-          },
-        };
-
-        const parts = convertEventToStreamParts(event, state);
-
-        expect(parts.some((p) => p.type === "text-start")).toBe(true);
-        expect(parts.some((p) => p.type === "text-delta")).toBe(true);
-        expect(parts.some((p) => p.type === "text-end")).toBe(true);
-
-        const delta = parts.find((p) => p.type === "text-delta") as
-          | { delta?: string }
-          | undefined;
-        expect(JSON.parse(delta!.delta!)).toEqual(structuredInput);
-
-        // No tool-call or tool-result parts
-        expect(parts.some((p) => p.type === "tool-call")).toBe(false);
-        expect(parts.some((p) => p.type === "tool-result")).toBe(false);
-        expect(parts.some((p) => p.type === "tool-input-start")).toBe(false);
-      });
-
-      it("should stream text across pending → running → completed lifecycle", () => {
-        const state = createStreamState();
-        const callID = "call-so-lifecycle";
-
-        const makeEvent = (
-          status: string,
-          input: Record<string, unknown>,
-        ): EventMessagePartUpdated => ({
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "part-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "tool",
-              callID,
-              tool: "StructuredOutput",
-              state: {
-                status,
-                input,
-                ...(status === "pending" ? { raw: JSON.stringify(input) } : {}),
-                ...(status === "running" ? { time: { start: 1000 } } : {}),
-                ...(status === "completed"
-                  ? {
-                      output: "Structured output captured successfully.",
-                      title: "Structured Output",
-                      time: { start: 1000, end: 2000 },
-                    }
-                  : {}),
-              },
-            } as ToolPart,
-          },
-        });
-
-        // pending with empty input (real OpenCode behavior)
-        const parts0 = convertEventToStreamParts(
-          makeEvent("pending", {}),
-          state,
-        );
-        expect(parts0).toHaveLength(0);
-
-        // running with real input — text starts here
-        const parts1 = convertEventToStreamParts(
-          makeEvent("running", { output: "hello" }),
-          state,
-        );
-        expect(parts1[0]).toMatchObject({ type: "text-start" });
-        const deltas1 = parts1.filter((p) => p.type === "text-delta");
-        expect(deltas1).toHaveLength(1);
-        expect(JSON.parse((deltas1[0] as any).delta)).toEqual({
-          output: "hello",
-        });
-
-        // completed with final input
-        const parts2 = convertEventToStreamParts(
-          makeEvent("completed", {
-            output: "hello world",
-            outputType: "markdown",
-          }),
-          state,
-        );
-        expect(parts2.some((p) => p.type === "text-delta")).toBe(true);
-        expect(parts2.some((p) => p.type === "text-end")).toBe(true);
-
-        // State should be closed
-        expect(state.textStarted).toBe(false);
-        expect(state.textPartId).toBeUndefined();
-      });
-
-      it("should emit {} for completed StructuredOutput with empty object output", () => {
-        const state = createStreamState();
-        const event: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "part-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "tool",
-              callID: "call-so-1",
-              tool: "StructuredOutput",
-              state: {
-                status: "completed",
-                input: {},
-                output: "Structured output captured successfully.",
-                title: "Structured Output",
-                time: { start: 1000, end: 2000 },
-              },
-            } as ToolPart,
-          },
-        };
-
-        const parts = convertEventToStreamParts(event, state);
-
-        const delta = parts.find((p) => p.type === "text-delta") as
-          | { delta?: string }
-          | undefined;
-        expect(delta).toBeDefined();
-        expect(delta!.delta).toBe("{}");
-      });
-
-      it("should close text part on StructuredOutput error", () => {
-        const state = createStreamState();
-
-        // First, get a text-start via a running event with real input
-        const runningEvent: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "part-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "tool",
-              callID: "call-so-1",
-              tool: "StructuredOutput",
-              state: {
-                status: "running",
-                input: { output: "partial" },
-                time: { start: 1000 },
-              },
-            } as ToolPart,
-          },
-        };
-        convertEventToStreamParts(runningEvent, state);
-        expect(state.textStarted).toBe(true);
-
-        // Now error
-        const errorEvent: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "part-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "tool",
-              callID: "call-so-1",
-              tool: "StructuredOutput",
-              state: {
-                status: "error",
-                input: { output: "partial" },
-                error: "Model did not produce structured output",
-                time: { start: 1000, end: 2000 },
-              },
-            } as ToolPart,
-          },
-        };
-
-        const parts = convertEventToStreamParts(errorEvent, state);
-
-        expect(parts).toEqual([
-          { type: "text-end", id: "structured-output-call-so-1" },
-        ]);
-        expect(state.textStarted).toBe(false);
-        expect(state.textPartId).toBeUndefined();
-      });
-
-      it("should close prior text part when StructuredOutput starts", () => {
-        const state = createStreamState();
-        // Simulate an existing text part being open
-        state.textStarted = true;
-        state.textPartId = "existing-text-1";
-        state.lastTextContent = "some text";
-
-        const event: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "part-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "tool",
-              callID: "call-so-1",
-              tool: "StructuredOutput",
-              state: {
-                status: "completed",
-                input: { result: "done" },
-                output: "ok",
-                title: "Structured Output",
-                time: { start: 1000, end: 2000 },
-              },
-            } as ToolPart,
-          },
-        };
-
-        const parts = convertEventToStreamParts(event, state);
-
-        // Should close the previous text part first
-        expect(parts[0]).toMatchObject({
-          type: "text-end",
-          id: "existing-text-1",
-        });
-        expect(parts[1]).toMatchObject({
-          type: "text-start",
-          id: "structured-output-call-so-1",
-        });
-      });
-    });
-
-    describe("step-finish parts", () => {
-      it("should accumulate usage from step-finish", () => {
-        const state = createStreamState();
-        const event: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "part-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "step-finish",
-              reason: "end_turn",
-              cost: 0.01,
-              tokens: {
-                input: 100,
-                output: 50,
-                reasoning: 25,
-                cache: { read: 10, write: 5 },
-              },
-            } as StepFinishPart,
-          },
-        };
-
-        convertEventToStreamParts(event, state);
-
-        expect(state.usage).toEqual({
-          inputTokens: 100,
-          outputTokens: 50,
-          reasoningTokens: 25,
-          cachedInputTokens: 10,
-          cachedWriteTokens: 5,
-          totalCost: 0.01,
-        });
-      });
-
-      it("should accumulate multiple step-finish parts", () => {
-        const state = createStreamState();
-
-        const event1: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "part-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "step-finish",
-              reason: "tool_use",
-              cost: 0.01,
-              tokens: {
-                input: 100,
-                output: 50,
-                reasoning: 0,
-                cache: { read: 0, write: 0 },
-              },
-            } as StepFinishPart,
-          },
-        };
-
-        const event2: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "part-2",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "step-finish",
-              reason: "end_turn",
-              cost: 0.02,
-              tokens: {
-                input: 200,
-                output: 100,
-                reasoning: 50,
-                cache: { read: 20, write: 10 },
-              },
-            } as StepFinishPart,
-          },
-        };
-
-        convertEventToStreamParts(event1, state);
-        convertEventToStreamParts(event2, state);
-
-        expect(state.usage).toEqual({
-          inputTokens: 300,
-          outputTokens: 150,
-          reasoningTokens: 50,
-          cachedInputTokens: 20,
-          cachedWriteTokens: 10,
-          totalCost: 0.03,
-        });
-      });
-    });
-
-    describe("unknown events", () => {
-      it("should return empty array for message.updated", () => {
-        const state = createStreamState();
-        const event = {
-          type: "message.updated",
-          properties: {
-            info: {
-              id: "msg-1",
-              sessionID: "session-123",
-              role: "assistant",
-            },
-          },
-        };
-
-        const parts = convertEventToStreamParts(event as any, state);
-
-        expect(parts).toHaveLength(0);
-      });
-
-      it("should log unknown event types when debug enabled", () => {
-        const state = createStreamState();
-        const logger: Logger = {
-          warn: vi.fn(),
-          error: vi.fn(),
-          debug: vi.fn(),
-        };
-
-        const event = {
-          type: "custom.event",
-          properties: {},
-        };
-
-        convertEventToStreamParts(event as any, state, logger);
-
-        expect(logger.debug).toHaveBeenCalledWith(
-          expect.stringContaining("custom.event"),
-        );
-      });
-    });
-
-    describe("permission events", () => {
-      const permissionAsked = (
-        overrides: Partial<EventPermissionAsked["properties"]> = {},
-      ): EventPermissionAsked => ({
-        type: "permission.asked",
-        properties: {
-          id: "approval-1",
-          sessionID: "session-123",
-          permission: "bash",
-          patterns: ["npm test"],
-          tool: { messageID: "msg-1", callID: "call-1" },
-          ...overrides,
-        },
-      });
-
-      const toolEvent = (
-        status: ToolState["status"],
-        extra: Record<string, unknown> = {},
-      ): EventMessagePartUpdated => ({
-        type: "message.part.updated",
-        properties: {
-          part: {
-            id: "part-1",
-            sessionID: "session-123",
-            messageID: "msg-1",
-            type: "tool",
-            callID: "call-1",
-            tool: "bash",
-            state: {
-              status,
-              input: { command: "ls" },
-              ...extra,
-            },
-          } as ToolPart,
-        },
-      });
-
-      const expectedApproval = {
-        type: "tool-approval-request",
-        approvalId: "approval-1",
-        toolCallId: "call-1",
-        providerMetadata: {
-          opencode: {
-            sessionId: "session-123",
-            permission: "bash",
-            patterns: ["npm test"],
-          },
-        },
-      };
-
-      // Case A (the bug, issue #22): permission.asked arrives before the tool
-      // call has been registered. It must be buffered, not emitted early, and
-      // flushed only after the tool call reaches tool-input-available.
-      it("buffers permission.asked until the tool call is registered, then flushes after tool-call", () => {
-        const state = createStreamState();
-
-        // Tool starts (pending) -> tool-input-start only.
-        const startParts = convertEventToStreamParts(
-          toolEvent("pending"),
-          state,
-        );
-        expect(startParts.map((p) => p.type)).toEqual(["tool-input-start"]);
-
-        // permission.asked arrives next -> buffered, nothing emitted, no error.
-        const askedParts = convertEventToStreamParts(permissionAsked(), state);
-        expect(askedParts).toEqual([]);
-        expect(state.pendingApprovals.has("call-1")).toBe(true);
-
-        // Input becomes available (running) -> tool-call is registered and the
-        // approval is flushed immediately after it.
-        const runningParts = convertEventToStreamParts(
-          toolEvent("running", { time: { start: 1000 } }),
-          state,
-        );
-        const types = runningParts.map((p) => p.type);
-        const callIdx = types.indexOf("tool-call");
-        const approvalIdx = types.indexOf("tool-approval-request");
-        expect(callIdx).toBeGreaterThanOrEqual(0);
-        expect(approvalIdx).toBeGreaterThan(callIdx);
-        expect(runningParts[approvalIdx]).toEqual(expectedApproval);
-        expect(state.pendingApprovals.has("call-1")).toBe(false);
-      });
-
-      it("never emits the approval before the tool call is registered", () => {
-        const state = createStreamState();
-        convertEventToStreamParts(toolEvent("pending"), state);
-        const askedParts = convertEventToStreamParts(permissionAsked(), state);
-        expect(askedParts.some((p) => p.type === "tool-approval-request")).toBe(
-          false,
-        );
-        expect(askedParts.some((p) => p.type === "error")).toBe(false);
-      });
-
-      // Case B (no regression): permission.asked arrives after the tool call is
-      // already registered -> emitted immediately.
-      it("emits the approval immediately when the tool call is already registered", () => {
-        const state = createStreamState();
-        convertEventToStreamParts(
-          toolEvent("completed", {
-            output: "file1\nfile2",
-            title: "List files",
-            time: { start: 1000, end: 2000 },
-          }),
-          state,
-        );
-        const tool = state.toolStates.get("call-1");
-        expect(tool?.callEmitted).toBe(true);
-
-        const askedParts = convertEventToStreamParts(permissionAsked(), state);
-        expect(askedParts).toEqual([expectedApproval]);
-      });
-
-      // Case C (criterion 4): a tool that errors with an approval still buffered
-      // yields a terminal denied result and leaves no dangling approval.
-      it("drops a buffered approval and emits a terminal error result on tool error", () => {
-        const state = createStreamState();
-        const logger: Logger = { warn: vi.fn(), error: vi.fn() };
-
-        convertEventToStreamParts(toolEvent("pending"), state);
-        convertEventToStreamParts(permissionAsked(), state);
-        expect(state.pendingApprovals.has("call-1")).toBe(true);
-
-        const errorParts = convertEventToStreamParts(
-          toolEvent("error", {
-            error: "Permission denied",
-            time: { start: 1000, end: 2000 },
-          }),
-          state,
-          logger,
-        );
-
-        expect(errorParts.some((p) => p.type === "tool-approval-request")).toBe(
-          false,
-        );
-        const result = errorParts.find((p) => p.type === "tool-result");
-        expect(result).toMatchObject({
-          toolCallId: "call-1",
-          result: "Permission denied",
-          isError: true,
-        });
-        expect(state.pendingApprovals.has("call-1")).toBe(false);
-      });
-
-      // Once the tool call is registered for approval, its input envelope is
-      // closed: a later `running` event must not emit a stale tool-input-delta
-      // (which would strand the UI tool part in `input-streaming`).
-      it("does not emit a tool-input-delta after the tool call is registered early", () => {
-        const state = createStreamState();
-        const logger: Logger = { warn: vi.fn(), error: vi.fn() };
-
-        // running input A -> input-start + delta.
-        convertEventToStreamParts(
-          toolEvent("running", {
-            input: { command: "ls" },
-            time: { start: 1000 },
-          }),
-          state,
-          logger,
-        );
-
-        // permission.asked closes the envelope: input-end + tool-call + approval.
-        const askedParts = convertEventToStreamParts(
-          permissionAsked(),
-          state,
-          logger,
-        );
-        expect(askedParts.map((p) => p.type)).toEqual([
-          "tool-input-end",
-          "tool-call",
-          "tool-approval-request",
-        ]);
-
-        // running input B (changed) -> no late delta; the change is warned, not applied.
-        const run2 = convertEventToStreamParts(
-          toolEvent("running", {
-            input: { command: "ls -la" },
-            time: { start: 1000 },
-          }),
-          state,
-          logger,
-        );
-        expect(run2.some((p) => p.type === "tool-input-delta")).toBe(false);
-        expect(run2).toEqual([]);
-        expect(logger.warn).toHaveBeenCalledWith(
-          expect.stringContaining("after the tool call"),
-        );
-        // The exposed input stays bound to what the approval was requested for.
-        expect(state.toolStates.get("call-1")?.lastInput).toBe(
-          '{"command":"ls"}',
-        );
-      });
-
-      it("ignores a repeated running event with unchanged input after registration", () => {
-        const state = createStreamState();
-        const logger: Logger = { warn: vi.fn(), error: vi.fn() };
-
-        convertEventToStreamParts(
-          toolEvent("running", { time: { start: 1000 } }),
-          state,
-          logger,
-        );
-        convertEventToStreamParts(permissionAsked(), state, logger);
-
-        // Same input again -> nothing emitted, no warning.
-        const run2 = convertEventToStreamParts(
-          toolEvent("running", { time: { start: 1000 } }),
-          state,
-          logger,
-        );
-        expect(run2).toEqual([]);
-        expect(logger.warn).not.toHaveBeenCalled();
-      });
-
-      // Fallback: permission.asked with no tool.callID can't be correlated, so
-      // it is emitted immediately (legacy behavior).
-      it("emits immediately when permission.asked has no tool callID", () => {
-        const state = createStreamState();
-        const parts = convertEventToStreamParts(
-          permissionAsked({ tool: undefined }),
-          state,
-        );
-        expect(parts).toEqual([
-          {
-            type: "tool-approval-request",
-            approvalId: "approval-1",
-            toolCallId: "approval-1",
-            providerMetadata: {
-              opencode: {
-                sessionId: "session-123",
-                permission: "bash",
-                patterns: ["npm test"],
-              },
-            },
-          },
-        ]);
-      });
-
-      it("emits a buffered approval only once (dedupe)", () => {
-        const state = createStreamState();
-        convertEventToStreamParts(toolEvent("pending"), state);
-        convertEventToStreamParts(permissionAsked(), state);
-        // Duplicate permission.asked while still buffered.
-        convertEventToStreamParts(permissionAsked(), state);
-
-        const runningParts = convertEventToStreamParts(
-          toolEvent("running", { time: { start: 1000 } }),
-          state,
-        );
-        const approvals = runningParts.filter(
-          (p) => p.type === "tool-approval-request",
-        );
-        expect(approvals).toHaveLength(1);
-
-        // A late duplicate after registration must not re-emit.
-        const lateParts = convertEventToStreamParts(permissionAsked(), state);
-        expect(lateParts.some((p) => p.type === "tool-approval-request")).toBe(
-          false,
-        );
-      });
-    });
-
-    describe("question events", () => {
-      it("should emit an error for question.asked (once per question id)", () => {
-        const state = createStreamState();
-        const logger: Logger = {
-          warn: vi.fn(),
-          error: vi.fn(),
-          debug: vi.fn(),
-        };
-
-        const event: EventQuestionAsked = {
-          type: "question.asked",
-          properties: {
-            id: "question-1",
-            sessionID: "session-123",
-            questions: [
-              {
-                header: "Deploy",
-                question: "Pick deployment strategy",
-                options: [
-                  { label: "Blue/Green", description: "Safer rollout" },
-                  { label: "In-place", description: "Faster" },
-                ],
-              },
-            ],
-          },
-        };
-
-        const parts1 = convertEventToStreamParts(event, state, logger);
-        expect(parts1).toHaveLength(1);
-        expect(parts1[0]).toMatchObject({ type: "error" });
-        expect(logger.warn).toHaveBeenCalled();
-
-        const parts2 = convertEventToStreamParts(event, state, logger);
-        expect(parts2).toHaveLength(0);
-      });
-
-      it('should emit the legacy error in "wait" question handling mode', () => {
-        const state = createStreamState("wait");
-
-        const event: EventQuestionAsked = {
-          type: "question.asked",
-          properties: {
-            id: "question-1",
-            sessionID: "session-123",
-            questions: [
-              {
-                header: "Deploy",
-                question: "Pick deployment strategy",
-                options: [{ label: "Blue/Green", description: "Safer" }],
-              },
-            ],
-          },
-        };
-
-        const parts = convertEventToStreamParts(event, state);
-        expect(parts).toHaveLength(1);
-        expect(parts[0]).toMatchObject({ type: "error" });
-        expect(String((parts[0] as { error: unknown }).error)).toContain(
-          "question-1",
-        );
-      });
-
-      it('should emit nothing in "external" question handling mode', () => {
-        const state = createStreamState("external");
-        const logger: Logger = {
-          warn: vi.fn(),
-          error: vi.fn(),
-          debug: vi.fn(),
-        };
-
-        const event: EventQuestionAsked = {
-          type: "question.asked",
-          properties: {
-            id: "question-1",
-            sessionID: "session-123",
-            questions: [
-              {
-                header: "Deploy",
-                question: "Pick deployment strategy",
-                options: [{ label: "Blue/Green", description: "Safer" }],
-              },
-            ],
-          },
-        };
-
-        // The language model layer replies out-of-band; the converter must
-        // stay silent and leave dedupe to the caller.
-        const parts = convertEventToStreamParts(event, state, logger);
-        expect(parts).toHaveLength(0);
-        expect(logger.warn).not.toHaveBeenCalled();
-        expect(state.questionRequests.size).toBe(0);
-      });
-
-      it("should read question payloads from the data envelope", () => {
-        const state = createStreamState();
-
-        const event: EventQuestionAsked = {
-          type: "question.asked",
-          data: {
-            id: "question-1",
-            sessionID: "session-123",
-            questions: [
-              {
-                header: "Deploy",
-                question: "Pick deployment strategy",
-                options: [{ label: "Blue/Green", description: "Safer" }],
-              },
-            ],
-          },
-        };
-
-        const parts = convertEventToStreamParts(event, state);
-        expect(parts).toHaveLength(1);
-        expect(parts[0]).toMatchObject({ type: "error" });
-        expect(String((parts[0] as { error: unknown }).error)).toContain(
-          "question-1",
-        );
-        expect(state.questionRequests.has("question-1")).toBe(true);
-      });
-    });
-
-    describe("file parts", () => {
-      it("should emit file parts for data URLs", () => {
-        const state = createStreamState();
-        const event: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "file-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "file",
-              mime: "text/plain",
-              url: "data:text/plain;base64,SGVsbG8=",
-            } as FilePart,
-          },
-        };
-
-        const parts = convertEventToStreamParts(event, state);
-        expect(parts).toEqual([
-          {
-            type: "file",
-            mediaType: "text/plain",
-            data: { type: "data", data: "SGVsbG8=" },
-          },
-        ]);
-      });
-
-      it("should ignore malformed non-base64 data URLs without throwing", () => {
-        const state = createStreamState();
-        const event: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "file-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "file",
-              mime: "text/plain",
-              url: "data:text/plain,%ZZ",
-            } as FilePart,
-          },
-        };
-
-        expect(() => convertEventToStreamParts(event, state)).not.toThrow();
-        expect(convertEventToStreamParts(event, state)).toEqual([]);
-      });
-
-      it("should handle data URLs with parameters before base64", () => {
-        const state = createStreamState();
-        const event: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "file-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "file",
-              mime: "text/plain",
-              url: "data:text/plain;charset=utf-8;base64,SGVsbG8=",
-            } as FilePart,
-          },
-        };
-
-        const parts = convertEventToStreamParts(event, state);
-        expect(parts).toEqual([
-          {
-            type: "file",
-            mediaType: "text/plain",
-            data: { type: "data", data: "SGVsbG8=" },
-          },
-        ]);
-      });
-
-      it("should not emit duplicate document sources for local files with source metadata", () => {
-        const state = createStreamState();
-        const event: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: "file-1",
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: "file",
-              mime: "text/plain",
-              filename: "README.md",
-              url: "/workspace/README.md",
-              source: {
-                type: "file",
-                path: "/workspace/README.md",
-              },
-            } as FilePart,
-          },
-        };
-
-        const parts = convertEventToStreamParts(event, state);
-        const documentSources = parts.filter(
-          (p) => p.type === "source" && p.sourceType === "document",
-        );
-        expect(documentSources).toHaveLength(1);
-      });
-    });
-  });
-
-  describe("createFinishParts", () => {
-    it("should close text if open", () => {
-      const state = createStreamState();
-      state.textStarted = true;
-      state.textPartId = "text-1";
-
-      const parts = createFinishParts(
-        state,
-        { unified: "stop", raw: undefined },
-        "session-123",
-      );
-
-      expect(parts.some((p) => p.type === "text-end")).toBe(true);
-    });
-
-    it("should close reasoning if open", () => {
-      const state = createStreamState();
-      state.reasoningStarted = true;
-      state.reasoningPartId = "reason-1";
-
-      const parts = createFinishParts(
-        state,
-        { unified: "stop", raw: undefined },
-        "session-123",
-      );
-
-      expect(parts.some((p) => p.type === "reasoning-end")).toBe(true);
-    });
-
-    it("should emit finish with usage and metadata", () => {
-      const state = createStreamState();
-      state.usage = {
-        inputTokens: 100,
-        outputTokens: 50,
-        reasoningTokens: 25,
-        cachedInputTokens: 10,
-        cachedWriteTokens: 5,
-        totalCost: 0.01,
-      };
-
-      const parts = createFinishParts(
-        state,
-        { unified: "stop", raw: undefined },
-        "session-123",
-      );
-
-      const finishPart = parts.find((p) => p.type === "finish");
-      expect(finishPart).toMatchObject({
-        type: "finish",
-        finishReason: { unified: "stop", raw: undefined },
-        usage: {
-          inputTokens: {
-            total: 115,
-            noCache: 100,
-            cacheRead: 10,
-            cacheWrite: 5,
-          },
-          outputTokens: {
-            total: 50,
-            reasoning: 25,
-          },
-        },
-        providerMetadata: {
-          opencode: {
-            sessionId: "session-123",
-            cost: 0.01,
-          },
-        },
-      });
-    });
-
-    it("should handle zero usage values", () => {
-      const state = createStreamState();
-
-      const parts = createFinishParts(
-        state,
-        { unified: "stop", raw: undefined },
-        "session-123",
-      );
-
-      const finishPart = parts.find((p) => p.type === "finish");
-      expect(finishPart).toMatchObject({
-        type: "finish",
-        usage: {
-          inputTokens: {
-            total: 0,
-            noCache: 0,
-            cacheRead: 0,
-            cacheWrite: 0,
-          },
-          outputTokens: {
-            total: 0,
-          },
-        },
-      });
-    });
-
-    it('should resolve a "tool-calls" finish to "stop" when structured output completed', () => {
-      const state = createStreamState();
-      state.structuredOutputCompleted = true;
-
-      const parts = createFinishParts(
-        state,
-        { unified: "tool-calls", raw: "tool-calls" },
-        "session-123",
-      );
-
-      const finishPart = parts.find((p) => p.type === "finish");
-      expect(finishPart).toMatchObject({
-        type: "finish",
-        finishReason: { unified: "stop", raw: "tool-calls" },
-      });
-    });
-
-    it('should keep a "tool-calls" finish when structured output did not complete', () => {
-      const state = createStreamState();
-
-      const parts = createFinishParts(
-        state,
-        { unified: "tool-calls", raw: "tool-calls" },
-        "session-123",
-      );
-
-      const finishPart = parts.find((p) => p.type === "finish");
-      expect(finishPart).toMatchObject({
-        type: "finish",
-        finishReason: { unified: "tool-calls", raw: "tool-calls" },
-      });
-    });
-  });
-
-  describe("createStreamStartPart", () => {
-    it("should create stream-start with empty warnings", () => {
-      const part = createStreamStartPart([]);
-
-      expect(part).toEqual({
-        type: "stream-start",
-        warnings: [],
-      });
-    });
-
-    it("should convert warnings to CallWarning format", () => {
-      const part = createStreamStartPart([
-        "Temperature not supported",
-        "TopP not supported",
-      ]);
-
-      expect(part).toEqual({
-        type: "stream-start",
-        warnings: [
-          { type: "other", message: "Temperature not supported" },
-          { type: "other", message: "TopP not supported" },
-        ],
-      });
-    });
-  });
-
-  describe("message role tracking", () => {
-    it("should track message roles from message.updated events", () => {
-      const state = createStreamState();
-      const event = {
-        type: "message.updated",
-        properties: {
-          info: {
-            id: "msg-1",
-            sessionID: "session-123",
-            role: "assistant",
-          },
-        },
-      };
-
-      convertEventToStreamParts(event as any, state);
-
-      expect(state.messageRoles.get("msg-1")).toBe("assistant");
-    });
-
-    it("should track user message roles", () => {
-      const state = createStreamState();
-      const event = {
-        type: "message.updated",
-        properties: {
-          info: {
-            id: "msg-user-1",
-            sessionID: "session-123",
-            role: "user",
-          },
-        },
-      };
-
-      convertEventToStreamParts(event as any, state);
-
-      expect(state.messageRoles.get("msg-user-1")).toBe("user");
-    });
-  });
-
-  describe("user message filtering", () => {
-    it("should filter out parts from user messages", () => {
-      const state = createStreamState();
-      // First, register the user message
-      state.messageRoles.set("user-msg-1", "user");
-
-      const event: EventMessagePartUpdated = {
-        type: "message.part.updated",
-        properties: {
-          part: {
-            id: "part-1",
-            sessionID: "session-123",
-            messageID: "user-msg-1", // User message ID
-            type: "text",
-            text: "User prompt that should be filtered",
-          } as TextPart,
-          delta: "User prompt that should be filtered",
-        },
-      };
-
-      const parts = convertEventToStreamParts(event, state);
-
-      // Should return empty - user messages are filtered
-      expect(parts).toHaveLength(0);
-    });
-
-    it("should process parts from assistant messages", () => {
-      const state = createStreamState();
-      // Register an assistant message
-      state.messageRoles.set("assistant-msg-1", "assistant");
-
-      const event: EventMessagePartUpdated = {
-        type: "message.part.updated",
-        properties: {
-          part: {
-            id: "part-1",
-            sessionID: "session-123",
-            messageID: "assistant-msg-1", // Assistant message ID
-            type: "text",
-            text: "Assistant response",
-          } as TextPart,
-          delta: "Assistant response",
-        },
-      };
-
-      const parts = convertEventToStreamParts(event, state);
-
-      // Should process assistant messages
-      expect(parts).toHaveLength(2);
-      expect(parts[0]).toEqual({ type: "text-start", id: "part-1" });
-      expect(parts[1]).toEqual({
-        type: "text-delta",
-        id: "part-1",
-        delta: "Assistant response",
-      });
-    });
-
-    it("should process parts from unknown messages (role not yet tracked)", () => {
-      const state = createStreamState();
-      // No message role registered yet
-
-      const event: EventMessagePartUpdated = {
-        type: "message.part.updated",
-        properties: {
-          part: {
-            id: "part-1",
-            sessionID: "session-123",
-            messageID: "unknown-msg-1", // Role not tracked
-            type: "text",
-            text: "Unknown message",
-          } as TextPart,
-          delta: "Unknown message",
-        },
-      };
-
-      const parts = convertEventToStreamParts(event, state);
-
-      // Should process unknown messages (could be assistant before message.updated arrives)
-      expect(parts).toHaveLength(2);
-    });
-  });
-
-  describe("session.diff event", () => {
-    it("should return empty array for session.diff events", () => {
-      const state = createStreamState();
-      const event = {
-        type: "session.diff",
-        properties: {
-          sessionID: "session-123",
-          diff: [{ path: "file.ts", additions: 10, deletions: 5 }],
-        },
-      };
-
-      const parts = convertEventToStreamParts(event as any, state);
-
-      expect(parts).toHaveLength(0);
-    });
-
-    it("should not log session.diff as unknown event type", () => {
-      const state = createStreamState();
-      const logger: Logger = {
-        warn: vi.fn(),
-        error: vi.fn(),
-        debug: vi.fn(),
-      };
-
-      const event = {
-        type: "session.diff",
-        properties: {
-          sessionID: "session-123",
-          diff: [],
-        },
-      };
-
-      convertEventToStreamParts(event as any, state, logger);
-
-      expect(logger.debug).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("step-start parts", () => {
-    it("should return empty array for step-start parts", () => {
-      const state = createStreamState();
-      const event: EventMessagePartUpdated = {
-        type: "message.part.updated",
-        properties: {
-          part: {
-            id: "part-1",
-            sessionID: "session-123",
-            messageID: "msg-1",
-            type: "step-start",
-            snapshot: "some-snapshot-id",
-          } as any,
-        },
-      };
-
-      const parts = convertEventToStreamParts(event, state);
-
-      expect(parts).toHaveLength(0);
-    });
-
-    it("should not log step-start as unknown part type", () => {
-      const state = createStreamState();
-      const logger: Logger = {
-        warn: vi.fn(),
-        error: vi.fn(),
-        debug: vi.fn(),
-      };
-
-      const event: EventMessagePartUpdated = {
-        type: "message.part.updated",
-        properties: {
-          part: {
-            id: "part-1",
-            sessionID: "session-123",
-            messageID: "msg-1",
-            type: "step-start",
-          } as any,
-        },
-      };
-
-      convertEventToStreamParts(event, state, logger);
-
-      expect(logger.debug).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("known v2 events and parts", () => {
-    it("should not log known v2 event types as unknown", () => {
-      const state = createStreamState();
-      const logger: Logger = {
-        warn: vi.fn(),
-        error: vi.fn(),
-        debug: vi.fn(),
-      };
-
-      const knownEvents = [
-        { type: "question.replied", properties: { sessionID: "session-123" } },
-        { type: "question.rejected", properties: { sessionID: "session-123" } },
-        { type: "project.updated", properties: {} },
-        { type: "server.instance.disposed", properties: {} },
-        { type: "global.disposed", properties: {} },
-        { type: "worktree.ready", properties: {} },
-        { type: "worktree.failed", properties: {} },
-        { type: "mcp.tools.changed", properties: {} },
-      ];
-
-      for (const event of knownEvents) {
-        const parts = convertEventToStreamParts(event as any, state, logger);
-        expect(parts).toHaveLength(0);
+  const parts = fixture.events.flatMap((event) =>
+    convertV2EventToStreamParts(event, state),
+  );
+  if (fixture.finalize) {
+    parts.push(...finalizeV2Stream(state));
+  }
+  return { parts, state, forms };
+}
+
+describe("convertV2EventToStreamParts (fixture library)", () => {
+  for (const fixture of fixtures) {
+    it(fixture.name, () => {
+      const { parts, state, forms } = runFixture(fixture);
+      expect(parts).toEqual(fixture.expected);
+      expect(forms).toEqual(fixture.expectedForms ?? []);
+      if (fixture.expectLogSynced !== undefined) {
+        expect(state.logSynced).toBe(fixture.expectLogSynced);
       }
-
-      expect(logger.debug).not.toHaveBeenCalled();
     });
 
-    it("should not log known v2 part types as unknown", () => {
-      const state = createStreamState();
-      const logger: Logger = {
-        warn: vi.fn(),
-        error: vi.fn(),
-        debug: vi.fn(),
-      };
+    it(`${fixture.name} — deterministic on re-run`, () => {
+      expect(runFixture(fixture).parts).toEqual(runFixture(fixture).parts);
+    });
+  }
+});
 
-      const knownPartTypes = [
-        "subtask",
-        "snapshot",
-        "patch",
-        "agent",
-        "retry",
-        "compaction",
-      ];
+describe("normalizeReducerInput", () => {
+  it("maps the log.synced sentinel", () => {
+    expect(
+      normalizeReducerInput({
+        type: "log.synced",
+        aggregateID: SESSION_ID,
+        seq: 7,
+      }),
+    ).toEqual({ kind: "log-synced", aggregateID: SESSION_ID, seq: 7 });
+  });
 
-      for (const partType of knownPartTypes) {
-        const event: EventMessagePartUpdated = {
-          type: "message.part.updated",
-          properties: {
-            part: {
-              id: `part-${partType}`,
-              sessionID: "session-123",
-              messageID: "msg-1",
-              type: partType,
-            } as any,
-          },
-        };
+  it("passes events through", () => {
+    const f = eventFactory();
+    const event = f.sessionIdle();
+    expect(normalizeReducerInput(event)).toEqual({ kind: "event", event });
+  });
+});
 
-        const parts = convertEventToStreamParts(event, state, logger);
-        expect(parts).toHaveLength(0);
-      }
+describe("extractV2EventSessionId", () => {
+  const f = eventFactory();
 
-      expect(logger.debug).not.toHaveBeenCalled();
+  it("reads data.sessionID for ordinary session events", () => {
+    expect(extractV2EventSessionId(f.textDelta("msg", 0, "x"))).toBe(
+      SESSION_ID,
+    );
+  });
+
+  it("reads data.form.sessionID for form.created", () => {
+    expect(
+      extractV2EventSessionId(
+        f.formCreated("form_x", "Title", [{ key: "k", type: "string" }]),
+      ),
+    ).toBe(SESSION_ID);
+  });
+
+  it("returns undefined for non-session events", () => {
+    expect(
+      extractV2EventSessionId({
+        id: "evt_x",
+        type: "server.connected",
+        data: {},
+      }),
+    ).toBeUndefined();
+  });
+});
+
+describe("session filtering", () => {
+  it("ignores events for other sessions entirely (including raw)", () => {
+    const other = eventFactory(OTHER_SESSION_ID);
+    const state = createV2StreamState({
+      sessionId: SESSION_ID,
+      includeRawChunks: true,
+    });
+    expect(
+      convertV2EventToStreamParts(other.textDelta("msg", 0, "x"), state),
+    ).toEqual([]);
+  });
+});
+
+describe("includeRawChunks", () => {
+  it("emits a raw part before semantic parts", () => {
+    const f = eventFactory();
+    const state = createV2StreamState({
+      sessionId: SESSION_ID,
+      includeRawChunks: true,
+    });
+    const event = f.textDelta("msg_raw", 0, "hi");
+    const parts = convertV2EventToStreamParts(event, state);
+    expect(parts[0]).toEqual({ type: "raw", rawValue: event });
+    expect(parts.slice(1)).toEqual([
+      { type: "text-start", id: "msg_raw:text:0" },
+      { type: "text-delta", id: "msg_raw:text:0", delta: "hi" },
+    ]);
+  });
+
+  it("emits a raw part for the log.synced sentinel", () => {
+    const state = createV2StreamState({
+      sessionId: SESSION_ID,
+      includeRawChunks: true,
+    });
+    const sentinel = { type: "log.synced" as const, aggregateID: SESSION_ID };
+    expect(convertV2EventToStreamParts(sentinel, state)).toEqual([
+      { type: "raw", rawValue: sentinel },
+    ]);
+    expect(state.logSynced).toBe(true);
+  });
+});
+
+describe("permission.replied", () => {
+  it("drops a buffered approval answered externally", () => {
+    const f = eventFactory();
+    const state = createV2StreamState({ sessionId: SESSION_ID, logger: false });
+    const msg = "msg_pr";
+    const tool = "tool_pr";
+
+    convertV2EventToStreamParts(f.stepStarted(msg), state);
+    // Buffered: no input yet.
+    expect(
+      convertV2EventToStreamParts(
+        f.permissionAsked("perm_ext", {
+          source: { type: "tool", messageID: msg, id: tool },
+        }),
+        state,
+      ),
+    ).toEqual([]);
+    // Replied externally before the tool call registered.
+    convertV2EventToStreamParts(f.permissionReplied("perm_ext", "once"), state);
+
+    const parts = [
+      ...convertV2EventToStreamParts(f.toolInputStarted(msg, tool, "t"), state),
+      ...convertV2EventToStreamParts(f.toolInputEnded(msg, tool, "{}"), state),
+      ...convertV2EventToStreamParts(f.toolCalled(msg, tool, {}), state),
+    ];
+    expect(
+      parts.filter((part) => part.type === "tool-approval-request"),
+    ).toEqual([]);
+  });
+});
+
+describe("tolerated stream anomalies", () => {
+  it("synthesizes a tool-input-start with a placeholder name on a missed input.started", () => {
+    const f = eventFactory();
+    const warnings: string[] = [];
+    const state = createV2StreamState({
+      sessionId: SESSION_ID,
+      logger: { warn: (m) => warnings.push(m), error: () => {} },
+    });
+    const parts = convertV2EventToStreamParts(
+      f.toolInputDelta("msg_x", "tool_x", '{"a":1}'),
+      state,
+    );
+    expect(parts).toEqual([
+      {
+        type: "tool-input-start",
+        id: "tool_x",
+        toolName: UNKNOWN_TOOL_NAME,
+        providerExecuted: true,
+        dynamic: true,
+      },
+      { type: "tool-input-delta", id: "tool_x", delta: '{"a":1}' },
+    ]);
+    expect(warnings).toHaveLength(1);
+  });
+
+  it("warns and drops a malformed tool-result file entry", () => {
+    const f = eventFactory();
+    const warnings: string[] = [];
+    const state = createV2StreamState({
+      sessionId: SESSION_ID,
+      logger: { warn: (m) => warnings.push(m), error: () => {} },
+    });
+    const msg = "msg_mf";
+    const tool = "tool_mf";
+    convertV2EventToStreamParts(f.toolCalled(msg, tool, {}), state);
+    const parts = convertV2EventToStreamParts(
+      f.toolSuccess(msg, tool, [
+        // No comma → unparseable data URI → dropped with a warning.
+        { type: "file", uri: "data:image/png;base64", mime: "image/png" },
+      ]),
+      state,
+    );
+    expect(parts.some((part) => part.type === "tool-result")).toBe(true);
+    expect(
+      parts.filter((part) => part.type === "file" || part.type === "source"),
+    ).toEqual([]);
+    expect(warnings).toEqual([
+      expect.stringContaining("malformed tool-result file entry"),
+    ]);
+  });
+
+  it("keeps streamed content and warns when the final text diverges non-prefix", () => {
+    const f = eventFactory();
+    const warnings: string[] = [];
+    const state = createV2StreamState({
+      sessionId: SESSION_ID,
+      logger: { warn: (m) => warnings.push(m), error: () => {} },
+    });
+    const msg = "msg_div";
+    convertV2EventToStreamParts(f.textStarted(msg, 0), state);
+    convertV2EventToStreamParts(f.textDelta(msg, 0, "streamed"), state);
+    const parts = convertV2EventToStreamParts(
+      f.textEnded(msg, 0, "different final"),
+      state,
+    );
+    expect(parts).toEqual([{ type: "text-end", id: `${msg}:text:0` }]);
+    expect(warnings).toHaveLength(1);
+  });
+});
+
+describe("finalizeV2Stream", () => {
+  it("is a no-op after a terminal execution event", () => {
+    const f = eventFactory();
+    const state = createV2StreamState({ sessionId: SESSION_ID });
+    convertV2EventToStreamParts(f.stepStarted("msg_z"), state);
+    convertV2EventToStreamParts(
+      f.stepEnded("msg_z", "stop", tokens(1, 1), 0),
+      state,
+    );
+    convertV2EventToStreamParts(f.executionSucceeded(), state);
+    expect(finalizeV2Stream(state)).toEqual([]);
+  });
+
+  it("uses an explicit finish reason when given", () => {
+    const state = createV2StreamState({ sessionId: SESSION_ID });
+    const parts = finalizeV2Stream(state, { unified: "stop", raw: "idle" });
+    expect(parts).toHaveLength(1);
+    expect(parts[0]).toMatchObject({
+      type: "finish",
+      finishReason: { unified: "stop", raw: "idle" },
+    });
+  });
+
+  it("never defaults to a retained tool-calls step finish", () => {
+    // Step ended tool-calls and the stream stalled before the next
+    // step.started: "tool-calls" is an intermediate finish, not a valid
+    // terminal reason for a backstopped turn.
+    const f = eventFactory();
+    const state = createV2StreamState({ sessionId: SESSION_ID });
+    convertV2EventToStreamParts(f.stepStarted("msg_bt"), state);
+    convertV2EventToStreamParts(
+      f.stepEnded("msg_bt", "tool-calls", tokens(1, 1), 0),
+      state,
+    );
+    const parts = finalizeV2Stream(state);
+    expect(parts[0]).toMatchObject({
+      type: "finish",
+      finishReason: { unified: "other", raw: "tool-calls" },
+    });
+  });
+
+  it("flushes a still-buffered approval before the finish part", () => {
+    // Last resort: permission.asked buffered against a tool that never
+    // produced input; finalize must still surface the approval (with a
+    // registered call) or the two-phase round-trip deadlocks.
+    const f = eventFactory();
+    const state = createV2StreamState({ sessionId: SESSION_ID });
+    convertV2EventToStreamParts(f.stepStarted("msg_fa"), state);
+    convertV2EventToStreamParts(
+      f.permissionAsked("perm_fa", {
+        source: { type: "tool", messageID: "msg_fa", id: "tool_fa" },
+      }),
+      state,
+    );
+    const parts = finalizeV2Stream(state);
+    expect(parts.map((part) => part.type)).toEqual([
+      "tool-input-start",
+      "tool-input-delta",
+      "tool-input-end",
+      "tool-call",
+      "tool-approval-request",
+      "finish",
+    ]);
+    expect(parts[3]).toMatchObject({
+      toolCallId: "tool_fa",
+      toolName: UNKNOWN_TOOL_NAME,
+      input: "{}",
+    });
+    expect(parts[4]).toMatchObject({
+      approvalId: "perm_fa",
+      toolCallId: "tool_fa",
+    });
+  });
+
+  it("falls back to {} when a buffered approval's input never completed", () => {
+    // A half-streamed JSON fragment must never become the published input.
+    const f = eventFactory();
+    const state = createV2StreamState({ sessionId: SESSION_ID, logger: false });
+    convertV2EventToStreamParts(
+      f.toolInputStarted("msg_pf", "tool_pf", "write_file"),
+      state,
+    );
+    convertV2EventToStreamParts(
+      f.toolInputDelta("msg_pf", "tool_pf", '{"path":'),
+      state,
+    );
+    convertV2EventToStreamParts(
+      f.permissionAsked("perm_pf", {
+        source: { type: "tool", messageID: "msg_pf", id: "tool_pf" },
+      }),
+      state,
+    );
+    const parts = finalizeV2Stream(state);
+    const call = parts.find((part) => part.type === "tool-call");
+    expect(call).toMatchObject({ toolCallId: "tool_pf", input: "{}" });
+    expect(
+      parts.find((part) => part.type === "tool-approval-request"),
+    ).toMatchObject({ approvalId: "perm_pf" });
+  });
+});
+
+describe("log.synced session scoping", () => {
+  it("ignores a foreign session's sentinel", () => {
+    const state = createV2StreamState({
+      sessionId: SESSION_ID,
+      includeRawChunks: true,
+    });
+    const foreign = {
+      type: "log.synced" as const,
+      aggregateID: OTHER_SESSION_ID,
+    };
+    expect(convertV2EventToStreamParts(foreign, state)).toEqual([]);
+    expect(state.logSynced).toBe(false);
+  });
+});
+
+describe("createStreamStartPart", () => {
+  it("wraps warnings", () => {
+    expect(createStreamStartPart(["a", "b"])).toEqual({
+      type: "stream-start",
+      warnings: [
+        { type: "other", message: "a" },
+        { type: "other", message: "b" },
+      ],
     });
   });
 });

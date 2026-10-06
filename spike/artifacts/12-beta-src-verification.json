@@ -1,0 +1,1913 @@
+{
+  "provenance": {
+    "capturedAt": "2026-08-27T01:32:34.845Z",
+    "betaSrcUrl": "http://127.0.0.1:14297",
+    "workdir": "/var/folders/3m/rkhd81k52n799tn9h5zwpxpc0000gn/T//opencode-beta-sandbox/workdir",
+    "srcDir": "/Users/ben/.cache/opencode-beta-src",
+    "srcGitHead": "f4a9b93013695aa7a1b56ab5d91855965d5cc727",
+    "pinnedClientVersion": "0.0.0-beta-18286",
+    "serverHealth": {
+      "label": "provenance-health",
+      "ok": true,
+      "ms": 14,
+      "value": {
+        "healthy": true,
+        "version": "local",
+        "pid": 81959
+      }
+    },
+    "serverInfo": {
+      "label": "provenance-server-get",
+      "ok": true,
+      "ms": 1,
+      "value": {
+        "urls": [
+          "http://127.0.0.1:14297"
+        ]
+      }
+    }
+  },
+  "serverConnected": {
+    "firstEventType": "server.connected",
+    "note": "first event on a fresh subscription"
+  },
+  "simpleTurn": {
+    "deliveryDefaultInReceipt": "steer",
+    "receipt": {
+      "id": "msg_040d8f3ed0019Xy5tB25p75SpO",
+      "sessionID": "ses_fbf270d4effefMvHBRgCofk5rf",
+      "timeCreated": 1787794355182,
+      "type": "user",
+      "payload": {
+        "text": "Reply with exactly: OK"
+      },
+      "delivery": "steer"
+    },
+    "terminalSeen": "session.execution.succeeded",
+    "eventSequence": [
+      "session.inbox.enqueued",
+      "session.execution.started",
+      "session.instructions.updated",
+      "session.inbox.delivered",
+      "session.step.started",
+      "session.reasoning.started",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.ended",
+      "session.text.started",
+      "session.text.delta",
+      "session.text.ended",
+      "session.step.streamed",
+      "session.step.ended",
+      "session.usage.updated",
+      "session.execution.succeeded"
+    ],
+    "events": [
+      {
+        "id": "evt_040d8f3ee001F6BKH6aBFConwC",
+        "created": 1787794355182,
+        "type": "session.inbox.enqueued",
+        "location": {
+          "directory": "/var/folders/3m/rkhd81k52n799tn9h5zwpxpc0000gn/T//opencode-beta-sandbox/workdir"
+        },
+        "data": {
+          "inboxID": "msg_040d8f3ed0019Xy5tB25p75SpO",
+          "sessionID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "item": {
+            "type": "user",
+            "payload": {
+              "text": "Reply with exactly: OK"
+            },
+            "delivery": "steer"
+          }
+        },
+        "durable": {
+          "aggregateID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "seq": 1,
+          "version": 1
+        }
+      },
+      {
+        "id": "evt_040d8f3f30013qoPX0ioI3jYEt",
+        "created": 1787794355187,
+        "type": "session.execution.started",
+        "data": {
+          "sessionID": "ses_fbf270d4effefMvHBRgCofk5rf"
+        },
+        "durable": {
+          "aggregateID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "seq": 2,
+          "version": 1
+        }
+      },
+      {
+        "id": "evt_040d8f402001kRPMwdppoZAnrA",
+        "created": 1787794355202,
+        "metadata": {
+          "instructions": {
+            "initial": true
+          }
+        },
+        "type": "session.instructions.updated",
+        "location": {
+          "directory": "/var/folders/3m/rkhd81k52n799tn9h5zwpxpc0000gn/T//opencode-beta-sandbox/workdir"
+        },
+        "data": {
+          "sessionID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "delta": {
+            "core/environment": "150afe516de70bf900c4d36d013311087992b5d0dbe1e80358b3d5ed9d705e41",
+            "core/date": "be8024fe7ea9c3e0c256df48f09993a8c4277344241cb26af8b5107ed44f171e",
+            "core/codemode": "200b54cd2969cc38d6dff53bdf4dbe8cfecb6cb4466f8a8c0fc8926dd4be875b",
+            "core/skill-guidance": "8394362d28c82fa4d13c7a9f5568c05680f6687e07db8f426a0e3c92f3027dc9"
+          }
+        },
+        "durable": {
+          "aggregateID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "seq": 3,
+          "version": 2
+        }
+      },
+      {
+        "id": "evt_040d8f404001HjoAeGTdp0fudn",
+        "created": 1787794355204,
+        "type": "session.inbox.delivered",
+        "location": {
+          "directory": "/var/folders/3m/rkhd81k52n799tn9h5zwpxpc0000gn/T//opencode-beta-sandbox/workdir"
+        },
+        "data": {
+          "sessionID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "inboxID": "msg_040d8f3ed0019Xy5tB25p75SpO"
+        },
+        "durable": {
+          "aggregateID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "seq": 4,
+          "version": 1
+        }
+      },
+      {
+        "id": "evt_040d92188001M0JVAZv88JZM39",
+        "created": 1787794366856,
+        "type": "session.step.started",
+        "location": {
+          "directory": "/var/folders/3m/rkhd81k52n799tn9h5zwpxpc0000gn/T//opencode-beta-sandbox/workdir"
+        },
+        "data": {
+          "sessionID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "agent": "build",
+          "model": {
+            "id": "nemotron-3.5-lightning-free",
+            "providerID": "opencode",
+            "variant": "default"
+          },
+          "assistantMessageID": "msg_040d8f3fa001ErWYPfDpLtI4iD"
+        },
+        "durable": {
+          "aggregateID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "seq": 5,
+          "version": 1
+        }
+      },
+      {
+        "id": "evt_040d9218d001zQvA1sYnAqhAQf",
+        "created": 1787794366861,
+        "type": "session.reasoning.started",
+        "location": {
+          "directory": "/var/folders/3m/rkhd81k52n799tn9h5zwpxpc0000gn/T//opencode-beta-sandbox/workdir"
+        },
+        "data": {
+          "sessionID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "assistantMessageID": "msg_040d8f3fa001ErWYPfDpLtI4iD",
+          "ordinal": 0,
+          "state": {
+            "reasoningField": "reasoning_content"
+          }
+        },
+        "durable": {
+          "aggregateID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "seq": 6,
+          "version": 1
+        }
+      },
+      {
+        "id": "evt_040d922070018JEGWZgj1Ubnzg",
+        "created": 1787794366983,
+        "type": "session.reasoning.delta",
+        "location": {
+          "directory": "/var/folders/3m/rkhd81k52n799tn9h5zwpxpc0000gn/T//opencode-beta-sandbox/workdir"
+        },
+        "data": {
+          "sessionID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "assistantMessageID": "msg_040d8f3fa001ErWYPfDpLtI4iD",
+          "ordinal": 0,
+          "delta": "The user is asking me to reply with exactly \""
+        }
+      },
+      {
+        "id": "evt_040d92275001F0HX7IZnPQasVh",
+        "created": 1787794367093,
+        "type": "session.reasoning.delta",
+        "location": {
+          "directory": "/var/folders/3m/rkhd81k52n799tn9h5zwpxpc0000gn/T//opencode-beta-sandbox/workdir"
+        },
+        "data": {
+          "sessionID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "assistantMessageID": "msg_040d8f3fa001ErWYPfDpLtI4iD",
+          "ordinal": 0,
+          "delta": "OK\". This is a simple request"
+        }
+      },
+      {
+        "id": "evt_040d922ed0010I2lRNNhlvQHGy",
+        "created": 1787794367213,
+        "type": "session.reasoning.delta",
+        "location": {
+          "directory": "/var/folders/3m/rkhd81k52n799tn9h5zwpxpc0000gn/T//opencode-beta-sandbox/workdir"
+        },
+        "data": {
+          "sessionID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "assistantMessageID": "msg_040d8f3fa001ErWYPfDpLtI4iD",
+          "ordinal": 0,
+          "delta": " that doesn't require any"
+        }
+      },
+      {
+        "id": "evt_040d92358001m8728Fn1GkWQUF",
+        "created": 1787794367320,
+        "type": "session.reasoning.delta",
+        "location": {
+          "directory": "/var/folders/3m/rkhd81k52n799tn9h5zwpxpc0000gn/T//opencode-beta-sandbox/workdir"
+        },
+        "data": {
+          "sessionID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "assistantMessageID": "msg_040d8f3fa001ErWYPfDpLtI4iD",
+          "ordinal": 0,
+          "delta": " of the available tools. I should just output"
+        }
+      },
+      {
+        "id": "evt_040d923c8001GrvfJoDLpm05Gc",
+        "created": 1787794367432,
+        "type": "session.reasoning.delta",
+        "location": {
+          "directory": "/var/folders/3m/rkhd81k52n799tn9h5zwpxpc0000gn/T//opencode-beta-sandbox/workdir"
+        },
+        "data": {
+          "sessionID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "assistantMessageID": "msg_040d8f3fa001ErWYPfDpLtI4iD",
+          "ordinal": 0,
+          "delta": " \"OK\" as requested."
+        }
+      },
+      {
+        "id": "evt_040d923d6001zeAKajD2Ry1jVE",
+        "created": 1787794367446,
+        "type": "session.reasoning.ended",
+        "location": {
+          "directory": "/var/folders/3m/rkhd81k52n799tn9h5zwpxpc0000gn/T//opencode-beta-sandbox/workdir"
+        },
+        "data": {
+          "sessionID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "assistantMessageID": "msg_040d8f3fa001ErWYPfDpLtI4iD",
+          "ordinal": 0,
+          "text": "The user is asking me to reply with exactly \"OK\". This is a simple request that doesn't require any of the available tools. I should just output \"OK\" as requested.",
+          "state": {
+            "reasoningField": "reasoning_content",
+            "reasoningDetails": [
+              {
+                "type": "reasoning.text",
+                "text": "The user is asking me to reply with exactly \"OK\". This is a simple request that doesn't require any of the available tools. I should just output \"OK\" as requested.",
+                "format": "unknown",
+                "index": 0
+              }
+            ]
+          }
+        },
+        "durable": {
+          "aggregateID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "seq": 7,
+          "version": 1
+        }
+      },
+      {
+        "id": "evt_040d923da001Wixl3XX3w6yQol",
+        "created": 1787794367450,
+        "type": "session.text.started",
+        "location": {
+          "directory": "/var/folders/3m/rkhd81k52n799tn9h5zwpxpc0000gn/T//opencode-beta-sandbox/workdir"
+        },
+        "data": {
+          "sessionID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "assistantMessageID": "msg_040d8f3fa001ErWYPfDpLtI4iD",
+          "ordinal": 0
+        },
+        "durable": {
+          "aggregateID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "seq": 8,
+          "version": 1
+        }
+      },
+      {
+        "id": "evt_040d924260018JnH7JfvnwAbQF",
+        "created": 1787794367526,
+        "type": "session.text.delta",
+        "location": {
+          "directory": "/var/folders/3m/rkhd81k52n799tn9h5zwpxpc0000gn/T//opencode-beta-sandbox/workdir"
+        },
+        "data": {
+          "sessionID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "assistantMessageID": "msg_040d8f3fa001ErWYPfDpLtI4iD",
+          "ordinal": 0,
+          "delta": "OK"
+        }
+      },
+      {
+        "id": "evt_040d92427001JcBYjku4M1Hg62",
+        "created": 1787794367527,
+        "type": "session.text.ended",
+        "location": {
+          "directory": "/var/folders/3m/rkhd81k52n799tn9h5zwpxpc0000gn/T//opencode-beta-sandbox/workdir"
+        },
+        "data": {
+          "sessionID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "assistantMessageID": "msg_040d8f3fa001ErWYPfDpLtI4iD",
+          "ordinal": 0,
+          "text": "OK"
+        },
+        "durable": {
+          "aggregateID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "seq": 9,
+          "version": 1
+        }
+      },
+      {
+        "id": "evt_040d9242b001VOodvvBRHrzCwZ",
+        "created": 1787794367531,
+        "type": "session.step.streamed",
+        "location": {
+          "directory": "/var/folders/3m/rkhd81k52n799tn9h5zwpxpc0000gn/T//opencode-beta-sandbox/workdir"
+        },
+        "data": {
+          "sessionID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "assistantMessageID": "msg_040d8f3fa001ErWYPfDpLtI4iD"
+        },
+        "durable": {
+          "aggregateID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "seq": 10,
+          "version": 1
+        }
+      },
+      {
+        "id": "evt_040d9242d0011jVQaMrjXt7Rhj",
+        "created": 1787794367533,
+        "type": "session.step.ended",
+        "location": {
+          "directory": "/var/folders/3m/rkhd81k52n799tn9h5zwpxpc0000gn/T//opencode-beta-sandbox/workdir"
+        },
+        "data": {
+          "sessionID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "assistantMessageID": "msg_040d8f3fa001ErWYPfDpLtI4iD",
+          "finish": "stop",
+          "rawFinish": "stop",
+          "cost": 0,
+          "tokens": {
+            "input": 4225,
+            "output": 0,
+            "reasoning": 41,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          }
+        },
+        "durable": {
+          "aggregateID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "seq": 11,
+          "version": 1
+        }
+      },
+      {
+        "id": "evt_040d92430001WGlME9D8UcyK4Y",
+        "created": 1787794367536,
+        "type": "session.usage.updated",
+        "data": {
+          "sessionID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "cost": 0,
+          "tokens": {
+            "input": 4225,
+            "output": 0,
+            "reasoning": 41,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          }
+        }
+      },
+      {
+        "id": "evt_040d92432001gjVov9tYm4wzYF",
+        "created": 1787794367538,
+        "type": "session.execution.succeeded",
+        "data": {
+          "sessionID": "ses_fbf270d4effefMvHBRgCofk5rf"
+        },
+        "durable": {
+          "aggregateID": "ses_fbf270d4effefMvHBRgCofk5rf",
+          "seq": 12,
+          "version": 1
+        }
+      }
+    ],
+    "storedMessages": [
+      {
+        "id": "msg_040d8f3ed0019Xy5tB25p75SpO",
+        "time": {
+          "created": 1787794355204
+        },
+        "text": "Reply with exactly: OK",
+        "type": "user"
+      },
+      {
+        "id": "msg_040d8f3fa001ErWYPfDpLtI4iD",
+        "time": {
+          "created": 1787794366856,
+          "streamed": 1787794367531,
+          "completed": 1787794367533
+        },
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "nemotron-3.5-lightning-free",
+          "providerID": "opencode",
+          "variant": "default"
+        },
+        "content": [
+          {
+            "type": "reasoning",
+            "text": "The user is asking me to reply with exactly \"OK\". This is a simple request that doesn't require any of the available tools. I should just output \"OK\" as requested.",
+            "state": {
+              "reasoningField": "reasoning_content",
+              "reasoningDetails": [
+                {
+                  "type": "reasoning.text",
+                  "text": "The user is asking me to reply with exactly \"OK\". This is a simple request that doesn't require any of the available tools. I should just output \"OK\" as requested.",
+                  "format": "unknown",
+                  "index": 0
+                }
+              ]
+            },
+            "time": {
+              "created": 1787794366861,
+              "completed": 1787794367446
+            }
+          },
+          {
+            "type": "text",
+            "text": "OK"
+          }
+        ],
+        "finish": "stop",
+        "rawFinish": "stop",
+        "cost": 0,
+        "tokens": {
+          "input": 4225,
+          "output": 0,
+          "reasoning": 41,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      }
+    ],
+    "userMessageIdEqualsReceiptId": true
+  },
+  "waitIdle": {
+    "label": "wait-on-idle-session",
+    "ok": true,
+    "ms": 8,
+    "value": "resolved"
+  },
+  "waitBusy": {
+    "label": "wait-on-busy-session",
+    "ok": true,
+    "ms": 21229,
+    "value": "resolved after 21229ms",
+    "executionStartedBeforeWaitCall": true,
+    "waitResolvedDeltaMs": 21229,
+    "executionSucceededDeltaMs": 21229,
+    "waitResolvedBeforeExecutionSucceeded": false,
+    "eventSequence": [
+      "session.inbox.enqueued",
+      "session.execution.started",
+      "session.instructions.updated",
+      "session.inbox.delivered",
+      "session.step.started",
+      "session.reasoning.started",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.ended",
+      "session.text.started",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.text.ended",
+      "session.step.streamed",
+      "session.step.ended",
+      "session.usage.updated",
+      "session.execution.succeeded"
+    ]
+  },
+  "busy": {
+    "firstReceipt": {
+      "id": "msg_040d97c04001Z5WfbYbpXqJ2C2",
+      "sessionID": "ses_fbf268540ffetMQjacLKBV4U2G",
+      "timeCreated": 1787794390021,
+      "type": "user",
+      "payload": {
+        "text": "Write a story about a lighthouse in about 150 words."
+      },
+      "delivery": "steer"
+    },
+    "whileBusyOmitted": {
+      "label": "prompt-busy-delivery-omitted",
+      "ok": true,
+      "ms": 17,
+      "value": {
+        "id": "msg_040da6c69001Zs1sbiE7Xjvo6e",
+        "sessionID": "ses_fbf268540ffetMQjacLKBV4U2G",
+        "timeCreated": 1787794451562,
+        "type": "user",
+        "payload": {
+          "text": "Reply with exactly: STEERED"
+        },
+        "delivery": "steer"
+      }
+    },
+    "queued": {
+      "label": "prompt-busy-delivery-queue",
+      "ok": true,
+      "ms": 18,
+      "value": {
+        "id": "msg_040da6c7e001dPYlzMzbLV6VHg",
+        "sessionID": "ses_fbf268540ffetMQjacLKBV4U2G",
+        "timeCreated": 1787794451582,
+        "type": "user",
+        "payload": {
+          "text": "Reply with exactly: QUEUED"
+        },
+        "delivery": "queue"
+      }
+    },
+    "eventSequence": [
+      "session.inbox.enqueued",
+      "session.execution.started",
+      "session.instructions.updated",
+      "session.inbox.delivered",
+      "session.step.started",
+      "session.reasoning.started",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.inbox.enqueued",
+      "session.reasoning.delta",
+      "session.inbox.enqueued",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.ended",
+      "session.text.started",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.text.ended",
+      "session.step.streamed",
+      "session.step.ended",
+      "session.usage.updated",
+      "session.inbox.delivered",
+      "session.step.started",
+      "session.reasoning.started",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.ended",
+      "session.text.started",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.text.ended",
+      "session.step.streamed",
+      "session.step.ended",
+      "session.usage.updated",
+      "session.inbox.delivered"
+    ],
+    "interruptedEvents": [
+      {
+        "id": "evt_040d97c09001m8TVIFAnaVeBhO",
+        "created": 1787794390025,
+        "type": "session.execution.started",
+        "data": {
+          "sessionID": "ses_fbf268540ffetMQjacLKBV4U2G"
+        },
+        "durable": {
+          "aggregateID": "ses_fbf268540ffetMQjacLKBV4U2G",
+          "seq": 2,
+          "version": 1
+        }
+      }
+    ],
+    "storedMessages": [
+      {
+        "id": "msg_040d97c04001Z5WfbYbpXqJ2C2",
+        "type": "user",
+        "text": "Write a story about a lighthouse in about 150 words."
+      },
+      {
+        "id": "msg_040d97c0e001JJwhIGfVF3GGXZ",
+        "type": "assistant",
+        "finish": "stop",
+        "text": "Perched on jagged rocks at the edge of the world, the old lighthouse had watched centuries of mariners find their way ho"
+      },
+      {
+        "id": "msg_040da6c69001Zs1sbiE7Xjvo6e",
+        "type": "user",
+        "text": "Reply with exactly: STEERED"
+      },
+      {
+        "id": "msg_040dab935002BZr0QtJ2DZs52n",
+        "type": "assistant",
+        "finish": "stop",
+        "text": "STEERED"
+      },
+      {
+        "id": "msg_040da6c7e001dPYlzMzbLV6VHg",
+        "type": "user",
+        "text": "Reply with exactly: QUEUED"
+      }
+    ]
+  },
+  "interrupt": {
+    "label": "interrupt-continue-false",
+    "ok": true,
+    "ms": 9,
+    "value": {
+      "interrupted": true
+    },
+    "terminalEvent": {
+      "id": "evt_040db27b1001YZYgj9sXECxmTx",
+      "created": 1787794499505,
+      "type": "session.execution.interrupted",
+      "data": {
+        "sessionID": "ses_fbf250435ffefQnXZ67gZSAr9p",
+        "reason": "user"
+      },
+      "durable": {
+        "aggregateID": "ses_fbf250435ffefQnXZ67gZSAr9p",
+        "seq": 10,
+        "version": 1
+      }
+    },
+    "eventSequence": [
+      "session.inbox.enqueued",
+      "session.execution.started",
+      "session.instructions.updated",
+      "session.inbox.delivered",
+      "session.step.started",
+      "session.reasoning.started",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.ended",
+      "session.step.streamed",
+      "session.step.failed",
+      "session.execution.interrupted"
+    ],
+    "finalAssistant": [
+      {
+        "id": "msg_040dafd15001UlNyceFFzYxmJ8",
+        "finish": "error",
+        "error": {
+          "type": "aborted",
+          "message": "Step interrupted"
+        }
+      }
+    ]
+  },
+  "multiStep": {
+    "permissionAsked": [
+      {
+        "id": "evt_040db6325002CvvUXx68Y5DHzN",
+        "created": 1787794514725,
+        "type": "permission.asked",
+        "location": {
+          "directory": "/var/folders/3m/rkhd81k52n799tn9h5zwpxpc0000gn/T//opencode-beta-sandbox/workdir"
+        },
+        "data": {
+          "id": "per_040db6325001GYTBvsajutg7OF",
+          "sessionID": "ses_fbf24d38dffe2h4T7rySH9Jm8D",
+          "action": "shell",
+          "resources": [
+            "printf beta-verify"
+          ],
+          "save": [
+            "printf *"
+          ],
+          "source": {
+            "type": "tool",
+            "messageID": "msg_040db2db9001x2H0sYhBNOCA8J",
+            "id": "call-2779801e-14cf-4018-93e8-d7aa8ffd2057"
+          }
+        }
+      }
+    ],
+    "permissionReplies": [
+      {
+        "label": "permission-reply-per_040db6325001GYTBvsajutg7OF",
+        "ok": true,
+        "ms": 8
+      }
+    ],
+    "stepEnded": [
+      {
+        "id": "evt_040db63fd001N87O8JxMDGI601",
+        "created": 1787794514941,
+        "type": "session.step.ended",
+        "location": {
+          "directory": "/var/folders/3m/rkhd81k52n799tn9h5zwpxpc0000gn/T//opencode-beta-sandbox/workdir"
+        },
+        "data": {
+          "sessionID": "ses_fbf24d38dffe2h4T7rySH9Jm8D",
+          "assistantMessageID": "msg_040db2db9001x2H0sYhBNOCA8J",
+          "finish": "tool-calls",
+          "rawFinish": "tool_calls",
+          "cost": 0,
+          "tokens": {
+            "input": 4250,
+            "output": 26,
+            "reasoning": 41,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          }
+        },
+        "durable": {
+          "aggregateID": "ses_fbf24d38dffe2h4T7rySH9Jm8D",
+          "seq": 13,
+          "version": 1
+        }
+      },
+      {
+        "id": "evt_040dbaef8001dwQLtLK35FXrx9",
+        "created": 1787794534136,
+        "type": "session.step.ended",
+        "location": {
+          "directory": "/var/folders/3m/rkhd81k52n799tn9h5zwpxpc0000gn/T//opencode-beta-sandbox/workdir"
+        },
+        "data": {
+          "sessionID": "ses_fbf24d38dffe2h4T7rySH9Jm8D",
+          "assistantMessageID": "msg_040db63ff001Bx5sZpAUmTS53I",
+          "finish": "stop",
+          "rawFinish": "stop",
+          "cost": 0,
+          "tokens": {
+            "input": 2168,
+            "output": 11,
+            "reasoning": 32,
+            "cache": {
+              "read": 2176,
+              "write": 0
+            }
+          }
+        },
+        "durable": {
+          "aggregateID": "ses_fbf24d38dffe2h4T7rySH9Jm8D",
+          "seq": 36,
+          "version": 1
+        }
+      }
+    ],
+    "usageEvents": [
+      {
+        "id": "evt_040db63fe001tZy17LzNKLOox1",
+        "created": 1787794514942,
+        "type": "session.usage.updated",
+        "data": {
+          "sessionID": "ses_fbf24d38dffe2h4T7rySH9Jm8D",
+          "cost": 0,
+          "tokens": {
+            "input": 4250,
+            "output": 26,
+            "reasoning": 41,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          }
+        }
+      },
+      {
+        "id": "evt_040dbaef9001QC4kIajpVAJm16",
+        "created": 1787794534137,
+        "type": "session.usage.updated",
+        "data": {
+          "sessionID": "ses_fbf24d38dffe2h4T7rySH9Jm8D",
+          "cost": 0,
+          "tokens": {
+            "input": 6418,
+            "output": 37,
+            "reasoning": 73,
+            "cache": {
+              "read": 2176,
+              "write": 0
+            }
+          }
+        }
+      }
+    ],
+    "eventSequence": [
+      "session.inbox.enqueued",
+      "session.execution.started",
+      "session.instructions.updated",
+      "session.inbox.delivered",
+      "session.step.started",
+      "session.reasoning.started",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.tool.input.started",
+      "session.reasoning.delta",
+      "session.reasoning.ended",
+      "session.tool.input.ended",
+      "session.tool.called",
+      "session.step.streamed",
+      "permission.asked",
+      "permission.replied",
+      "session.tool.progress",
+      "session.tool.success",
+      "session.step.ended",
+      "session.usage.updated",
+      "session.step.started",
+      "session.reasoning.started",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.delta",
+      "session.reasoning.ended",
+      "session.text.started",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.reasoning.started",
+      "session.reasoning.ended",
+      "session.text.delta",
+      "session.text.ended",
+      "session.step.streamed",
+      "session.step.ended",
+      "session.usage.updated",
+      "session.execution.succeeded"
+    ],
+    "assistantMessages": [
+      {
+        "id": "msg_040db2db9001x2H0sYhBNOCA8J",
+        "finish": "tool-calls",
+        "tokens": {
+          "input": 4250,
+          "output": 26,
+          "reasoning": 41,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "cost": 0,
+        "contentTypes": [
+          "reasoning",
+          "tool"
+        ]
+      },
+      {
+        "id": "msg_040db63ff001Bx5sZpAUmTS53I",
+        "finish": "stop",
+        "tokens": {
+          "input": 2168,
+          "output": 11,
+          "reasoning": 32,
+          "cache": {
+            "read": 2176,
+            "write": 0
+          }
+        },
+        "cost": 0,
+        "contentTypes": [
+          "reasoning",
+          "text",
+          "reasoning",
+          "reasoning",
+          "reasoning",
+          "reasoning",
+          "reasoning",
+          "reasoning",
+          "reasoning",
+          "reasoning"
+        ]
+      }
+    ],
+    "sessionInfoTokens": {
+      "input": 6418,
+      "output": 37,
+      "reasoning": 73,
+      "cache": {
+        "read": 2176,
+        "write": 0
+      }
+    },
+    "sessionInfoCost": 0
+  },
+  "sessionLog": {
+    "label": "session-log-catchup",
+    "ok": true,
+    "ms": 24,
+    "value": {
+      "count": 1,
+      "types": [
+        "log.synced"
+      ],
+      "first": {
+        "type": "log.synced",
+        "aggregateID": "ses_fbf244ab4ffeGdqJbPEdCKfOBs",
+        "seq": 16
+      },
+      "last": {
+        "type": "log.synced",
+        "aggregateID": "ses_fbf244ab4ffeGdqJbPEdCKfOBs",
+        "seq": 16
+      }
+    }
+  },
+  "migration": {
+    "label": "migration-v1-status",
+    "ok": true,
+    "ms": 2,
+    "value": {
+      "status": "completed"
+    }
+  }
+}

@@ -1,31 +1,45 @@
+/**
+ * Streaming with `streamText`: live text deltas plus the other stream parts
+ * OpenCode emits (reasoning, tool lifecycle, sources/files from tool
+ * results).
+ *
+ * Requires an OpenCode 2.x server — see examples/env.ts for the server
+ * requirement and environment variables.
+ *
+ * OpenCode v2 streams native delta events (`session.text.delta`,
+ * `session.reasoning.delta`, `session.tool.input.delta`); the provider maps
+ * them 1:1 onto AI SDK stream parts.
+ */
 import { streamText } from "ai";
 import { createOpencode } from "../dist/index.js";
+import { exampleConfig } from "./env.js";
 
 async function main() {
-  const opencode = createOpencode({
-    autoStartServer: true,
-  });
+  const { providerSettings, modelSettings, modelId } = exampleConfig();
+  const opencode = createOpencode(providerSettings);
 
   try {
     const result = streamText({
-      model: opencode("openai/gpt-5.3-codex-spark"),
-      prompt: "Count from 1 to 5, explaining each number briefly.",
+      model: opencode(modelId, modelSettings),
+      prompt:
+        "Write a haiku about code review, then explain it in one sentence.",
     });
 
-    console.log("Response:");
     for await (const chunk of result.textStream) {
       process.stdout.write(chunk);
     }
-    console.log();
+    process.stdout.write("\n");
 
-    const [usage, finishReason] = await Promise.all([
-      result.usage,
-      result.finishReason,
-    ]);
-    console.log("Usage:", usage);
-    console.log("Finish reason:", finishReason);
+    console.log("Finish reason:", await result.finishReason);
+    console.log("Usage:", await result.usage);
+
+    const metadata = (await result.finalStep).providerMetadata?.opencode;
+    if (metadata) {
+      console.log("Session ID:", metadata.sessionId);
+      console.log("Cost (USD):", metadata.cost);
+    }
   } finally {
-    await opencode.dispose?.();
+    await opencode.dispose();
   }
 }
 

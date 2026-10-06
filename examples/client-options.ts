@@ -1,105 +1,84 @@
+/**
+ * Backend selection and client configuration.
+ *
+ * Requires an OpenCode 2.x server — see examples/env.ts for the server
+ * requirement and environment variables.
+ *
+ * The provider picks exactly one backend, in precedence order:
+ *   1. `client`        — a caller-supplied `OpenCode.make(...)` client
+ *   2. `clientManager` — a caller-supplied manager (advanced injection seam)
+ *   3. `baseUrl`       — the provider constructs the client (+ clientOptions)
+ *   4. service discovery — `Service.discover()` via the registration file
+ *      (`autoStart: true` additionally spawns via `Service.ensure`; note no
+ *      published CLI supports `serve --service` yet)
+ *
+ * `clientOptions` is the v2 construction passthrough: `{headers, fetch}`.
+ * Beta servers require Basic auth (`opencode:<password>`) on every route,
+ * so `headers.Authorization` is how you connect to one via `baseUrl`.
+ */
 import { generateText } from "ai";
-import { createOpencode, OpencodeClientManager } from "../dist/index.js";
-import { createOpencodeClient } from "@opencode-ai/sdk/v2";
-
-const MODEL = process.env.OPENCODE_MODEL ?? "openai/gpt-5.3-codex-spark";
-const BASE_URL = "http://127.0.0.1:4096";
-
-function formatError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-// Wraps fetch to echo each outgoing request's x-demo-source header, so the
-// output proves which client a request actually flowed through.
-function echoingFetch(): typeof fetch {
-  return (input, init) => {
-    const headers =
-      input instanceof Request ? input.headers : new Headers(init?.headers);
-    const url =
-      input instanceof Request
-        ? input.url
-        : input instanceof URL
-          ? input.href
-          : String(input);
-    const method =
-      (input instanceof Request ? input.method : init?.method) ?? "GET";
-    const source = headers.get("x-demo-source") ?? "(none)";
-    console.log(
-      `  [http] ${method} ${new URL(url).pathname} x-demo-source: ${source}`,
-    );
-    return fetch(input, init);
-  };
-}
-
-async function runStep(title: string, fn: () => Promise<void>) {
-  console.log(title);
-  try {
-    await fn();
-  } catch (error) {
-    console.error(`  Error: ${formatError(error)}`);
-  }
-  console.log();
-}
+import { OpenCode } from "@opencode/client";
+import { createOpencode } from "../dist/index.js";
+import { exampleConfig } from "./env.js";
 
 async function main() {
-  console.log("=== OpenCode: clientOptions and preconfigured client ===");
-  console.log(
-    "This example assumes an OpenCode server is available at",
-    BASE_URL,
-  );
-  console.log();
+  const { providerSettings, modelSettings, modelId } = exampleConfig();
+  const baseUrl = providerSettings.baseUrl!;
+  const headers = providerSettings.clientOptions!.headers as Record<
+    string,
+    string
+  >;
 
-  const providerWithClientOptions = createOpencode({
-    baseUrl: BASE_URL,
+  // --- 1. baseUrl backend with headers and a logging fetch wrapper ---
+  let requests = 0;
+  const withLoggingFetch = createOpencode({
+    baseUrl,
     clientOptions: {
-      headers: {
-        "x-demo-source": "client-options-example",
+      headers,
+      fetch: (input, init) => {
+        requests += 1;
+        const url = input instanceof Request ? input.url : String(input);
+        console.log(`  [fetch #${requests}] ${init?.method ?? "GET"} ${url}`);
+        return fetch(input, init);
       },
-      fetch: echoingFetch(),
-      credentials: "include",
-      throwOnError: true,
     },
   });
 
-  await runStep("1) Provider with clientOptions passthrough", async () => {
-    const { text } = await generateText({
-      model: providerWithClientOptions(MODEL),
-      prompt: 'Reply with exactly: "client-options-ok".',
+  try {
+    console.log("baseUrl backend (custom fetch logs every request):");
+    const result = await generateText({
+      model: withLoggingFetch(modelId, modelSettings),
+      prompt: "Reply with the single word: ready",
     });
-    console.log(`  Response: ${text}`);
-  });
+    console.log("Response:", result.text.trim());
+    console.log("Requests made:", requests);
+  } finally {
+    await withLoggingFetch.dispose();
+  }
 
-  // createOpencodeClient() is synchronous in @opencode-ai/sdk/v2.
-  const preconfiguredClient = createOpencodeClient({
-    baseUrl: BASE_URL,
-    headers: {
-      "x-demo-source": "preconfigured-client-example",
-    },
-    fetch: echoingFetch(),
-    throwOnError: true,
-  });
-
-  // createOpencode({ client }) hands the client to the process-wide singleton
-  // client manager. Step 1 already initialized that singleton, so the client
-  // would be ignored (with a warning) and requests would keep flowing through
-  // step 1's client. An isolated manager guarantees this provider really uses
-  // the preconfigured client.
-  const providerWithPreconfiguredClient = createOpencode({
-    clientManager: OpencodeClientManager.createInstance({
-      client: preconfiguredClient,
-    }),
-  });
-
-  await runStep("2) Provider with preconfigured SDK client", async () => {
-    const { text } = await generateText({
-      model: providerWithPreconfiguredClient(MODEL),
-      prompt: 'Reply with exactly: "preconfigured-client-ok".',
+  // --- 2. caller-supplied client (provider never disposes it) ---
+  const client = OpenCode.make({ baseUrl, headers });
+  const withClient = createOpencode({ client });
+  try {
+    console.log("\nCaller-supplied client backend:");
+    const info = await client.server.info();
+    console.log("Server info:", { version: info.version, pid: info.pid });
+    const result = await generateText({
+      model: withClient(modelId, modelSettings),
+      prompt: "Reply with the single word: ready",
     });
-    console.log(`  Response: ${text}`);
-  });
+    console.log("Response:", result.text.trim());
+  } finally {
+    // dispose() never closes a caller-supplied client — its lifecycle is
+    // yours.
+    await withClient.dispose();
+  }
 
-  await providerWithClientOptions.dispose?.();
-  await providerWithPreconfiguredClient.dispose?.();
+  // --- 3. service discovery (shown, not run: needs a registered service) ---
+  // const discovered = createOpencode({
+  //   service: { file: "/path/to/service-registration.json" },
+  //   autoStart: false, // discovery only; ensure/spawn is opt-in
+  // });
 }
 
 main().catch((error) => {

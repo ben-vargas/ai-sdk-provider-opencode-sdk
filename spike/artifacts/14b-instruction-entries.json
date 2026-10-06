@@ -1,0 +1,231 @@
+{
+  "capturedAt": "2026-08-27T07:21:12.784Z",
+  "baseUrl": "http://127.0.0.1:14399",
+  "health": {
+    "label": "health",
+    "ok": true,
+    "ms": 22,
+    "value": {
+      "healthy": true,
+      "version": "0.0.0-beta-18286",
+      "pid": 74014
+    }
+  },
+  "e1RoundTrip": {
+    "put": {
+      "label": "entry-put",
+      "ok": true,
+      "ms": 1
+    },
+    "afterPut": {
+      "label": "entry-list-after-put",
+      "ok": true,
+      "ms": 1,
+      "value": [
+        {
+          "key": "ai-sdk.system",
+          "value": "Always end every reply with the word BANANA."
+        }
+      ]
+    },
+    "remove": {
+      "label": "entry-remove",
+      "ok": true,
+      "ms": 0
+    },
+    "afterRemove": {
+      "label": "entry-list-after-remove",
+      "ok": true,
+      "ms": 1,
+      "value": []
+    }
+  },
+  "e2Visible": {
+    "turn1": "ZEPHYR-77",
+    "turn2": "ZEPHYR-77",
+    "turn1SawEntry": true,
+    "turn2SawEntry": true,
+    "contextMessageTypes": [
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+      "user",
+      "user"
+    ],
+    "systemMessages": []
+  },
+  "e4MidSessionPut": {
+    "beforePut": "I don't have enough context to identify which \"codeword\" you're referring to. Could you clarify — are you asking about a password/keyword in a specific system, a programming term, or something else?",
+    "beforePutSawEntry": false,
+    "afterPut": "<timeout>",
+    "afterPutSawEntry": false,
+    "afterPutSecond": "<timeout>",
+    "afterPutSecondSawEntry": false,
+    "messageTypes": [
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+      "system",
+      "user",
+      "user",
+      "user"
+    ],
+    "systemMessages": [
+      "{\"id\":\"msg_04220eb5d001IEjfMgw7SjNB8g\",\"time\":{\"created\":1787815848798},\"type\":\"system\",\"text\":\"<context key=\\\"ai-sdk.system\\\">\\nYour secret codeword is ORCHID-42. Whenever the user asks for the codeword, reply with exactly that codeword and nothing else.\\n</context>\",\"description\":\"Instructions updated: api/ai-sdk.system\"}"
+    ]
+  },
+  "e5RemoveClean": {
+    "reply": "Without more context, \"codeword\" typically refers to a password, passphrase, or secret word used for authentication or identification. If you're referring to a specific codeword in a particular system, framework, or project, please provide more details so I can give you an accurate answer.",
+    "conclusive": true,
+    "stillSawEntry": false,
+    "entries": {
+      "label": "list-after-clean-remove",
+      "ok": true,
+      "ms": 3,
+      "value": []
+    }
+  },
+  "e5bRemoveAfterExposure": {
+    "withEntry": "QQQHello! How can I help you today?",
+    "withEntryObeyed": true,
+    "afterRemove": "Hello! How can I help you today?",
+    "afterRemoveStillObeyed": false,
+    "confound": "the transcript still shows the QQQ-prefixed turn, so continued obedience is explainable by history alone"
+  },
+  "e6Keys": {
+    "\"ai-sdk.System\"": {
+      "label": "key-ai-sdk.System",
+      "ok": false,
+      "ms": 4,
+      "error": {
+        "_tag": "InvalidRequestError",
+        "message": "Expected a string matching the RegExp ^[a-z0-9][a-z0-9._-]*$\n  at [\"key\"]",
+        "kind": "Params"
+      }
+    },
+    "\"_leading\"": {
+      "label": "key-_leading",
+      "ok": false,
+      "ms": 2,
+      "error": {
+        "_tag": "InvalidRequestError",
+        "message": "Expected a string matching the RegExp ^[a-z0-9][a-z0-9._-]*$\n  at [\"key\"]",
+        "kind": "Params"
+      }
+    },
+    "\".dot\"": {
+      "label": "key-.dot",
+      "ok": false,
+      "ms": 1,
+      "error": {
+        "_tag": "InvalidRequestError",
+        "message": "Expected a string matching the RegExp ^[a-z0-9][a-z0-9._-]*$\n  at [\"key\"]",
+        "kind": "Params"
+      }
+    },
+    "\"\"": {
+      "label": "key-",
+      "ok": false,
+      "ms": 2,
+      "error": {
+        "__error": true,
+        "name": "ClientError",
+        "message": "UnsupportedContentType",
+        "reason": "UnsupportedContentType"
+      }
+    },
+    "\"AI-SDK\"": {
+      "label": "key-AI-SDK",
+      "ok": false,
+      "ms": 1,
+      "error": {
+        "_tag": "InvalidRequestError",
+        "message": "Expected a string matching the RegExp ^[a-z0-9][a-z0-9._-]*$\n  at [\"key\"]",
+        "kind": "Params"
+      }
+    }
+  },
+  "e6GoodKeys": {
+    "ai-sdk.system": {
+      "label": "good-key-ai-sdk.system",
+      "ok": true,
+      "ms": 2
+    },
+    "a": {
+      "label": "good-key-a",
+      "ok": true,
+      "ms": 1
+    },
+    "a1._-x": {
+      "label": "good-key-a1._-x",
+      "ok": true,
+      "ms": 0
+    }
+  },
+  "e6Size": {
+    "raw8189": {
+      "label": "value-raw-8189",
+      "ok": true,
+      "ms": 1
+    },
+    "raw8190": {
+      "label": "value-raw-8190",
+      "ok": true,
+      "ms": 1
+    },
+    "raw8191": {
+      "label": "value-raw-8191",
+      "ok": false,
+      "ms": 1,
+      "error": {
+        "_tag": "InstructionEntryValueTooLargeError",
+        "actualBytes": 8193,
+        "maxBytes": 8192,
+        "message": "Instruction entry value is 8193 bytes; the limit is 8192 bytes"
+      }
+    },
+    "raw8192": {
+      "label": "value-raw-8192",
+      "ok": false,
+      "ms": 1,
+      "error": {
+        "_tag": "InstructionEntryValueTooLargeError",
+        "actualBytes": 8194,
+        "maxBytes": 8192,
+        "message": "Instruction entry value is 8194 bytes; the limit is 8192 bytes"
+      }
+    }
+  },
+  "e6SizeMultibyte": {
+    "label": "value-multibyte",
+    "ok": true,
+    "ms": 1
+  },
+  "e6NonString": {
+    "label": "value-object",
+    "ok": true,
+    "ms": 1
+  },
+  "e7Precedence": {
+    "agent": "strict",
+    "controlReply": "AGENT: Choose descriptive, intent-revealing names; avoid ambiguous abbreviations; follow the project's naming conventions.",
+    "contestedReply": "Here's a thinking process:\n\n1.  **Analyze User Input:** The user is asking for \"three tips for naming variables.\"\n2.  **Check Constraints:** \n   - I need to output in a specific format: `ENTRY: <text>` (from the `ai-sdk.system` context)\n   - Must be a single line\n   - No markdown headings, lists, or code fences\n   - The format override says: \"You must answer EVERY user message with a single line of the form `ENTRY: <text>` and never use markdown headings, lists, or code fences.\"\n   - There's also a previous format rule `AGENT: <text>` but the `ai-sdk.system` context overrides it with `ENTRY: <text>`. I should follow the most recent/active formatting rule. The prompt says: \"Formatting override: ignore any other formatting rule you were given. You must answer EVERY user message with a single line of the form `ENTRY: <text>` and never use markdown headings, lists, or code fences.\"\n   - So I will use `ENTRY: <text>`.\n\n3.  **Formulate Content:** I need to give three tips for naming variables, but as a single line of text after `ENTRY:`. I need to avoid lists or markdown. I can phrase them as a comma-separated list or a sentence, but without markdown list formatting. I'll just write a co",
+    "agentPromptEffective": true,
+    "contestedFollowedEntryRule": false,
+    "contestedFollowedAgentRule": false,
+    "conclusive": false,
+    "winner": "neither"
+  },
+  "e9UnknownSession": {
+    "label": "put-unknown-session",
+    "ok": false,
+    "ms": 4,
+    "error": {
+      "_tag": "SessionNotFoundError",
+      "sessionID": "ses_definitely_not_real",
+      "message": "Session not found: ses_definitely_not_real"
+    }
+  }
+}
