@@ -831,8 +831,7 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       !approvalOnly &&
       unrepliedApprovals.some(
         (approval) =>
-          (this.pendingApprovalSessions.get(approval.approvalId) ??
-            sessionId) === sessionId,
+          this.approvalSessionFor(approval.approvalId, sessionId) === sessionId,
       );
     const consumerCancel = new AbortController();
     const state = createV2StreamState({
@@ -1184,6 +1183,23 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
   }
 
   /** Phase-2 dispatch: reply the prompt-carried approval decisions. */
+  /**
+   * The session an approval reply targets: the session the approval was
+   * surfaced on, else the instance's pinned session, else the turn's. Shared
+   * by reply dispatch and mixed-continuation predecessor detection so the
+   * two can never disagree.
+   */
+  private approvalSessionFor(
+    approvalId: string,
+    turnSessionId: string,
+  ): string {
+    return (
+      this.pendingApprovalSessions.get(approvalId) ??
+      this.pinnedSessionId ??
+      turnSessionId
+    );
+  }
+
   private async dispatchApprovalReplies(
     turn: TurnContext,
     approvals: PromptApprovalResponse[],
@@ -1194,10 +1210,10 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       // NOT necessarily the turn's session: a mixed prompt (approvals + new
       // user content) under createNewSession or an escape-hatch sessionId
       // runs the prompt on a different session than the blocked one.
-      const approvalSessionId =
-        this.pendingApprovalSessions.get(approval.approvalId) ??
-        this.pinnedSessionId ??
-        turn.sessionId;
+      const approvalSessionId = this.approvalSessionFor(
+        approval.approvalId,
+        turn.sessionId,
+      );
       try {
         await turn.port.permission.reply(
           {

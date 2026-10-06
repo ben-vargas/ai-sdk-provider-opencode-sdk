@@ -4284,6 +4284,64 @@ describe("5.0.1 review fixes", () => {
       expect(result.finishReason).toEqual({ unified: "stop", raw: "stop" });
     });
 
+    it("uses the pinned-session fallback when deciding whether the prompt has a predecessor", async () => {
+      // An existing-session model can reply to an approval this instance
+      // never surfaced: the reply falls back to the pinned session, while
+      // the new content targets another session.
+      const fake = createFakePort({ manualDelivery: true });
+      const model = createModel(
+        fake,
+        { sessionId: SESSION_ID },
+        { silenceWatchdogMs: 10 },
+      );
+      fake.hooks.onPrompt = (_input, receipt) => {
+        const other = eventFactory("ses_other");
+        fake.emit(
+          {
+            ...inbox("session.inbox.enqueued", receipt.id),
+            durable: { aggregateID: "ses_other", seq: 90, version: 1 },
+            data: {
+              sessionID: "ses_other",
+              inboxID: receipt.id,
+              item: {
+                type: "user",
+                payload: { text: "new" },
+                delivery: "queue",
+              },
+            },
+          } as V2Event,
+          other.stepStarted("msg_z"),
+          other.textEnded("msg_z", 0, "ok"),
+          other.stepEnded("msg_z", "stop", tokens(1, 1), 0),
+          other.executionSucceeded(),
+        );
+      };
+      const parts = await collectStream(
+        await model.doStream({
+          ...mixedOptions(),
+          providerOptions: { opencode: { sessionId: "ses_other" } },
+        }),
+      );
+      expect(fake.callsFor("permission.reply")[0]!.input).toMatchObject({
+        sessionID: SESSION_ID,
+      });
+      expect(fake.callsFor("session.prompt")[0]!.input).toMatchObject({
+        sessionID: "ses_other",
+      });
+      expect(
+        parts
+          .filter((part) => part.type === "text-delta")
+          .map((part) => (part as { delta: string }).delta)
+          .join(""),
+      ).toBe("ok");
+      const finish = parts[parts.length - 1] as Extract<
+        LanguageModelV4StreamPart,
+        { type: "finish" }
+      >;
+      expect(finish.finishReason).toEqual({ unified: "stop", raw: "stop" });
+      expect(parts.some((part) => part.type === "error")).toBe(false);
+    });
+
     it("recovers this prompt's stored answer once it concluded", async () => {
       const fake = createFakePort({ manualDelivery: true, waitHangs: true });
       fake.hooks.onPrompt = (_input, receipt) => {
