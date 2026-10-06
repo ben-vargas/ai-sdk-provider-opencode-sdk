@@ -4342,6 +4342,51 @@ describe("5.0.1 review fixes", () => {
       expect(parts.some((part) => part.type === "error")).toBe(false);
     });
 
+    it("treats a predecessor ending before this prompt's enqueue as the predecessor's", async () => {
+      // Phase 1 blocks SESSION_ID on perm_1.
+      const fake = createFakePort({ manualDelivery: true });
+      fake.hooks.onPrompt = (_input, receipt) => {
+        const ev = eventFactory(SESSION_ID);
+        fake.emit(
+          inbox("session.inbox.enqueued", receipt.id),
+          ev.executionStarted(),
+          inbox("session.inbox.delivered", receipt.id),
+          ev.stepStarted("msg_a"),
+          ev.toolInputStarted("msg_a", "tool_1", "bash"),
+          ev.toolInputEnded("msg_a", "tool_1", '{"cmd":"rm x"}'),
+          ev.permissionAsked("perm_1", {
+            source: { type: "tool", messageID: "msg_a", id: "tool_1" },
+          }),
+        );
+      };
+      const model = createModel(
+        fake,
+        {},
+        { approvalIdleTimeoutMs: 25, silenceWatchdogMs: 50 },
+      );
+      await model.doGenerate(callOptions());
+
+      // The resumed execution ends BEFORE the new prompt's enqueue; the new
+      // prompt's own execution then runs without an observed
+      // execution.started or inbox.delivered.
+      fake.hooks.onPermissionReply = () => {};
+      fake.hooks.onPrompt = (_input, receipt) => {
+        const ev = eventFactory(SESSION_ID);
+        fake.emit(
+          ev.executionSucceeded(),
+          inbox("session.inbox.enqueued", receipt.id),
+          ev.stepStarted("msg_c"),
+          ev.textStarted("msg_c", 0),
+          ev.textEnded("msg_c", 0, "New answer."),
+          ev.stepEnded("msg_c", "stop", tokens(1, 1), 0),
+          ev.executionSucceeded(),
+        );
+      };
+      const result = await model.doGenerate(mixedOptions());
+      expect(result.content).toEqual([{ type: "text", text: "New answer." }]);
+      expect(result.finishReason).toEqual({ unified: "stop", raw: "stop" });
+    });
+
     it("recovers this prompt's stored answer once it concluded", async () => {
       const fake = createFakePort({ manualDelivery: true, waitHangs: true });
       fake.hooks.onPrompt = (_input, receipt) => {

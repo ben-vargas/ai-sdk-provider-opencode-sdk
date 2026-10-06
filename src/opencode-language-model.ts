@@ -1739,6 +1739,15 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
         `Ignoring ${event.type} for session ${turn.sessionId}: it precedes ` +
           "this turn's own delivery.",
       );
+      if (
+        turn.awaitingPredecessorEnd &&
+        isTurnEndingEvent(event) &&
+        event.type !== "session.idle"
+      ) {
+        // The approval-resumed predecessor ended before this prompt was even
+        // accepted: the next ending is this turn's own.
+        turn.awaitingPredecessorEnd = false;
+      }
       return true;
     }
     if (sessionMatches && turn.awaitingPredecessorEnd) {
