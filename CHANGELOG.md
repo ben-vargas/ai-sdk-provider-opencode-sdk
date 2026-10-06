@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.3] - 2026-10-06
+
+### Fixed
+
+- **A truncated stream no longer ends silently.** The OpenCode SDK reconnects
+  its event stream only after a connection error; when the server closes it
+  cleanly mid-turn (a restart, or a proxy timing out the connection),
+  `doStream`/`streamText` ended with no finish and no error, so a truncated
+  answer looked complete. The stream now ends with a non-retryable error
+  ("event stream ended before the session finished") instead. The prompt is
+  never re-sent, since the turn may still be running server-side. If the
+  prompt request fails at the same moment, only one error is reported.
+
 ## [4.1.2] - 2026-10-06
 
 ### Fixed
