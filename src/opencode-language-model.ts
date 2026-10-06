@@ -823,6 +823,17 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       ? AbortSignal.any([subscription.signal, options.abortSignal])
       : subscription.signal;
 
+    // A mixed continuation has a predecessor on the prompt's session only
+    // when a replied approval resumes an execution there (replies are routed
+    // to each approval's own session, which can differ under
+    // createNewSession or providerOptions.sessionId).
+    const resumesPromptSession =
+      !approvalOnly &&
+      unrepliedApprovals.some(
+        (approval) =>
+          (this.pendingApprovalSessions.get(approval.approvalId) ??
+            sessionId) === sessionId,
+      );
     const consumerCancel = new AbortController();
     const state = createV2StreamState({
       sessionId,
@@ -870,8 +881,8 @@ export class OpencodeLanguageModel implements LanguageModelV4 {
       turnStartedAt: Date.now(),
       delivered: approvalOnly,
       awaitingOwnDelivery: false,
-      awaitingPredecessorEnd: unrepliedApprovals.length > 0 && !approvalOnly,
-      mixedContinuation: unrepliedApprovals.length > 0 && !approvalOnly,
+      awaitingPredecessorEnd: resumesPromptSession,
+      mixedContinuation: resumesPromptSession,
       ownPromptDelivered: false,
       heldEnding: undefined,
       outstandingApprovals: new Set(),

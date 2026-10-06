@@ -1088,7 +1088,11 @@ describe("approvals: two-phase round-trip", () => {
   it("routes mixed-prompt approval replies to the approval's session, not the turn's", async () => {
     const fake = createFakePort();
     scriptBlockedTurn(fake);
-    const model = createModel(fake, {}, { approvalIdleTimeoutMs: 25 });
+    const model = createModel(
+      fake,
+      {},
+      { approvalIdleTimeoutMs: 25, silenceWatchdogMs: 50 },
+    );
     await model.doGenerate(callOptions()); // phase 1 blocks SESSION_ID
 
     // Mixed continuation (approval + new user content) targeting a
@@ -1117,12 +1121,17 @@ describe("approvals: two-phase round-trip", () => {
       },
       ...userPrompt("Also do this"),
     ];
-    await model.doGenerate(
+    const result = await model.doGenerate(
       callOptions({
         prompt: mixedPrompt,
         providerOptions: { opencode: { sessionId: "ses_other" } },
       }),
     );
+
+    // No predecessor runs on the prompt's session: its own terminal (with
+    // no execution.started observed) ends the call with its own answer.
+    expect(result.content).toEqual([{ type: "text", text: "ok" }]);
+    expect(result.finishReason).toEqual({ unified: "stop", raw: "stop" });
 
     // The reply lands on the blocked session; the prompt on the turn's.
     expect(fake.callsFor("permission.reply")[0]!.input).toMatchObject({
@@ -4216,6 +4225,63 @@ describe("5.0.1 review fixes", () => {
         { type: "finish" }
       >;
       expect(finish.finishReason.unified).toBe("error");
+    });
+
+    it("does not await a predecessor when the approval belongs to another session", async () => {
+      // Phase 1 blocks SESSION_ID on perm_1.
+      const fake = createFakePort({ manualDelivery: true });
+      fake.hooks.onPrompt = (_input, receipt) => {
+        const ev = eventFactory(SESSION_ID);
+        fake.emit(
+          inbox("session.inbox.enqueued", receipt.id),
+          ev.executionStarted(),
+          inbox("session.inbox.delivered", receipt.id),
+          ev.stepStarted("msg_a"),
+          ev.toolInputStarted("msg_a", "tool_1", "bash"),
+          ev.toolInputEnded("msg_a", "tool_1", '{"cmd":"rm x"}'),
+          ev.permissionAsked("perm_1", {
+            source: { type: "tool", messageID: "msg_a", id: "tool_1" },
+          }),
+        );
+      };
+      const model = createModel(
+        fake,
+        {},
+        { approvalIdleTimeoutMs: 25, silenceWatchdogMs: 50 },
+      );
+      await model.doGenerate(callOptions());
+
+      // Mixed call whose new content goes to another session: nothing is
+      // queued behind a resumed execution there, so its own terminal (with
+      // no execution.started or inbox.delivered observed) ends the call.
+      fake.hooks.onPermissionReply = () => {};
+      fake.hooks.onPrompt = (_input, receipt) => {
+        const other = eventFactory("ses_other");
+        fake.emit(
+          {
+            ...inbox("session.inbox.enqueued", receipt.id),
+            data: {
+              sessionID: "ses_other",
+              inboxID: receipt.id,
+              item: { type: "user", payload: { text: "x" }, delivery: "queue" },
+            },
+          } as V2Event,
+          other.stepStarted("msg_z"),
+          other.textStarted("msg_z", 0),
+          other.textEnded("msg_z", 0, "ok"),
+          other.stepEnded("msg_z", "stop", tokens(1, 1), 0),
+          other.executionSucceeded(),
+        );
+      };
+      const result = await model.doGenerate({
+        ...mixedOptions(),
+        providerOptions: { opencode: { sessionId: "ses_other" } },
+      });
+      expect(fake.callsFor("permission.reply")[0]!.input).toMatchObject({
+        sessionID: SESSION_ID,
+      });
+      expect(result.content).toEqual([{ type: "text", text: "ok" }]);
+      expect(result.finishReason).toEqual({ unified: "stop", raw: "stop" });
     });
 
     it("recovers this prompt's stored answer once it concluded", async () => {
