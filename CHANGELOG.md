@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.1] - 2026-10-06
+
+### Changed
+
+- **4.x is now the maintenance line for OpenCode 1.x.** OpenCode 2.x is
+  supported by 5.x, which takes the `latest` npm tag. This line moves to the
+  [`opencode-v1`](https://github.com/ben-vargas/ai-sdk-provider-opencode-sdk/tree/opencode-v1)
+  branch and npm tag (`npm install ai-sdk-provider-opencode-sdk@opencode-v1`)
+  and gets bug fixes only. The README now has a version picker by AI SDK and
+  OpenCode server version, and 3.x (AI SDK v6) is marked legacy. No code
+  changes.
+
 ## [4.1.0] - 2026-08-05
 
 ### Added
