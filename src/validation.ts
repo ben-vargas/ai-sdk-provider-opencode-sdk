@@ -287,9 +287,9 @@ export function validateModelId(
     };
   }
 
-  // Just model ID without provider - will use default provider
+  // Just model ID without provider - default to opencode provider
   return {
-    providerID: "",
+    providerID: "opencode",
     modelID: trimmedId,
   };
 }

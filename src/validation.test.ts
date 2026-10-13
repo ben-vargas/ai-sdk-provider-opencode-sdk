@@ -302,7 +302,7 @@ describe("validation", () => {
     it("should handle model-only format", () => {
       const result = validateModelId("claude-3-5-sonnet-20241022");
       expect(result).toEqual({
-        providerID: "",
+        providerID: "opencode",
         modelID: "claude-3-5-sonnet-20241022",
       });
     });
